@@ -288,6 +288,9 @@ class USB3PIPESim(SoCMini):
     - lane_skp:         Extra SKP Ordered Sets (2 Symbols) on the Host Lane 1 then Lane 0 every
                         lane_skp cycles in U0 (per lane SKP differences, 0 = disabled, >= 4096 for
                         the model).
+    - dev_mode:         Device x2 (Gen 1x2), x1 (two lanes, not x2 capable: Gen 1x1 negotiated, single
+                        lane fallback on Lane 0) or ss (Gen 1x1 SuperSpeed Device on Lane 0, no
+                        SuperSpeedPlus Polling: SuperSpeed fallback of the Host).
 
     gen2_capable (lanes=1): Host and Device advertise Gen 2x1 in the SuperSpeedPlus Polling
     (SCD1/SCD2, LBPM), Gen 2 negotiated (training continues at Gen 1 speed).
@@ -300,11 +303,15 @@ class USB3PIPESim(SoCMini):
     def __init__(self, phy_dw=None, timer_scale=1, with_core=True, rx_word_shift=0, ppm=0, ssc=False,
         prbs_words=2**16, max_cycles=2**24, host_skp=True, host_latency=256, host_status_gap=64, host_pm=False,
         host_lpm=False, lanes=1, lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096, prbs_gap_bits=4,
+        dev_mode="x2",
         gen2_capable=False, gen2=False, link_words=1):
         assert lanes in [1, 2]
         assert (link_words == 1) or (lanes == 1)
         assert (not gen2) or ((lanes == 1) and gen2_capable)
         assert (lanes == 1) or (not with_core) # Gen 1x2: PRBS Link-Layer stand-ins only.
+        assert dev_mode in ["x2", "x1", "ss"]
+        assert (lanes == 2) or (dev_mode == "x2")
+        x1 = (lanes == 2) and (dev_mode != "x2") # Gen 1x1 negotiated by the Gen 1x2 Host.
         sys_clk_freq = int(133e6)
         # SerDes models data width: 4 symbols per clock with the core (full PIPE rate, as on
         # hardware) and with 2 lanes, 2 with the PRBS stand-ins.
@@ -336,28 +343,31 @@ class USB3PIPESim(SoCMini):
         checkers = {}
         for name, role, partner in [("host", "host", "dev"), ("dev", "device", "host")]:
             renamer = ClockDomainsRenamer({"sys": cds[name], "tx": cds[name], "rx": cds[partner]})
+            ss_dev  = (name == "dev") and (dev_mode == "ss") # Gen 1x1 SuperSpeed Device (Lane 0).
+            lanes_n = 1 if ss_dev else lanes
             serdes  = [renamer(USB3SerDesModel(
                 phy_dw          = phy_dw,
                 rx_word_shift   = lane1_word_shift if (name, lane) == ("dev", 1) else rx_word_shift,
                 rx_clock_domain = "rx",
-                gen2_capable    = gen2)) for lane in range(lanes)]
+                gen2_capable    = gen2)) for lane in range(lanes_n)]
             phy     = renamer(USB3PHY(
-                serdes               = serdes[0] if lanes == 1 else serdes,
+                serdes               = serdes[0] if lanes_n == 1 else serdes,
                 sys_clk_freq         = sys_clk_freq,
                 role                 = role,
                 timer_scale          = timer_scale,
                 with_endianness_swap = (lanes == 1),
-                lanes                = lanes,
+                lanes                = lanes_n,
+                x2_capable           = not ((name == "dev") and (dev_mode == "x1")),
                 gen2_capable         = gen2_capable,
                 link_words           = link_words if name == "dev" else 1))
-            if lanes == 1:
+            if lanes_n == 1:
                 self.add_module(name=f"{name}_usb3_serdes", module=serdes[0])
             else:
-                for lane in range(lanes):
+                for lane in range(lanes_n):
                     self.add_module(name=f"{name}_usb3_serdes{lane}", module=serdes[lane])
             self.add_module(name=f"{name}_usb3_phy",    module=phy)
             ltssm = phy.ltssm
-            if lanes == 1:
+            if lanes_n == 1:
                 # Inverse TX polarity to test RX auto-polarity.
                 self.comb += serdes[0].tx_polarity.eq(1)
             else:
@@ -403,17 +413,20 @@ class USB3PIPESim(SoCMini):
                     loopback.source.connect(core.endpoints[0].sink),
                 ]
             else:
+                # Gen 1x1 negotiated by a Gen 1x2 PHY: 32-bit words on its Lane 0 interface.
+                width = 32 if x1 else 32*lanes
+                sink, source = (phy.sink_x1, phy.source_x1) if (x1 and lanes_n == 2) else (phy.sink, phy.source)
                 generator = renamer(PRBSPacketGenerator(
-                    data_width = 32*lanes,
+                    data_width = width,
                     gap_bits   = prbs_gap_bits))
-                checker   = renamer(PRBSPacketChecker(data_width=32*lanes))
+                checker   = renamer(PRBSPacketChecker(data_width=width))
                 self.add_module(name=f"{name}_prbs_generator", module=generator)
                 self.add_module(name=f"{name}_prbs_checker",   module=checker)
                 self.comb += [
                     generator.enable.eq(ltssm.u0),
-                    generator.source.connect(phy.sink),
+                    generator.source.connect(sink),
                     checker.enable.eq(ltssm.u0),
-                    phy.source.connect(checker.sink),
+                    source.connect(checker.sink),
                 ]
                 checkers[name] = checker
 
@@ -448,9 +461,9 @@ class USB3PIPESim(SoCMini):
                         )
                     )
                 ]
-            if (lanes > 1) or gen2_capable:
+            if hasattr(phys[name], "ssp"):
                 self.add_ssp_status(phys[name], name, sync, timer)
-            if lanes > 1:
+            if len(phys[name].pipes) > 1:
                 self.add_lanes_status(phys[name], name, sync, timer)
 
         # Simulation End.
@@ -480,8 +493,10 @@ class USB3PIPESim(SoCMini):
                 fmt  = "{} PRBS: %d words, %d packets, %d errors".format(name.upper())
                 args = [checker.words, checker.packets, checker.errors]
                 if lanes > 1:
+                    x2 = Signal() # (SuperSpeed Device: 0).
+                    self.comb += x2.eq(getattr(phys[name], "x2", 0))
                     fmt  += ", x2: %d"
-                    args += [phys[name].x2]
+                    args += [x2]
                 self.sync += If(done & ~report,
                     Display(fmt, *args)
                 )
@@ -497,6 +512,10 @@ class USB3PIPESim(SoCMini):
         """Gen 1x2 Host <--> Device lanes connection (Host -> Device lanes delayed)."""
         for lane in range(2):
             h = serdeses["host"][lane]
+            if lane >= len(serdeses["dev"]):
+                # Gen 1x1 SuperSpeed Device: no Lane 1 (Host Lane 1 RX in electrical idle).
+                self.comb += h.rx_idle.eq(1)
+                continue
             d = serdeses["dev"][lane]
             self.comb += d.tx.connect(h.rx)
             n = lane_delays[lane]
@@ -579,6 +598,7 @@ def main():
     parser.add_argument("--lane0-delay",   default=0,           help="Host to Device Lane 0 delay (words, --lanes 2).")
     parser.add_argument("--lane1-delay",   default=1,           help="Host to Device Lane 1 delay (words, --lanes 2).")
     parser.add_argument("--lane1-word-shift", default=2,        help="Device Lane 1 RX word shift (symbols, --lanes 2).")
+    parser.add_argument("--dev-mode",      default="x2",          help="Device with --lanes 2: x2 (Gen 1x2), x1 (two lanes, not x2 capable: Gen 1x1 on Lane 0) or ss (Gen 1x1 SuperSpeed Device on Lane 0, no SuperSpeedPlus Polling).")
     parser.add_argument("--prbs-gap-bits", default=4,           help="Gaps of 0 to 2**N - 1 cycles between the PRBS packets (--no-core/--lanes 2).")
     parser.add_argument("--lane-skp",      default=4096,        help="Extra Host Lane 1/Lane 0 SKP Ordered Sets period (cycles, 0: disabled, --lanes 2).")
     parser.add_argument("--gen2-capable",  action="store_true", help="Gen 2x1 capability advertised/negotiated in the SuperSpeedPlus Polling (--lanes 1).")
@@ -610,6 +630,7 @@ def main():
         lane_delays      = (int(args.lane0_delay), int(args.lane1_delay)),
         lane1_word_shift = int(args.lane1_word_shift),
         lane_skp         = int(args.lane_skp),
+        dev_mode         = args.dev_mode,
         prbs_gap_bits    = int(args.prbs_gap_bits),
         gen2_capable     = args.gen2_capable or args.gen2,
         gen2             = args.gen2,

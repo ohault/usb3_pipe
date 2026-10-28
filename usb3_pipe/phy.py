@@ -16,11 +16,12 @@ from litex.gen import *
 
 from litex.soc.interconnect import stream
 
-from usb3_pipe.common     import COM, LTSSM_PIPE_INTERFACE, EndiannessSwap
+from usb3_pipe.common     import COM, SHP, SDP, SLC, LTSSM_PIPE_INTERFACE, EndiannessSwap
 from usb3_pipe.core       import USB3PIPE, Gen2PIPE, GEN2_PIPE_INTERFACE
 from usb3_pipe.ltssm      import USB3LTSSM, SSPPolling
 from usb3_pipe.scrambling import LFSR_SEED_LANE0, LFSR_SEED_LANE1
-from usb3_pipe.lanes      import LaneStriper, LaneDestriper, LaneDeskew, link_layout
+from usb3_pipe.lanes      import LaneStriper, LaneDestriper, LaneDeskew, lane_layout, link_layout
+from usb3_pipe.datapath   import RXWordAligner
 
 # LTSSM <-> PIPE -----------------------------------------------------------------------------------
 
@@ -93,7 +94,10 @@ class USB3PHY(LiteXModule):
     - lanes=1 (Gen 1x1): serdes is a SerDes, 32-bit data/4-bit ctrl link words.
     - lanes=2 (Gen 1x2, 6.13): serdes is a list of 2 SerDes (Lane 0: Configuration Lane), 64-bit
       data/8-bit ctrl link words (Symbol 0 on data[0:8], no endianness swap). x2 is the negotiated
-      Gen 1x2 operation (PHY Capability LBPM, x2_capable: advertised capability).
+      Gen 1x2 operation (PHY Capability LBPM, x2_capable: advertised capability), sink/source carry
+      the link words with x2. Gen 1x1 negotiated (x2 = 0: Gen 1x1 SuperSpeedPlus partner, or
+      SuperSpeed partner after the SuperSpeed fallback): single lane on Lane 0 (Lane 1 in electrical
+      idle), 32-bit/4-bit link words on sink_x1/source_x1 (framing aligned, as with lanes=1).
     - gen2_capable: Gen 2 (10Gbps) capability advertised in SuperSpeedPlus Polling (SCD1/SCD2, PHY
       Capability LBPM, also used with lanes=1), gen2 is the negotiated Gen 2 operation. With a
       gen2_capable SerDes (raw words, 10Gbps rate), the training continues at 10Gbps on the
@@ -197,8 +201,10 @@ class USB3PHY(LiteXModule):
         The two lanes TX paths must run in lockstep (same clock, same SKP schedule: SKP Ordered Sets
         inserted simultaneously on both lanes, 6.4.3.2).
 
-        Not implemented: dynamic fallback to Gen 1x1 on Lane 0 when Gen 1x1 is negotiated (x2
-        de-asserted), SuperSpeedPlus Link Layer (Type 1/Type 2 traffic, 4-bit HSEQ...), framing
+        Gen 1x1 negotiated (x2 = 0): Lane 0 only, TS1/TS2/Idle handshake status from Lane 0, Lane 1
+        in electrical idle (single lane fallback).
+
+        Not implemented: SuperSpeedPlus Link Layer (Type 1/Type 2 traffic, 4-bit HSEQ...), framing
         alignment of the 64-bit link words.
         """
         # PIPEs / LTSSM ----------------------------------------------------------------------------
@@ -219,11 +225,18 @@ class USB3PHY(LiteXModule):
         # Lane 0 (Configuration Lane): LTSSM <-> PIPE, TS/Idle status combined with Lane 1 below.
         self.comb += connect_ltssm_pipe(ltssm, pipes[0], with_rx_ts_status=False)
 
+        # SuperSpeedPlus Polling (Lane 0): negotiated x2 --------------------------------------------
+        self.add_ssp_polling(pipes[0], serdes[0], sys_clk_freq, role, timer_scale,
+            x2_capable=x2_capable, gen2_capable=gen2_capable)
+        x2 = self.x2
+
         # Lane 1: same TX/RX controls, no LFPS (6.13.12): electrical idle while Lane 0 sends LFPS.
+        # Gen 1x1 negotiated (x2 = 0, single lane fallback): Lane 1 unused, in electrical idle.
         for name in ["lfps_tx_idle", "ts_tx_enable", "ts_tx_tseq", "ts_tx_ts1", "ts_tx_ts2",
             "ts_tx_ts2_reset", "ts_tx_ts2_loopback", "ts2_decode", "idle_handshake",
             "serdes_rx_align", "rx_ready", "tx_ready"]:
-            self.comb += getattr(pipes[1], name).eq(getattr(ltssm, name))
+            self.comb += getattr(pipes[1], name).eq(getattr(ltssm, name) & x2)
+        self.comb += If(~x2, pipes[1].lfps_tx_idle.eq(1))
 
         # Lane 1 polarity (6.13.7): inverted when TS1 are received inverted on Lane 1.
         lane1_polarity = Signal()
@@ -232,22 +245,19 @@ class USB3PHY(LiteXModule):
             lane1_polarity.eq(~lane1_polarity)
         )
 
-        # TS1/TS2 received on both lanes (6.13.6), Idle handshake on both lanes.
+        # TS1/TS2 received on both lanes (6.13.6), Idle handshake on both lanes (Lane 0 only when
+        # Gen 1x1 is negotiated).
         lane1_ts1 = pipes[1].ts_rx_ts1 | pipes[1].ts_rx_ts1_inv
         self.both_ts1     = both_ts1     = LanesEvent(pipes[0].ts_rx_ts1,     lane1_ts1)
         self.both_ts1_inv = both_ts1_inv = LanesEvent(pipes[0].ts_rx_ts1_inv, lane1_ts1)
         self.both_ts2     = both_ts2     = LanesEvent(pipes[0].ts_rx_ts2,     pipes[1].ts_rx_ts2)
         self.comb += [
-            ltssm.ts_rx_ts1.eq(both_ts1.o),
-            ltssm.ts_rx_ts1_inv.eq(both_ts1_inv.o),
-            ltssm.ts_rx_ts2.eq(both_ts2.o),
-            ltssm.idle_handshake_done.eq(
-                pipes[0].idle_handshake_done & pipes[1].idle_handshake_done),
+            ltssm.ts_rx_ts1.eq(    Mux(x2, both_ts1.o,     pipes[0].ts_rx_ts1)),
+            ltssm.ts_rx_ts1_inv.eq(Mux(x2, both_ts1_inv.o, pipes[0].ts_rx_ts1_inv)),
+            ltssm.ts_rx_ts2.eq(    Mux(x2, both_ts2.o,     pipes[0].ts_rx_ts2)),
+            ltssm.idle_handshake_done.eq(pipes[0].idle_handshake_done &
+                (pipes[1].idle_handshake_done | ~x2)),
         ]
-
-        # SuperSpeedPlus Polling (Lane 0) ----------------------------------------------------------
-        self.add_ssp_polling(pipes[0], serdes[0], sys_clk_freq, role, timer_scale,
-            x2_capable=x2_capable, gen2_capable=gen2_capable)
 
     def add_ssp_polling(self, pipe, serdes, sys_clk_freq, role, timer_scale, x2_capable,
         gen2_capable):
@@ -269,7 +279,8 @@ class USB3PHY(LiteXModule):
             pipe.lfps_tx_ssp.eq(ssp.tx_active),
             pipe.lfps_tx_ssp_lfps.eq(ssp.tx_lfps),
         ]
-        self.sync += If(ssp.done,
+        # Updated on each SuperSpeedPlus Polling (also on the SuperSpeed fallback: x2/gen2 = 0).
+        self.sync += If(ssp.done | ssp.ss_fallback,
             self.x2.eq(ssp.x2),
             self.gen2.eq(ssp.gen2),
         )
@@ -394,8 +405,13 @@ class USB3PHY(LiteXModule):
         fraction of a word), re-acquired on each TS1 phase (Polling.Active, Recovery.Active)."""
         pipes = self.pipes
         ltssm = self.ltssm
-        self.sink   = sink   = stream.Endpoint(link_layout())
-        self.source = source = stream.Endpoint(link_layout())
+        x2    = self.x2
+        self.sink      = sink      = stream.Endpoint(link_layout())
+        self.source    = source    = stream.Endpoint(link_layout())
+        self.sink_x1   = sink_x1   = stream.Endpoint(lane_layout())
+        self.source_x1 = source_x1 = stream.Endpoint(lane_layout())
+        tx_enable = Signal()
+        self.comb += tx_enable.eq(ltssm.tx_ready | ltssm.idle_handshake)
 
         # TX: Striping -----------------------------------------------------------------------------
         # Logical Idle (7.2.3) striped as data (6.13.4): Idle words when the Link Layer has no data
@@ -405,12 +421,26 @@ class USB3PHY(LiteXModule):
         self.comb += If(sink.valid & ltssm.tx_ready,
             sink.connect(striper.sink),
         ).Else(
-            striper.sink.valid.eq(ltssm.tx_ready | ltssm.idle_handshake),
+            striper.sink.valid.eq(tx_enable),
             striper.sink.data.eq(0),
             striper.sink.ctrl.eq(0),
         )
-        for lane in range(2):
-            self.comb += striper.sources[lane].connect(pipes[lane].sink)
+
+        # TX: Gen 1x1 (Lane 0) ---------------------------------------------------------------------
+        x1_words = stream.Endpoint(lane_layout())
+        self.comb += If(sink_x1.valid & ltssm.tx_ready,
+            sink_x1.connect(x1_words),
+        ).Else(
+            x1_words.valid.eq(tx_enable),
+            x1_words.data.eq(0),
+            x1_words.ctrl.eq(0),
+        )
+        self.comb += If(x2,
+            striper.sources[0].connect(pipes[0].sink),
+            striper.sources[1].connect(pipes[1].sink),
+        ).Else(
+            x1_words.connect(pipes[0].sink),
+        )
 
         # RX: Deskew / Destriping ------------------------------------------------------------------
         # The deskew is re-acquired on the TS1/TS2 COM words (every 4 words) after each TSEQ/TS1
@@ -422,14 +452,27 @@ class USB3PHY(LiteXModule):
         self.deskew    = deskew
         self.destriper = destriper = LaneDestriper()
         self.comb += deskew.reset.eq(ltssm.ts_tx_ts1 | ltssm.ts_tx_tseq)
+        self.comb += pipes[1].source.connect(deskew.sinks[1])
         for lane in range(2):
-            self.comb += [
-                pipes[lane].source.connect(deskew.sinks[lane]),
-                deskew.sources[lane].connect(destriper.sinks[lane]),
-            ]
+            self.comb += deskew.sources[lane].connect(destriper.sinks[lane])
         self.comb += [
             destriper.source.connect(source, omit={"valid", "ready"}),
-            source.valid.eq(destriper.source.valid & ltssm.rx_ready),
-            destriper.source.ready.eq(source.ready | ~ltssm.rx_ready),
+            source.valid.eq(destriper.source.valid & ltssm.rx_ready & x2),
+            destriper.source.ready.eq(source.ready | ~ltssm.rx_ready | ~x2),
         ]
         self.deskew_aligned = deskew.aligned # o
+
+        # RX: Gen 1x1 (Lane 0) ---------------------------------------------------------------------
+        # Framing alignment of the Lane 0 words (as USB3PIPE in Gen 1x1, words shifted by the SKP
+        # Ordered Sets removal), output gated by rx_ready.
+        self.framing_aligner = framing_aligner = RXWordAligner(markers=[SHP, SDP, SLC])
+        self.comb += [
+            If(x2,
+                pipes[0].source.connect(deskew.sinks[0]),
+            ).Else(
+                pipes[0].source.connect(framing_aligner.sink),
+            ),
+            framing_aligner.source.connect(source_x1, omit={"valid", "ready"}),
+            source_x1.valid.eq(framing_aligner.source.valid & ltssm.rx_ready & ~x2),
+            framing_aligner.source.ready.eq(source_x1.ready | ~ltssm.rx_ready | x2),
+        ]

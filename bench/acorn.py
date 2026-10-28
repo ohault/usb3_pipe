@@ -108,7 +108,7 @@ class _CRG(LiteXModule):
 
 class USB3SoC(USB3BaseSoC):
     def __init__(self, platform, cpu_type=None, with_dram=False,
-        gtp_params={}, rxcdr_cfg=None, lpm_hold="none", lanes=1, role="device",
+        gtp_params={}, rxcdr_cfg=None, lpm_hold="none", lanes=1, role="device", x2_capable=True,
         with_analyzer=False, analyzer_group="link", analyzer_csv="analyzer.csv",
         usb3_kwargs={}, **kwargs):
         sys_clk_freq = int(125e6)
@@ -171,6 +171,7 @@ class USB3SoC(USB3BaseSoC):
         else:
             add_usb3_lanes_link(self, usb3_serdes,
                 role          = role,
+                x2_capable    = x2_capable,
                 leds          = leds,
                 leds_inverted = True)
         self.comb += platform.request("user_led", 3).eq(1) # Not Used.
@@ -213,6 +214,7 @@ def main():
     x2_group = parser.add_argument_group(title="Gen 1x2 link tests (two boards, SFP-0/SFP-1, PRBS Link-Layer stand-ins)")
     x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2, SFP-0/SFP-1, Mini only, no USB3 Device Core).", choices=[1, 2])
     x2_group.add_argument("--role",       default="device",    help="USB3PHY role with --lanes 2 (one board in each role).", choices=["device", "host"])
+    x2_group.add_argument("--no-x2",      action="store_true", help="--lanes 2: not Gen 1x2 capable (Gen 1x1 negotiated: single lane fallback on SFP-0).")
     args = parser.parse_args()
 
     # Gen 1x2: two SFPs (Mini), PHY + PRBS Link-Layer stand-ins only (no SuperSpeedPlus Link Layer).
@@ -222,6 +224,7 @@ def main():
         assert args.cpu_type is None and not args.with_dram, "--lanes 2: no CPU/DRAM."
     else:
         assert args.role == "device", "--role host requires --lanes 2."
+        assert not args.no_x2, "--no-x2 requires --lanes 2."
 
     # DRAM disk: DDR3 SDRAM, initialized by the BIOS (VexRiscv CPU by default, console on a stub UART).
     with_dram = args.with_dram or (args.example == "msc_dram")
@@ -241,6 +244,7 @@ def main():
         lpm_hold    = args.lpm_hold,
         lanes       = args.lanes,
         role        = args.role,
+        x2_capable  = not args.no_x2,
         **usb3_soc_argdict(args))
     usb3_soc_build(parser, args, soc)
 
