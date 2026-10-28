@@ -62,33 +62,53 @@ class Mesh:
                        ((2, 6, 7, 3), (0, 1, 0)), ((0, 4, 6, 2), (-1, 0, 0)), ((1, 3, 7, 5), (1, 0, 0))]:
             self.face(*[p[i] for i in f], out=out)
 
-    def plate_with_holes(self, x0, x1, y0, y1, z0, z1, cols, rows, pitch, r, n=24):
-        """Plate [x0, x1] x [y0, y1] x [z0, z1] with round holes (radius r) on a grid of square tiles
-        (pitch) centered on (cols x rows) centers; the rest of the plate as boxes."""
-        tx0, tx1 = min(cols) - pitch/2, max(cols) + pitch/2
-        ty0, ty1 = min(rows) - pitch/2, max(rows) + pitch/2
-        # Plate around the tiles grid.
-        for bx0, bx1, by0, by1 in [(x0, tx0, y0, y1), (tx1, x1, y0, y1), (tx0, tx1, y0, ty0), (tx0, tx1, ty1, y1)]:
-            if bx1 > bx0 and by1 > by0:
-                self.box(bx0, bx1, by0, by1, z0, z1)
-        for cx in cols:
-            for cy in rows:
-                h = pitch/2
-                ring_top, ring_bot, sq_top, sq_bot = [], [], [], []
-                for k in range(n):
-                    a = 2*math.pi*k/n
-                    ca, sa = math.cos(a), math.sin(a)
-                    m = h/max(abs(ca), abs(sa))
-                    for z, ring, sq in [(z1, ring_top, sq_top), (z0, ring_bot, sq_bot)]:
-                        ring.append(self.v(cx + r*ca, cy + r*sa, z))
-                        sq.append(self.v(cx + m*ca, cy + m*sa, z))
-                for k in range(n):
-                    j = (k + 1) % n
-                    a = 2*math.pi*(k + 0.5)/n
-                    self.face(ring_top[k], sq_top[k], sq_top[j], ring_top[j], out=(0, 0, 1))
-                    self.face(ring_bot[k], ring_bot[j], sq_bot[j], sq_bot[k], out=(0, 0, -1))
-                    self.face(ring_top[k], ring_top[j], ring_bot[j], ring_bot[k],
-                        out=(-math.cos(a), -math.sin(a), 0))
+    def hole_tile(self, cx, cy, h, r, z0, z1, n=24):
+        """Square tile (half side h) with a round hole (radius r)."""
+        ring_top, ring_bot, sq_top, sq_bot = [], [], [], []
+        for k in range(n):
+            a = 2*math.pi*k/n
+            ca, sa = math.cos(a), math.sin(a)
+            m = h/max(abs(ca), abs(sa))
+            for z, ring, sq in [(z1, ring_top, sq_top), (z0, ring_bot, sq_bot)]:
+                ring.append(self.v(cx + r*ca, cy + r*sa, z))
+                sq.append(self.v(cx + m*ca, cy + m*sa, z))
+        for k in range(n):
+            j = (k + 1) % n
+            a = 2*math.pi*(k + 0.5)/n
+            self.face(ring_top[k], sq_top[k], sq_top[j], ring_top[j], out=(0, 0, 1))
+            self.face(ring_bot[k], ring_bot[j], sq_bot[j], sq_bot[k], out=(0, 0, -1))
+            self.face(ring_top[k], ring_top[j], ring_bot[j], ring_bot[k], out=(-math.cos(a), -math.sin(a), 0))
+
+    def plate_with_holes(self, x0, x1, y0, y1, z0, z1, hole_rows, pitch, r):
+        """Plate [x0, x1] x [y0, y1] x [z0, z1] with round holes (radius r): hole_rows [(cy, [cx])],
+        rows pitch apart (bands of height pitch), holes at least pitch apart in a row (square tiles)."""
+        h = pitch/2
+        cys = sorted(cy for cy, _ in hole_rows)
+        by0, by1 = cys[0] - h, cys[-1] + h
+        self.box(x0, x1, y0, by0, z0, z1)
+        self.box(x0, x1, by1, y1, z0, z1)
+        for cy, cxs in hole_rows:
+            x = x0
+            for cx in sorted(cxs):
+                if cx - h > x:
+                    self.box(x, cx - h, cy - h, cy + h, z0, z1)
+                self.hole_tile(cx, cy, h, r, z0, z1)
+                x = cx + h
+            if x1 > x:
+                self.box(x, x1, cy - h, cy + h, z0, z1)
+
+    def wall_with_windows(self, x0, x1, y0, y1, z0, z1, windows):
+        """Wall [x0, x1] x [y0, y1] x [z0, z1] (thin in y) with rectangular windows [(xa, xb, za, zb)]."""
+        xs = sorted({x0, x1} | {x for xa, xb, _, _ in windows for x in (xa, xb)})
+        for xa, xb in zip(xs, xs[1:]):
+            gaps = sorted((za, zb) for wa, wb, za, zb in windows if wa <= xa and xb <= wb)
+            z = z0
+            for za, zb in gaps:
+                if za > z:
+                    self.box(xa, xb, y0, y1, z, za)
+                z = max(z, zb)
+            if z1 > z:
+                self.box(xa, xb, y0, y1, z, z1)
 
     def tube(self, outer, inner, y0, y1, back_closed=True):
         """Hollow prism along y (front at y1 open, back at y0 closed): outer/inner cross-sections
@@ -159,35 +179,30 @@ def sfp_cage():
     cage, dark, plastic, gold, black = Mesh(), Mesh(), Mesh(), Mesh(), Mesh()
     x0, x1 = -48.7, 0.0      # Fab outline (front at x0, overhangs the PCB edge at x=-43).
     hw, h, t = 7.25, 9.3, 0.25
-    # Top: vent holes (3 rows x 6 columns) over the connector/module area.
-    pitch = 3.6
-    cols  = [-31.0 + k*pitch for k in range(6)]
-    rows  = [-pitch, 0.0, pitch]
-    cage.plate_with_holes(x0, x1, -hw, hw, h - t, h, cols, rows, pitch, 1.05)
-    # Sides (with a rectangular window near the front), back.
-    for y0, y1 in [(-hw, -hw + t), (hw - t, hw)]:
-        cage.box(x0, -40.0, y0, y1, 0, h)
-        cage.box(-37.0, x1, y0, y1, 0, h)
-        cage.box(-40.0, -37.0, y0, y1, 0, 2.0)
-        cage.box(-40.0, -37.0, y0, y1, 6.5, h)
-    cage.box(x1 - t, x1, -hw, hw, 0, h)
-    cage.box(x0, -12.0, -hw, hw, 0, t)               # Bottom plate (front part, over the board edge).
-    # Front EMI collar (bezel side of the PCB edge) with spring fingers.
-    xc, fo, ct = -44.4, 0.9, 0.3
-    dark.box(xc - ct, xc, -hw - fo, hw + fo, h, h + fo)
-    dark.box(xc - ct, xc, -hw - fo, hw + fo, -fo, 0)
-    dark.box(xc - ct, xc, -hw - fo, -hw, -fo, h + fo)
-    dark.box(xc - ct, xc, hw, hw + fo, -fo, h + fo)
-    for k in range(9):
-        y = -hw + 0.9 + k*(2*hw - 1.8)/8
-        dark.box(xc, xc + 2.4, y - 0.35, y + 0.35, h, h + 0.3)
-    for y in (-hw - 0.3, hw):
-        for k in range(3):
-            z = 1.5 + k*2.8
-            dark.box(xc, xc + 2.4, y, y + 0.3, z - 0.4, z + 0.4)
-    # Front: latch window, module guides (front opening edge folded in).
-    black.box(-47.6, -45.6, -1.6, 1.6, h - t - 0.02, h + 0.02)
-    dark.box(x0, x0 + 0.6, -hw, hw, h - 0.8, h - t)
+    # Top: staggered vent holes (2 rows, offset by half a pitch) over the module/connector area.
+    pitch, r = 4.6, 1.15
+    hole_rows = [(-2.3, [-35.5 + k*pitch for k in range(6)]),
+                 ( 2.3, [-33.2 + k*pitch for k in range(6)])]
+    cage.plate_with_holes(x0, x1, -hw, hw, h - t, h, hole_rows, pitch, r)
+    # Top front: 3 latch springs (bent strips).
+    for y in (-3.6, 0.0, 3.6):
+        dark.box(-48.3, -43.8, y - 0.35, y + 0.35, h, h + 0.25)
+        dark.box(-44.2, -43.8, y - 0.35, y + 0.35, h - 0.6, h + 0.25)
+    # Sides: two stacked windows at the front (module latch/EMI springs behind them), bottom slots.
+    windows = [(-47.9, -42.9, 1.2, 3.3), (-47.9, -42.9, 5.2, 7.3)]
+    windows += [(xa, xa + 2.4, 0.0, 0.9) for xa in (-36.0, -24.0, -12.0)]
+    for y0, y1, ys in [(-hw, -hw + t, -hw + t), (hw - t, hw, hw - t)]:
+        cage.wall_with_windows(x0, x1, y0, y1, 0, h, windows)
+        for za, zb in [(1.2, 3.3), (5.2, 7.3)]:
+            yi = ys + (0.5 if ys < 0 else -0.5)
+            dark.box(-47.4, -43.4, min(ys, yi), max(ys, yi), za + 0.3, zb - 0.3) # Spring inside.
+    # Back with the rear notch, bottom plate (front part, over the board edge).
+    cage.box(x1 - t, x1, -hw, hw, 0, h - 1.2)
+    cage.box(x1 - t, x1, -hw + 1.2, hw - 1.2, h - 1.2, h)
+    cage.box(x0, -12.0, -hw, hw, 0, t)
+    # Front edge folded in (module guide).
+    cage.box(x0, x0 + 0.5, -hw, hw, h - 0.7, h - t)
+    cage.box(x0, x0 + 0.5, -hw, hw, t, 0.7)
     # Press-fit pins (through the board).
     for x, y in [(-37.1, 1.45), (0.0, 0.0), (-37.1, -7.12), (-14.3, -7.12), (-32.1, 7.12), (-22.1, 7.12),
                  (-4.6, -7.12), (0.0, -4.8), (-17.1, -1.45), (-7.1, -7.12), (-17.1, 3.95), (-2.1, 7.12),
