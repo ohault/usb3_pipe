@@ -155,7 +155,7 @@ class PRBSLinkTester(LiteXModule):
     USB3PHYs, Host and Device roles), packets sent and checked in U0 when enabled.
 
     data_width: PHY link words width (32: Gen 1x1, 64: Gen 1x2), gap_bits: gaps between packets of 0
-    to 2**gap_bits - 1 cycles (Gen 1x2: 2, see doc/gen2-x2-roadmap.md). The counters are free running
+    to 2**gap_bits - 1 cycles (Logical Idle). The counters are free running
     (no clear: clearing the checker inside a packet would count errors), rates/errors are measured
     from their differences.
     """

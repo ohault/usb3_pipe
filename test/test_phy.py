@@ -151,6 +151,7 @@ CONFIGS_SLOW = {
     "no_skew"        : ["--lane1-delay", "0", "--lane1-word-shift", "0"],
     "ppm_m300"       : ["--ppm", "-300"],
     "ppm_p300"       : ["--ppm", "300"],
+    "long_gaps"      : ["--prbs-gap-bits", "6"],
 }
 
 class TestPHYX2(unittest.TestCase):
