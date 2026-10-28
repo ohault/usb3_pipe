@@ -288,6 +288,8 @@ class USB3PIPESim(SoCMini):
     - lane_skp:         Extra SKP Ordered Sets (2 Symbols) on the Host Lane 1 then Lane 0 every
                         lane_skp cycles in U0 (per lane SKP differences, 0 = disabled, >= 4096 for
                         the model).
+    - lanes_crossed:    Host Lane i on the Device SerDes 1 - i (flipped USB Type-C plug): the Device
+                        detects the Configuration Lane (lane_swap) from the Host Polling.LFPS.
     - dev_mode:         Device x2 (Gen 1x2), x1 (two lanes, not x2 capable: Gen 1x1 negotiated, single
                         lane fallback on Lane 0) or ss (Gen 1x1 SuperSpeed Device on Lane 0, no
                         SuperSpeedPlus Polling: SuperSpeed fallback of the Host).
@@ -303,7 +305,7 @@ class USB3PIPESim(SoCMini):
     def __init__(self, phy_dw=None, timer_scale=1, with_core=True, rx_word_shift=0, ppm=0, ssc=False,
         prbs_words=2**16, max_cycles=2**24, host_skp=True, host_latency=256, host_status_gap=64, host_pm=False,
         host_lpm=False, lanes=1, lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096, prbs_gap_bits=4,
-        dev_mode="x2",
+        dev_mode="x2", lanes_crossed=False,
         gen2_capable=False, gen2=False, link_words=1):
         assert lanes in [1, 2]
         assert (link_words == 1) or (lanes == 1)
@@ -442,7 +444,7 @@ class USB3PIPESim(SoCMini):
         if lanes == 1:
             serdeses["host"][0].connect(serdeses["dev"][0])
         else:
-            self.add_lanes_connection(serdeses, phys, cds, lane_delays, lane_skp)
+            self.add_lanes_connection(serdeses, phys, cds, lane_delays, lane_skp, lanes_crossed)
 
         # Simulation Timer.
         timer = Signal(32)
@@ -497,7 +499,7 @@ class USB3PIPESim(SoCMini):
                     self.comb += x2.eq(getattr(phys[name], "x2", 0))
                     fmt  += ", x2: %d"
                     args += [x2]
-                self.sync += If(done & ~report,
+                self.sync += If((done | (timer >= max_cycles)) & ~report,
                     Display(fmt, *args)
                 )
         self.sync += [
@@ -508,15 +510,16 @@ class USB3PIPESim(SoCMini):
             If(report, Finish())
         ]
 
-    def add_lanes_connection(self, serdeses, phys, cds, lane_delays, lane_skp):
-        """Gen 1x2 Host <--> Device lanes connection (Host -> Device lanes delayed)."""
+    def add_lanes_connection(self, serdeses, phys, cds, lane_delays, lane_skp, lanes_crossed=False):
+        """Gen 1x2 Host <--> Device lanes connection (Host -> Device lanes delayed), Host Lane i on the
+        Device SerDes 1 - i with lanes_crossed (flipped USB Type-C plug)."""
         for lane in range(2):
             h = serdeses["host"][lane]
             if lane >= len(serdeses["dev"]):
                 # Gen 1x1 SuperSpeed Device: no Lane 1 (Host Lane 1 RX in electrical idle).
                 self.comb += h.rx_idle.eq(1)
                 continue
-            d = serdeses["dev"][lane]
+            d = serdeses["dev"][lane ^ int(lanes_crossed)]
             self.comb += d.tx.connect(h.rx)
             n = lane_delays[lane]
             if n > 0:
@@ -574,6 +577,11 @@ class USB3PIPESim(SoCMini):
         sync += If(phy.deskew_aligned & ~aligned_d,
             Display("[%08d] {} lanes deskewed".format(label), timer)
         )
+        swap_d = Signal()
+        sync += swap_d.eq(phy.lane_swap)
+        sync += If(phy.lane_swap != swap_d,
+            Display("[%08d] {} lanes swap: %d".format(label), timer, phy.lane_swap)
+        )
 
 # Build --------------------------------------------------------------------------------------------
 
@@ -599,6 +607,7 @@ def main():
     parser.add_argument("--lane1-delay",   default=1,           help="Host to Device Lane 1 delay (words, --lanes 2).")
     parser.add_argument("--lane1-word-shift", default=2,        help="Device Lane 1 RX word shift (symbols, --lanes 2).")
     parser.add_argument("--dev-mode",      default="x2",          help="Device with --lanes 2: x2 (Gen 1x2), x1 (two lanes, not x2 capable: Gen 1x1 on Lane 0) or ss (Gen 1x1 SuperSpeed Device on Lane 0, no SuperSpeedPlus Polling).")
+    parser.add_argument("--lanes-crossed", action="store_true",   help="--lanes 2: Host Lane 0/1 on the Device SerDes 1/0 (flipped USB Type-C plug, Device lanes swap).")
     parser.add_argument("--prbs-gap-bits", default=4,           help="Gaps of 0 to 2**N - 1 cycles between the PRBS packets (--no-core/--lanes 2).")
     parser.add_argument("--lane-skp",      default=4096,        help="Extra Host Lane 1/Lane 0 SKP Ordered Sets period (cycles, 0: disabled, --lanes 2).")
     parser.add_argument("--gen2-capable",  action="store_true", help="Gen 2x1 capability advertised/negotiated in the SuperSpeedPlus Polling (--lanes 1).")
@@ -631,6 +640,7 @@ def main():
         lane1_word_shift = int(args.lane1_word_shift),
         lane_skp         = int(args.lane_skp),
         dev_mode         = args.dev_mode,
+        lanes_crossed    = args.lanes_crossed,
         prbs_gap_bits    = int(args.prbs_gap_bits),
         gen2_capable     = args.gen2_capable or args.gen2,
         gen2             = args.gen2,

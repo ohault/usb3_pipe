@@ -180,7 +180,7 @@ class USB3PHYDebug(LiteXModule):
 class USB3LanesDebug(LiteXModule):
     """USB3 Gen 1x2 Lanes Debug (CSRs, hardware bring-up of USB3PHY(lanes=2)), with USB3PHYDebug on
     the Configuration Lane (Lane 0):
-    - Status: negotiated x2/gen2, lanes deskewed, per lane SerDes ready/RX idle/RX polarity.
+    - Status: negotiated x2/gen2, lanes deskewed/swapped, per lane SerDes ready/RX idle/RX polarity.
     - Per lane event counters (TS1/TS1 inverted/TS2 detections, RX errors cycles) and deskew
       acquisitions.
     """
@@ -191,6 +191,7 @@ class USB3LanesDebug(LiteXModule):
             CSRField("x2",             size=1, offset=0, description="Gen 1x2 negotiated (SuperSpeedPlus Polling)."),
             CSRField("gen2",           size=1, offset=1, description="Gen 2 negotiated."),
             CSRField("deskew_aligned", size=1, offset=2, description="Lanes deskewed."),
+            CSRField("lane_swap",      size=1, offset=3, description="Lanes swapped (Configuration Lane on SerDes 1)."),
             CSRField("ready",          size=2, offset=4, description="SerDes ready (per lane)."),
             CSRField("rx_idle",        size=2, offset=6, description="SerDes RX idle (per lane)."),
             CSRField("rx_polarity",    size=2, offset=8, description="SerDes RX polarity (per lane)."),
@@ -202,6 +203,7 @@ class USB3LanesDebug(LiteXModule):
             self._status.fields.x2.eq(phy.x2),
             self._status.fields.gen2.eq(phy.gen2),
             self._status.fields.deskew_aligned.eq(phy.deskew_aligned),
+            self._status.fields.lane_swap.eq(phy.lane_swap),
             self._status.fields.ready.eq(Cat(*[s.ready for s in serdes])),
             self._status.fields.rx_idle.eq(Cat(*[s.rx_idle for s in serdes])),
             self._status.fields.rx_polarity.eq(Cat(*[s.rx_polarity for s in serdes])),

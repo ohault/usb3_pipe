@@ -152,10 +152,13 @@ CONFIGS_SLOW = {
     "ppm_m300"       : ["--ppm", "-300"],
     "ppm_p300"       : ["--ppm", "300"],
     "long_gaps"      : ["--prbs-gap-bits", "6"],
+    # Lane 0 late by a word, Lane 1 word shift (lanes latencies: COM words 2 words apart, half the
+    # TS period).
+    "lane0_late_shift": ["--lane0-delay", "1", "--lane1-delay", "0", "--lane1-word-shift", "2"],
 }
 
 class TestPHYX2(unittest.TestCase):
-    def run_sim(self, name, args, mode="x2"):
+    def run_sim(self, name, args, mode="x2", swap=False):
         # mode: x2 (Gen 1x2 negotiated), x1 (Gen 1x1 negotiated by two Gen 1x2 PHYs, Device not x2
         # capable) or ss (Gen 1x1 SuperSpeed Device, SuperSpeed fallback of the Host).
         cmd = [sys.executable, str(ROOT / "sim.py"), "--lanes", "2",
@@ -170,6 +173,9 @@ class TestPHYX2(unittest.TestCase):
         self.assertEqual(p.returncode, 0, f"{name}: Simulation failed." + tail)
         self.assertNotIn("Simulation timeout", out, f"{name}: No PRBS completion." + tail)
         x2 = int(mode == "x2")
+        # Lanes swap detected by the Device only with crossed lanes (the Host keeps its lanes).
+        self.assertEqual(len(re.findall(r"DEV\s*lanes swap: 1", out)), int(swap), tail)
+        self.assertNotRegex(out, r"HOST\s*lanes swap", tail)
         for side in ["HOST", r"DEV\s"]:
             # SuperSpeedPlus Polling done with Gen 1x2/Gen 1x1 negotiated (SuperSpeed fallback of
             # the Host with a SuperSpeed Device).
@@ -200,6 +206,15 @@ class TestPHYX2(unittest.TestCase):
         # Device not Gen 1x2 capable: Gen 1x1 negotiated (LBPM), single lane on Lane 0 (Lane 1 in
         # electrical idle), extra SKP Ordered Sets on the Host Lane 0 (framing re-alignment).
         self.run_sim("fallback_x1", ["--dev-mode", "x1"], mode="x1")
+
+    def test_phy_x2_crossed(self):
+        # Flipped USB Type-C plug: Host Lane 0/1 on the Device SerDes 1/0, the Device detects the
+        # Configuration Lane (lanes swap) from the Host Polling.LFPS.
+        self.run_sim("crossed", ["--lanes-crossed"], swap=True)
+
+    def test_phy_x2_crossed_fallback_x1(self):
+        # Flipped plug, Gen 1x1 negotiated: single lane on the Device SerDes 1.
+        self.run_sim("crossed_x1", ["--lanes-crossed", "--dev-mode", "x1"], mode="x1", swap=True)
 
     def test_phy_x2_fallback_ss(self):
         # Gen 1x1 SuperSpeed Device (no SCD): SuperSpeed fallback of the Host, Lane 0 only.

@@ -11,6 +11,8 @@ from migen import *
 
 from litex.gen import *
 
+from litex.soc.interconnect import stream
+
 from usb3_pipe.lanes import *
 
 MARKER = (0xbcbcbcbc, 0b1111) # COM x4.
@@ -71,7 +73,7 @@ class TestLanes(unittest.TestCase):
 
     def test_stripe_skew_deskew_destripe(self):
         # Link words striped, lanes skewed (Lane 1 delayed by 3 words, different garbage before the
-        # marker), deskewed on the marker, destriped: link words recovered.
+        # marker, longer than the deskew gap), deskewed on the marker, destriped: link words recovered.
         rng   = random.Random(0)
         words = [(rng.getrandbits(64), rng.getrandbits(8)) for _ in range(64)]
         # Marker on both lanes (as duplicated Ordered Sets): striped from a link word.
@@ -89,8 +91,8 @@ class TestLanes(unittest.TestCase):
                 for lane in range(2):
                     lanes[lane].append(((yield dut.sources[lane].data), (yield dut.sources[lane].ctrl)))
         run_simulation(striper, strip_gen(striper))
-        lanes[0] = [(rng.getrandbits(32), 0) for _ in range(1)] + lanes[0]
-        lanes[1] = [(rng.getrandbits(32), 0) for _ in range(4)] + lanes[1]
+        lanes[0] = [(rng.getrandbits(32), 0) for _ in range(17)] + lanes[0]
+        lanes[1] = [(rng.getrandbits(32), 0) for _ in range(20)] + lanes[1]
 
         dut = DUT()
         out = []
@@ -112,56 +114,134 @@ class TestLanes(unittest.TestCase):
         run_simulation(dut, [lane_gen(dut, 0), lane_gen(dut, 1), checker(dut)])
         self.assertEqual(out, [marker_word] + words)
 
-    def test_deskew_periodic_marker(self):
-        # Periodic marker (TS1/TS2 COM words, every 4 words), lanes skewed by up to 1 word in either
-        # direction, deskew started at any point of the period: the markers of the same Ordered Set are
-        # paired (max_skew=1), the link words are recovered.
+    def run_deskew(self, lanes, cycles=300):
+        class DUT(LiteXModule):
+            def __init__(self):
+                self.deskew    = LaneDeskew(0xbcbcbcbc, 0b1111)
+                self.destriper = LaneDestriper()
+                for lane in range(2):
+                    self.comb += self.deskew.sources[lane].connect(self.destriper.sinks[lane])
+        dut = DUT()
+        out = []
+        def lane_gen(dut, lane):
+            for data, ctrl in lanes[lane]:
+                yield dut.deskew.sinks[lane].valid.eq(1)
+                yield dut.deskew.sinks[lane].data.eq(data)
+                yield dut.deskew.sinks[lane].ctrl.eq(ctrl)
+                yield
+            yield dut.deskew.sinks[lane].valid.eq(0)
+        def checker(dut):
+            yield dut.destriper.source.ready.eq(1)
+            for _ in range(cycles):
+                if (yield dut.destriper.source.valid):
+                    out.append(((yield dut.destriper.source.data), (yield dut.destriper.source.ctrl)))
+                yield
+        run_simulation(dut, [lane_gen(dut, 0), lane_gen(dut, 1), checker(dut)])
+        return out
+
+    @staticmethod
+    def stripe(word, lane):
+        data, ctrl = word
+        return (sum(((data >> (8*(2*i + lane))) & 0xff) << (8*i) for i in range(4)),
+                sum(((ctrl >> (2*i + lane)) & 0x1) << i for i in range(4)))
+
+    def test_deskew_first_marker_after_gap(self):
+        # Gap without marker (TSEQ), then periodic marker (TS1/TS2 COM words, every 4 words), lanes
+        # skewed by up to 3 words in either direction (more than half the marker period): the first
+        # markers after the gap are paired, the link words are recovered from the first marker.
         rng    = random.Random(1)
         marker = (0xbcbcbcbcbcbcbcbc, 0xff)
-        stream = []
+        tseq   = [(rng.getrandbits(64), 0) for _ in range(24)]
+        ts     = []
         for _ in range(8):
-            stream += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
-        stream += [(rng.getrandbits(64), rng.getrandbits(8)) for _ in range(32)]
-        def stripe(word, lane):
-            data, ctrl = word
-            return (sum(((data >> (8*(2*i + lane))) & 0xff) << (8*i) for i in range(4)),
-                    sum(((ctrl >> (2*i + lane)) & 0x1) << i for i in range(4)))
-        for start in range(4, 8):
-            for skew in [-1, 0, 1]:
-                # Lane late by skew words: it still holds skew older words.
-                lanes = [
-                    [stripe(w, 0) for w in stream[start - max(0, -skew):]],
-                    [stripe(w, 1) for w in stream[start - max(0,  skew):]],
-                ]
-                class DUT(LiteXModule):
-                    def __init__(self):
-                        self.deskew    = LaneDeskew(0xbcbcbcbc, 0b1111, max_skew=1)
-                        self.destriper = LaneDestriper()
-                        for lane in range(2):
-                            self.comb += self.deskew.sources[lane].connect(self.destriper.sinks[lane])
-                dut = DUT()
-                out = []
-                def lane_gen(dut, lane):
-                    for data, ctrl in lanes[lane]:
-                        yield dut.deskew.sinks[lane].valid.eq(1)
-                        yield dut.deskew.sinks[lane].data.eq(data)
-                        yield dut.deskew.sinks[lane].ctrl.eq(ctrl)
-                        yield
-                        while not (yield dut.deskew.sinks[lane].ready):
-                            yield
-                    yield dut.deskew.sinks[lane].valid.eq(0)
-                def checker(dut):
-                    yield dut.destriper.source.ready.eq(1)
-                    for _ in range(200):
-                        if (yield dut.destriper.source.valid):
-                            out.append(((yield dut.destriper.source.data), (yield dut.destriper.source.ctrl)))
-                        yield
-                run_simulation(dut, [lane_gen(dut, 0), lane_gen(dut, 1), checker(dut)])
-                self.assertTrue(len(out), f"start={start} skew={skew}")
-                self.assertEqual(out[0], marker)
-                first = stream.index(marker, start)
-                self.assertIn(out, [stream[m:m + len(out)] for m in range(first - 4, first + 5)])
-                self.assertGreater(len(out), len(stream) - start - 8)
+            ts += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
+        data   = [(rng.getrandbits(64), rng.getrandbits(8) & 0x7f) for _ in range(32)]
+        stream = tseq + ts + data
+        for skew in [-3, -2, -1, 0, 1, 2, 3]:
+            # Lane late by skew words: extra garbage words before its stream.
+            lanes = [
+                [(0, 0)]*max(0,  skew) + [self.stripe(w, 0) for w in stream],
+                [(0, 0)]*max(0, -skew) + [self.stripe(w, 1) for w in stream],
+            ]
+            out = self.run_deskew(lanes)
+            self.assertEqual(out, ts + data, f"skew={skew}")
+
+    def test_deskew_no_gap(self):
+        # Deskew started in the middle of periodic markers (no gap): no pairing (ambiguous), until a
+        # gap followed by markers.
+        rng    = random.Random(2)
+        marker = (0xbcbcbcbcbcbcbcbc, 0xff)
+        def ts(n):
+            r = []
+            for _ in range(n):
+                r += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
+            return r
+        first = ts(6)
+        idle  = [(0, 0)]*20
+        last  = ts(4)
+        stream = first + idle + last
+        lanes = [[self.stripe(w, 0) for w in stream], [(0, 0)]*2 + [self.stripe(w, 1) for w in stream]]
+        out = self.run_deskew(lanes)
+        self.assertEqual(out, last)
+
+    def test_lane_swap(self):
+        # Logical lanes on the physical SerDes (lane i on SerDes i ^ swap), swap detected from the
+        # partner's LFPS on a single physical lane (detection enabled only).
+        class SerDes:
+            def __init__(self):
+                for name in ["tx_idle", "tx_lfps", "tx_polarity", "rx_polarity", "tx_skp_enable",
+                    "rx_align", "ready", "rx_idle", "rx_errors"]:
+                    setattr(self, name, Signal())
+                self.tx_pattern = Signal(20)
+                self.sink   = stream.Endpoint(lane_layout())
+                self.source = stream.Endpoint(lane_layout())
+                self.rx_idle_stretch = 0
+        serdes = [SerDes(), SerDes()]
+        dut    = LaneSwap(serdes, detect=True, burst_cycles=4)
+        lanes  = dut.lanes
+        def generator():
+            for p in range(2):
+                yield serdes[p].rx_idle.eq(1)
+                yield serdes[p].source.valid.eq(1)
+                yield serdes[p].source.data.eq(0x100 + p)
+                yield serdes[p].ready.eq(p)
+            yield lanes[0].tx_idle.eq(1)
+            yield lanes[0].sink.valid.eq(1)
+            yield lanes[0].sink.data.eq(0xaa)
+            yield
+            # Not swapped: lane i on SerDes i.
+            self.assertEqual((yield serdes[0].tx_idle), 1)
+            self.assertEqual((yield serdes[1].tx_idle), 0)
+            self.assertEqual((yield serdes[0].sink.data), 0xaa)
+            self.assertEqual((yield lanes[0].source.data), 0x100)
+            self.assertEqual((yield lanes[1].ready), 1)
+            # LFPS on SerDes 1 only, detection disabled: no swap.
+            yield serdes[1].rx_idle.eq(0)
+            for _ in range(8):
+                yield
+            self.assertEqual((yield dut.swap), 0)
+            # Detection enabled: swapped (Lane 0 on SerDes 1).
+            yield dut.enable.eq(1)
+            for _ in range(8):
+                yield
+            self.assertEqual((yield dut.swap), 1)
+            self.assertEqual((yield serdes[1].tx_idle), 1)
+            self.assertEqual((yield serdes[0].tx_idle), 0)
+            self.assertEqual((yield serdes[1].sink.data), 0xaa)
+            self.assertEqual((yield serdes[1].sink.valid), 1)
+            self.assertEqual((yield serdes[0].sink.valid), 0)
+            self.assertEqual((yield lanes[0].source.data), 0x101)
+            self.assertEqual((yield lanes[0].ready), 1)
+            # Both lanes active (data): kept. LFPS on SerDes 0 only: back to not swapped.
+            yield serdes[0].rx_idle.eq(0)
+            for _ in range(8):
+                yield
+            self.assertEqual((yield dut.swap), 1)
+            yield serdes[1].rx_idle.eq(1)
+            for _ in range(8):
+                yield
+            self.assertEqual((yield dut.swap), 0)
+        run_simulation(dut, generator())
 
 if __name__ == "__main__":
     unittest.main()
