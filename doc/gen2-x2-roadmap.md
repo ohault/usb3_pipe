@@ -299,13 +299,14 @@ idle through the SFP DAC cables, and the AC coupling of the lanes on the baseboa
 USB3). The Host role is exercised on hardware for the first time (Rx.Detect is not modelled by the
 LTSSM: both boards start in Polling).
 
-**M1: Type-C breakout and a Gen 1x2 host** (to do): the Configuration Lane follows the USB-C plug
-orientation (a flipped plug swaps the lanes). Options: detect it in gateware (the host sends the
-Polling LFPS on its Configuration Lane only: swap the lanes on the SFP that receives them before the
-SuperSpeedPlus Polling), or read a CC controller on the breakout through the SFP I2C (`sfp_i2c` on
-the Mini). Rd pull-downs on CC1/CC2 (UFP). Needs the single lane fallback (Gen 1x1 negotiated by
-most hosts) and the SuperSpeedPlus Link Layer at Gen 1x2 for the enumeration and transfers; Linux
-reports the negotiated lanes in `/sys/bus/usb/devices/*/rx_lanes` and `tx_lanes`.
+**M1: Type-C breakout and a Gen 1x2 host** (breakout design: [hardware/sfp2usbc](../hardware/sfp2usbc/README.md),
+gateware to do): the Configuration Lane follows the USB-C plug orientation (a flipped plug swaps the
+lanes). Passive DAC cables do not carry the SFP low-speed pins (I2C...) to the other end: no CC
+controller readable by the FPGA, the orientation is detected in gateware (the host sends the Polling
+LFPS on its Configuration Lane only: swap the lanes on the SFP that receives them before the
+SuperSpeedPlus Polling). Rd pull-downs on CC1/CC2 (UFP). Needs the single lane fallback (Gen 1x1
+negotiated by most hosts) and the SuperSpeedPlus Link Layer at Gen 1x2 for the enumeration and
+transfers; Linux reports the negotiated lanes in `/sys/bus/usb/devices/*/rx_lanes` and `tx_lanes`.
 
 ## Suggested order
 
