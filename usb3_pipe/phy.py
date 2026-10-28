@@ -20,7 +20,7 @@ from usb3_pipe.common     import COM, SHP, SDP, SLC, LTSSM_PIPE_INTERFACE, Endia
 from usb3_pipe.core       import USB3PIPE, Gen2PIPE, GEN2_PIPE_INTERFACE
 from usb3_pipe.ltssm      import USB3LTSSM, SSPPolling
 from usb3_pipe.scrambling import LFSR_SEED_LANE0, LFSR_SEED_LANE1
-from usb3_pipe.lanes      import LaneStriper, LaneDestriper, LaneDeskew, lane_layout, link_layout
+from usb3_pipe.lanes      import LaneStriper, LaneDestriper, LaneDeskew, LaneSwap, lane_layout, link_layout
 from usb3_pipe.datapath   import RXWordAligner
 
 # LTSSM <-> PIPE -----------------------------------------------------------------------------------
@@ -98,6 +98,8 @@ class USB3PHY(LiteXModule):
       the link words with x2. Gen 1x1 negotiated (x2 = 0: Gen 1x1 SuperSpeedPlus partner, or
       SuperSpeed partner after the SuperSpeed fallback): single lane on Lane 0 (Lane 1 in electrical
       idle), 32-bit/4-bit link words on sink_x1/source_x1 (framing aligned, as with lanes=1).
+      Lanes order (USB Type-C plug orientation): lane_swap (1: Configuration Lane on serdes[1]),
+      detected from the partner's Polling.LFPS with lane_swap_detect (default: Device role).
     - gen2_capable: Gen 2 (10Gbps) capability advertised in SuperSpeedPlus Polling (SCD1/SCD2, PHY
       Capability LBPM, also used with lanes=1), gen2 is the negotiated Gen 2 operation. With a
       gen2_capable SerDes (raw words, 10Gbps rate), the training continues at 10Gbps on the
@@ -113,7 +115,8 @@ class USB3PHY(LiteXModule):
       signals are the LTSSM ones (same Signal objects); undriven inputs keep their reset values.
     """
     def __init__(self, serdes, sys_clk_freq, role="device", with_endianness_swap=True,
-        timer_scale=1, lanes=1, x2_capable=True, gen2_capable=False, deskew_depth=8, link_words=1):
+        timer_scale=1, lanes=1, x2_capable=True, gen2_capable=False, deskew_depth=8, link_words=1,
+        lane_swap_detect=None):
         assert role in ["device", "host"]
         assert lanes in [1, 2]
         serdes = [serdes] if lanes == 1 else serdes
@@ -143,7 +146,10 @@ class USB3PHY(LiteXModule):
             else:
                 self.comb += connect_ltssm_pipe(ltssm, pipe)
         else:
-            self.add_lanes(serdes, sys_clk_freq, role, timer_scale, x2_capable, gen2_capable)
+            if lane_swap_detect is None:
+                lane_swap_detect = (role == "device")
+            self.add_lanes(serdes, sys_clk_freq, role, timer_scale, x2_capable, gen2_capable,
+                lane_swap_detect)
             ltssm = self.ltssm
 
         # SerDes RX Re-initialization --------------------------------------------------------------
@@ -186,7 +192,8 @@ class USB3PHY(LiteXModule):
         self.ltssm_state  = Signal(len(ltssm.fsm.state))
         self.comb += self.ltssm_state.eq(ltssm.fsm.state)
 
-    def add_lanes(self, serdes, sys_clk_freq, role, timer_scale, x2_capable, gen2_capable=False):
+    def add_lanes(self, serdes, sys_clk_freq, role, timer_scale, x2_capable, gen2_capable=False,
+        lane_swap_detect=False):
         """Gen 1x2 (6.13): one USB3PIPE per lane under a single LTSSM, Lane 0 is the Configuration
         Lane.
 
@@ -207,6 +214,14 @@ class USB3PHY(LiteXModule):
         Not implemented: SuperSpeedPlus Link Layer (Type 1/Type 2 traffic, 4-bit HSEQ...), framing
         alignment of the 64-bit link words.
         """
+        # Lane Swap --------------------------------------------------------------------------------
+        # Logical lanes on the physical SerDes (USB Type-C plug orientation): with
+        # lane_swap_detect, the Configuration Lane is the physical lane receiving the partner's
+        # Polling.LFPS (lane_swap = 1: Lane 0 on serdes[1]), else lane_swap input (default 0).
+        self.lane_swap_unit = lane_swap_unit = LaneSwap(serdes, detect=lane_swap_detect)
+        self.lane_swap = lane_swap_unit.swap
+        serdes = lane_swap_unit.lanes
+
         # PIPEs / LTSSM ----------------------------------------------------------------------------
         self.pipes = pipes = []
         for lane, seed in enumerate([LFSR_SEED_LANE0, LFSR_SEED_LANE1]):
@@ -221,6 +236,7 @@ class USB3PHY(LiteXModule):
             pipes.append(pipe)
         self.ltssm = ltssm = USB3LTSSM(sys_clk_freq=sys_clk_freq, timer_scale=timer_scale, ssp=True)
         self.comb += ltssm.ds_port.eq(role == "host")
+        self.comb += lane_swap_unit.enable.eq(ltssm.ssp_polling)
 
         # Lane 0 (Configuration Lane): LTSSM <-> PIPE, TS/Idle status combined with Lane 1 below.
         self.comb += connect_ltssm_pipe(ltssm, pipes[0], with_rx_ts_status=False)
@@ -401,8 +417,8 @@ class USB3PHY(LiteXModule):
     def add_lanes_datapath(self, deskew_depth):
         """Gen 1x2 datapath: data striping (6.13.4): 64-bit/8-bit link words (Symbol 0 on
         data[0:8]), even Symbols on Lane 0, odd Symbols on Lane 1 (LaneStriper/LaneDestriper), lanes
-        deskew on the TS1/TS2 COM words (LaneDeskew, Table 6-34: 6.4ns max at the receiver, a
-        fraction of a word), re-acquired on each TS1 phase (Polling.Active, Recovery.Active)."""
+        deskew on the TS1/TS2 COM words (LaneDeskew: first COM words after a gap, Table 6-34: 6.4ns
+        max at the receiver), re-acquired on each TS1 phase (Polling.Active, Recovery.Active)."""
         pipes = self.pipes
         ltssm = self.ltssm
         x2    = self.x2
@@ -443,15 +459,12 @@ class USB3PHY(LiteXModule):
         )
 
         # RX: Deskew / Destriping ------------------------------------------------------------------
-        # The deskew is re-acquired on the TS1/TS2 COM words (every 4 words) after each TSEQ/TS1
-        # phase, pairing the COM words received within 1 word on both lanes (6.4ns max lane-to-lane
-        # skew at the receiver, Table 6-34: less than a word, the word alignment of each lane on COM
-        # can add one word).
-        deskew = LaneDeskew(COM.value*0x01010101, 0b1111, depth=deskew_depth, max_skew=1)
-        deskew = ResetInserter()(deskew)
-        self.deskew    = deskew
+        # The deskew is acquired on the TS1/TS2 COM words: first COM word of each lane after a gap
+        # without COM words on both lanes (TSEQ in Polling.RxEQ, Logical Idle before Recovery), the
+        # same TS1 Ordered Set on both lanes whatever the lanes latencies (6.4ns max lane-to-lane skew
+        # at the receiver, Table 6-34, + per lane word alignment/SKP removal/RX buffers latencies).
+        self.deskew    = deskew    = LaneDeskew(COM.value*0x01010101, 0b1111, depth=deskew_depth)
         self.destriper = destriper = LaneDestriper()
-        self.comb += deskew.reset.eq(ltssm.ts_tx_ts1 | ltssm.ts_tx_tseq)
         self.comb += pipes[1].source.connect(deskew.sinks[1])
         for lane in range(2):
             self.comb += deskew.sources[lane].connect(destriper.sinks[lane])

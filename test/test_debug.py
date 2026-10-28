@@ -147,7 +147,8 @@ class TestUSB3PHYDebug(unittest.TestCase):
 def fake_lanes_phy():
     pipes = [SimpleNamespace(**{name: Signal(name=f"lane{lane}_{name}") for name in PIPE_EVENTS})
         for lane in range(2)]
-    phy = SimpleNamespace(x2=Signal(), gen2=Signal(), deskew_aligned=Signal(), pipes=pipes)
+    phy = SimpleNamespace(x2=Signal(), gen2=Signal(), deskew_aligned=Signal(), lane_swap=Signal(),
+        pipes=pipes)
     serdes = [SimpleNamespace(ready=Signal(), rx_idle=Signal(), rx_polarity=Signal(),
         rx_errors=Signal()) for _ in range(2)]
     return phy, serdes
@@ -176,6 +177,10 @@ class TestUSB3LanesDebug(unittest.TestCase):
             self.assertEqual((yield fields.ready),          0b11)
             self.assertEqual((yield fields.rx_idle),        0b10)
             self.assertEqual((yield fields.rx_polarity),    0b10)
+            self.assertEqual((yield fields.lane_swap),      0)
+            yield dut.phy.lane_swap.eq(1)
+            yield
+            self.assertEqual((yield fields.lane_swap),      1)
 
             # Per lane events: edges counted once, levels counted per cycle.
             yield dut.phy.pipes[1].ts_rx_ts1_inv.eq(1)

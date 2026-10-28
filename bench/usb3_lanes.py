@@ -58,6 +58,7 @@ class USB3LanesClient:
             "x2"             : (status >> 0) & 0x1,
             "gen2"           : (status >> 1) & 0x1,
             "deskew_aligned" : (status >> 2) & 0x1,
+            "lane_swap"      : (status >> 3) & 0x1,
             "ready"          : [(status >> (4 + lane)) & 0x1 for lane in range(2)],
             "rx_idle"        : [(status >> (6 + lane)) & 0x1 for lane in range(2)],
             "rx_polarity"    : [(status >> (8 + lane)) & 0x1 for lane in range(2)],
