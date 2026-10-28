@@ -86,7 +86,8 @@ class USB3PIPE(LiteXModule):
     Gen 1x2 lanes (USB3PHY lanes=2): lfsr_seed is the lane scrambler seed (FFFFh Lane 0, 8000h
     Lane 1, 6.13.5) and with x2_lane the descrambled lane stream is output as is on source (no
     framing alignment and no rx_ready gating: the lanes are deskewed on the Training Sequences, the
-    framing alignment/gating is done after the lanes destriping). With ssp (Configuration Lane), the
+    framing alignment/gating is done after the lanes destriping) and the TX words are taken from sink
+    as is when transmitting scrambled words (Logical Idle included: striped by the USB3PHY). With ssp (Configuration Lane), the
     SuperSpeedPlus Polling LFPS (lfps_tx_ssp/lfps_tx_ssp_lfps, from SSPPolling) has priority on the
     LFPS/electrical idle TX controls.
     """
@@ -206,22 +207,32 @@ class USB3PIPE(LiteXModule):
         self.scrambler = scrambler
         self.comb += scrambler.enable.eq(scrambling)
         tx_idle = Signal()
-        self.comb += [
-            # Logical Idle (7.2.3): send Idle Symbols (00h, scrambled) when the Link Layer has no
-            # data, the transceiver would otherwise re-transmit stale symbols and desync the
-            # partner's descrambler.
-            If(sink.valid & self.tx_ready,
-                sink.connect(scrambler.sink),
-            ).Else(
-                tx_idle.eq(1),
-                scrambler.sink.valid.eq(1),
-                scrambler.sink.data.eq(0x00000000),
-                scrambler.sink.ctrl.eq(0b0000),
-            ),
-            If(tx_enable,
-                scrambler.source.connect(serdes.sink)
-            )
-        ]
+        if x2_lane:
+            # Gen 1x2 lane: the Logical Idle is striped by the USB3PHY with the data (both lanes
+            # stay in lockstep, a lane must never send a word the other lane does not send): the
+            # words of sink are taken as is with tx_enable (sink.ready does not depend on
+            # sink.valid), Idle words detected on their contents for the Idle handshake.
+            self.comb += [
+                If(tx_enable,
+                    sink.connect(scrambler.sink),
+                ),
+                tx_idle.eq(sink.valid & (sink.data == 0) & (sink.ctrl == 0)),
+            ]
+        else:
+            self.comb += [
+                # Logical Idle (7.2.3): send Idle Symbols (00h, scrambled) when the Link Layer has
+                # no data, the transceiver would otherwise re-transmit stale symbols and desync the
+                # partner's descrambler.
+                If(sink.valid & self.tx_ready,
+                    sink.connect(scrambler.sink),
+                ).Else(
+                    tx_idle.eq(1),
+                    scrambler.sink.valid.eq(1),
+                    scrambler.sink.data.eq(0x00000000),
+                    scrambler.sink.ctrl.eq(0b0000),
+                ),
+            ]
+        self.comb += If(tx_enable, scrambler.source.connect(serdes.sink))
 
         # Descrambling -----------------------------------------------------------------------------
         # The descrambler processes all received symbols, including the Training Sequences received

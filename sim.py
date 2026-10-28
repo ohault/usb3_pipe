@@ -278,6 +278,7 @@ class USB3PIPESim(SoCMini):
     - ppm/ssc:       Host/Device in separate clock domains, the Device clock offset by ppm and/or with
                      SSC. Each SerDes model receives in the partner's (recovered) clock domain.
     - prbs_words:    Words to check on both sides before ending the simulation (without core).
+    - prbs_gap_bits: Gaps of 0 to 2**prbs_gap_bits - 1 cycles (Logical Idle) between the PRBS packets.
 
     Gen 1x2 (lanes=2, PRBS stand-ins on 64-bit link words, see doc/gen2-x2-roadmap.md): the PHYs
     train to U0 through the SuperSpeedPlus Polling (SCD1/SCD2, LBPM), with lane-to-lane skew, per
@@ -298,7 +299,7 @@ class USB3PIPESim(SoCMini):
     """
     def __init__(self, phy_dw=None, timer_scale=1, with_core=True, rx_word_shift=0, ppm=0, ssc=False,
         prbs_words=2**16, max_cycles=2**24, host_skp=True, host_latency=256, host_status_gap=64, host_pm=False,
-        host_lpm=False, lanes=1, lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096,
+        host_lpm=False, lanes=1, lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096, prbs_gap_bits=4,
         gen2_capable=False, gen2=False, link_words=1):
         assert lanes in [1, 2]
         assert (link_words == 1) or (lanes == 1)
@@ -402,11 +403,9 @@ class USB3PIPESim(SoCMini):
                     loopback.source.connect(core.endpoints[0].sink),
                 ]
             else:
-                # Gen 1x2: gaps of 0-3 cycles (Logical Idle gaps of 4+ cycles with per lane extra
-                # SKP Ordered Sets give Device PRBS errors, see doc/gen2-x2-roadmap.md).
                 generator = renamer(PRBSPacketGenerator(
                     data_width = 32*lanes,
-                    gap_bits   = {1: 4, 2: 2}[lanes]))
+                    gap_bits   = prbs_gap_bits))
                 checker   = renamer(PRBSPacketChecker(data_width=32*lanes))
                 self.add_module(name=f"{name}_prbs_generator", module=generator)
                 self.add_module(name=f"{name}_prbs_checker",   module=checker)
@@ -580,6 +579,7 @@ def main():
     parser.add_argument("--lane0-delay",   default=0,           help="Host to Device Lane 0 delay (words, --lanes 2).")
     parser.add_argument("--lane1-delay",   default=1,           help="Host to Device Lane 1 delay (words, --lanes 2).")
     parser.add_argument("--lane1-word-shift", default=2,        help="Device Lane 1 RX word shift (symbols, --lanes 2).")
+    parser.add_argument("--prbs-gap-bits", default=4,           help="Gaps of 0 to 2**N - 1 cycles between the PRBS packets (--no-core/--lanes 2).")
     parser.add_argument("--lane-skp",      default=4096,        help="Extra Host Lane 1/Lane 0 SKP Ordered Sets period (cycles, 0: disabled, --lanes 2).")
     parser.add_argument("--gen2-capable",  action="store_true", help="Gen 2x1 capability advertised/negotiated in the SuperSpeedPlus Polling (--lanes 1).")
     parser.add_argument("--gen2",          action="store_true", help="Gen 2 training to U0 on raw words (implies --gen2-capable).")
@@ -610,6 +610,7 @@ def main():
         lane_delays      = (int(args.lane0_delay), int(args.lane1_delay)),
         lane1_word_shift = int(args.lane1_word_shift),
         lane_skp         = int(args.lane_skp),
+        prbs_gap_bits    = int(args.prbs_gap_bits),
         gen2_capable     = args.gen2_capable or args.gen2,
         gen2             = args.gen2,
         link_words       = int(args.link_words))

@@ -398,8 +398,17 @@ class USB3PHY(LiteXModule):
         self.source = source = stream.Endpoint(link_layout())
 
         # TX: Striping -----------------------------------------------------------------------------
+        # Logical Idle (7.2.3) striped as data (6.13.4): Idle words when the Link Layer has no data
+        # (and during the Idle handshake), so that both lanes always transmit the same words in
+        # lockstep (a lane TX held for a cycle, ex: full TX CDC FIFO, holds the other lane).
         self.striper = striper = LaneStriper()
-        self.comb += sink.connect(striper.sink)
+        self.comb += If(sink.valid & ltssm.tx_ready,
+            sink.connect(striper.sink),
+        ).Else(
+            striper.sink.valid.eq(ltssm.tx_ready | ltssm.idle_handshake),
+            striper.sink.data.eq(0),
+            striper.sink.ctrl.eq(0),
+        )
         for lane in range(2):
             self.comb += striper.sources[lane].connect(pipes[lane].sink)
 

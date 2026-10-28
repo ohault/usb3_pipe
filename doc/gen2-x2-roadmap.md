@@ -145,12 +145,14 @@ milestones](#gen-2x1-hardware-milestones)); the Gen 1x2 ones are still simulatio
   6.13.12), Ordered Sets on both lanes, TS1/TS2 required on both lanes (6.13.6), per lane scrambler
   seeds FFFFh/8000h (6.13.5), **per lane polarity** (6.13.7), per lane SKP removal, **lanes deskew**
   on the TS1/TS2 COM words (re-acquired after each TSEQ/TS1 phase, markers paired by arrival time
-  within 1 word), **data striping** aligned to Lane 0 (6.13.4), 64-bit/8-bit link words.
+  within 1 word), **data striping** aligned to Lane 0 (6.13.4), 64-bit/8-bit link words, Logical
+  Idle striped with the data (a word is given to both lanes in the same cycle: a lane TX held, ex:
+  full TX CDC FIFO, holds the other lane, the lanes never get out of step).
 - `lanes.py`: `LaneDeskew(max_skew)` pairs periodic markers by arrival timestamp.
 - `sim.py --lanes 2` (Verilator): Host and Device `USB3PHY(lanes=2)` (4 SerDes models) negotiate
-  Gen 1x2 (SCD1/SCD2, LBPM), train to U0 and exchange 64-bit PRBS packets without errors with
-  lane-to-lane skew (Lane 0 or Lane 1 late, word shifts), Lane 1 TX polarity inverted, extra SKP
-  Ordered Sets on a single lane at a time, +-300ppm (`test/test_phy.py` `TestPHYX2`, extra
+  Gen 1x2 (SCD1/SCD2, LBPM), train to U0 and exchange 64-bit PRBS packets (Logical Idle gaps of
+  0-15 cycles) without errors with lane-to-lane skew (Lane 0 or Lane 1 late, word shifts), Lane 1 TX
+  polarity inverted, extra SKP Ordered Sets on a single lane at a time, +-300ppm (`test/test_phy.py` `TestPHYX2`, extra
   configurations with `pytest -m slow`).
 - Unit tests: `test/test_lfps_ssp.py` (SCD, LBPM), `test/test_ltssm_ssp.py` (x2/x2 -> Gen 1x2,
   x2/x1 -> Gen 1x1, SS partner fallback), `test/test_lanes.py` (periodic marker deskew in both skew
@@ -174,9 +176,7 @@ after Polling.PortConfig, timing at 250MHz (`Gen2TX` DC Balance pipelined). Rema
   to a single lane datapath), the two lanes TX must run in lockstep (same clock, same SKP schedule),
   the Recovery/U1/U2/U3 flows use the Gen 1x1 LTSSM on the Configuration Lane (Ux exit, Ping.LFPS on
   Lane 0 as required, but not exercised in x2 simulation), Lane 1 Rx.Detect/Loopback/Compliance per
-  lane not handled. The x2 simulation PRBS packets are separated by 0-3 cycles of Logical Idle:
-  Logical Idle gaps of 4+ cycles with the extra SKP Ordered Sets on a single lane give Device PRBS
-  errors (also seen with the former sim_x2.py, to investigate).
+  lane not handled.
 - Gen 1x2 Link Layer: the SuperSpeedPlus Link Layer (done for Gen 2x1, M3) and the 64-bit link
   words (done for Gen 2x1, M4b) are not connected to the x2 datapath yet (framing alignment of the
   striped 64-bit link words), the x2 simulation uses PRBS Link-Layer stand-ins.

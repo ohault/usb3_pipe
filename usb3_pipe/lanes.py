@@ -7,8 +7,8 @@
 """Dual-lane (Gen 1x2) building blocks (USB 3.2 6.13), see doc/gen2-x2-roadmap.md.
 
 - LaneStriper   : 64-bit link words (8 symbols, symbol 0 on data[0:8]) striped on two 32-bit lanes,
-                  aligned to Lane 0: even symbols on Lane 0, odd symbols on Lane 1 (6.13.4). The two
-                  lanes must accept the words in lockstep.
+                  aligned to Lane 0: even symbols on Lane 0, odd symbols on Lane 1 (6.13.4). A word
+                  is given to both lanes in the same cycle (lanes ready independent of valid).
 - LaneDestriper : two 32-bit lanes to 64-bit link words.
 - LaneDeskew    : aligns two lanes on a marker word (ex: Ordered Set duplicated on both lanes,
                   6.13.6), the lanes are then released in lockstep (the two sources must be consumed
@@ -38,12 +38,12 @@ class LaneStriper(LiteXModule):
 
         # # #
 
-        # The lanes must be consumed in lockstep (lanes valid/ready are not cross-gated: no
-        # combinatorial loop with sinks whose ready depends on valid).
+        # A word is given to both lanes or to none: presented only when both lanes are ready (the
+        # lanes ready must not depend on valid).
         self.comb += sink.ready.eq(sources[0].ready & sources[1].ready)
         for lane, source in enumerate(sources):
             self.comb += [
-                source.valid.eq(sink.valid),
+                source.valid.eq(sink.valid & sink.ready),
                 source.data.eq(Cat(*[sink.data[8*(2*i + lane):8*(2*i + lane + 1)] for i in range(4)])),
                 source.ctrl.eq(Cat(*[sink.ctrl[2*i + lane] for i in range(4)])),
             ]

@@ -40,6 +40,35 @@ class TestLanes(unittest.TestCase):
             self.assertEqual((yield dut.sources[1].ctrl), 0b0000)
         run_simulation(dut, generator(dut))
 
+    def test_striping_lockstep(self):
+        # Lanes ready randomly: a word is given to both lanes in the same cycle, never to a single
+        # lane (a lane held must hold the other one, the lanes would get out of step).
+        rng   = random.Random(1)
+        words = [rng.getrandbits(64) for _ in range(64)]
+        dut   = LaneStriper()
+        got   = [[], []]
+        def generator(dut):
+            yield dut.sink.valid.eq(1)
+            i = 0
+            while i < len(words):
+                yield dut.sink.data.eq(words[i])
+                for lane in range(2):
+                    yield dut.sources[lane].ready.eq(rng.random() < 0.7)
+                yield
+                valid = []
+                for lane in range(2):
+                    valid.append((yield dut.sources[lane].valid) & (yield dut.sources[lane].ready))
+                self.assertEqual(valid[0], valid[1])
+                for lane in range(2):
+                    if valid[lane]:
+                        got[lane].append((yield dut.sources[lane].data))
+                if (yield dut.sink.ready):
+                    i += 1
+        run_simulation(dut, generator(dut))
+        for lane in range(2):
+            self.assertEqual(got[lane], [
+                sum(((w >> (8*(2*k + lane))) & 0xff) << (8*k) for k in range(4)) for w in words])
+
     def test_stripe_skew_deskew_destripe(self):
         # Link words striped, lanes skewed (Lane 1 delayed by 3 words, different garbage before the
         # marker), deskewed on the marker, destriped: link words recovered.

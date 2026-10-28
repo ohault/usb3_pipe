@@ -464,8 +464,7 @@ def add_usb3_lanes_link(soc, serdes, role="device", leds=[], leds_inverted=False
     soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes)
 
     # PRBS Link-Layer Stand-Ins --------------------------------------------------------------------
-    # Gaps of 0-3 cycles between packets (doc/gen2-x2-roadmap.md).
-    soc.usb3_prbs = PRBSLinkTester(usb3_phy, data_width=64, gap_bits=2)
+    soc.usb3_prbs = PRBSLinkTester(usb3_phy, data_width=64)
 
     # Leds -----------------------------------------------------------------------------------------
     for led, signal in zip(leds, [usb3_phy.ready, usb3_phy.u0, usb3_phy.x2]):
