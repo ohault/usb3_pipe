@@ -103,6 +103,7 @@ LANES_ARGS = {
     "acorn_x2_host"            : ["--lanes", "2", "--role", "host", "--with-jtagbone"],
     "acorn_x2_analyzer_link"   : ["--lanes", "2", "--with-analyzer", "--analyzer-group", "link",
         "--lpm-hold", "rxeq"],
+    "acorn_x2_no_x2"           : ["--lanes", "2", "--no-x2"],
 }
 
 @pytest.mark.parametrize("name", list(LANES_ARGS))
@@ -121,8 +122,8 @@ def test_target_lanes(name, tmp_path):
     assert len(tx_clks) == 1
 
 def test_target_lanes_args(tmp_path):
-    # --role host requires --lanes 2, --lanes 2 requires the Mini.
-    for args in [["--role", "host"], ["--lanes", "2", "--variant", "standard"]]:
+    # --role host/--no-x2 require --lanes 2, --lanes 2 requires the Mini.
+    for args in [["--role", "host"], ["--no-x2"], ["--lanes", "2", "--variant", "standard"]]:
         cmd = [sys.executable, "-c", RUN_TARGET, "bench/acorn.py", "--output-dir", str(tmp_path)] + args
         p = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         assert p.returncode != 0

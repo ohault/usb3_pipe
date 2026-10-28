@@ -436,13 +436,14 @@ def add_usb3_device(soc, serdes, leds=[], leds_inverted=False,
 
 # USB3 Gen 1x2 Link (PRBS) -------------------------------------------------------------------------
 
-def add_usb3_lanes_link(soc, serdes, role="device", leds=[], leds_inverted=False):
+def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], leds_inverted=False):
     """Add a Gen 1x2 link on serdes (2 lanes, Lane 0: Configuration Lane) to soc: USB3PHY(lanes=2) in
     the Host or Device role + debug (USB3PHYDebug on Lane 0, USB3LanesDebug), PRBS Link-Layer stand-ins
     (PRBSLinkTester on the 64-bit link words) and LEDs (SerDes ready, U0, x2 negotiated).
 
     No SuperSpeedPlus Link Layer yet (doc/gen2-x2-roadmap.md): the link is tested between two
-    boards (one in each role, as sim.py --lanes 2), not with a USB host."""
+    boards (one in each role, as sim.py --lanes 2), not with a USB host. x2_capable=False: Gen 1x1
+    negotiated with the partner (single lane fallback on Lane 0, as sim.py --dev-mode x1)."""
     sys_clk_freq = soc.sys_clk_freq
     assert len(serdes) == 2
 
@@ -456,7 +457,8 @@ def add_usb3_lanes_link(soc, serdes, role="device", leds=[], leds_inverted=False
         sys_clk_freq         = sys_clk_freq,
         role                 = role,
         with_endianness_swap = False,
-        lanes                = 2)
+        lanes                = 2,
+        x2_capable           = x2_capable)
     soc.comb += usb3_phy.link_activity.eq(1) # No Link Layer: no PM activity.
 
     # USB3 PHY/Lanes Debug -------------------------------------------------------------------------

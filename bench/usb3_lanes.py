@@ -34,7 +34,7 @@ LANES_COUNTERS = ["deskew"] + [f"lane{lane}_{name}" for lane in range(2)
 
 PRBS_COUNTERS = ["tx_words", "rx_words", "rx_packets", "rx_errors"]
 
-PRBS_WORD_BYTES = 8 # 64-bit link words.
+PRBS_WORD_BYTES = {1: 8, 0: 4} # 64-bit link words (x2), 32-bit (Gen 1x1 negotiated, Lane 0).
 
 # USB3 Lanes Client --------------------------------------------------------------------------------
 
@@ -126,6 +126,8 @@ def main():
         last     = lanes.prbs()
         total    = {k: 0 for k in last}
         recovery = lanes.dbg.status()["recovery"]
+        x2       = lanes.status()["x2"]
+        word_bytes = PRBS_WORD_BYTES[x2] # Counters of the negotiated mode.
         while time.time() - start < args.duration:
             time.sleep(args.period)
             t     = time.time()
@@ -135,8 +137,8 @@ def main():
             last  = prbs
             print(json.dumps({
                 "time_s"       : round(t - start, 1),
-                "tx_MBps"      : round(delta["tx_words"]*PRBS_WORD_BYTES/args.period/1e6, 1),
-                "rx_MBps"      : round(delta["rx_words"]*PRBS_WORD_BYTES/args.period/1e6, 1),
+                "tx_MBps"      : round(delta["tx_words"]*word_bytes/args.period/1e6, 1),
+                "rx_MBps"      : round(delta["rx_words"]*word_bytes/args.period/1e6, 1),
                 "rx_errors"    : delta["rx_errors"],
                 "ltssm_state"  : lanes.dbg.status()["ltssm_state"],
             }), flush=True)
@@ -144,11 +146,11 @@ def main():
         status  = lanes.status()
         print(json.dumps({
             "duration_s"   : round(elapsed, 1),
-            "tx_bytes"     : total["tx_words"]*PRBS_WORD_BYTES,
-            "rx_bytes"     : total["rx_words"]*PRBS_WORD_BYTES,
+            "tx_bytes"     : total["tx_words"]*word_bytes,
+            "rx_bytes"     : total["rx_words"]*word_bytes,
             "rx_packets"   : total["rx_packets"],
             "rx_errors"    : total["rx_errors"],
-            "rx_MBps"      : round(total["rx_words"]*PRBS_WORD_BYTES/elapsed/1e6, 1),
+            "rx_MBps"      : round(total["rx_words"]*word_bytes/elapsed/1e6, 1),
             "recoveries"   : status["recovery_count"] - recovery,
             "x2"           : status["x2"],
         }))
