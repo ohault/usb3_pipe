@@ -1,8 +1,9 @@
 # Backplane brief: dual SFP to USB-C breakout
 
-Brief for the Backplane agents (KiCad), to paste in a Backplane project thread with this directory
-(README.md, netlist.py, check_netlist.py) in the project. The agents work in phases, each ending with
-a human review: do not start a phase before the previous one is approved.
+Brief for the Backplane agents (KiCad), to paste in a Backplane project thread with this directory in
+the project. The schematic and the unrouted board are generated (gen_schematic.py, gen_board.py):
+the agents start at Phase 1 (review) and do the routing (Phase 4) and fab outputs (Phase 5). Each
+phase ends with a human review: do not start a phase before the previous one is approved.
 
 ## Context for the agents
 
@@ -12,45 +13,42 @@ lanes (5Gbps each) from two SFP DAC cables to a USB-C cable. The design intent i
 
 - `README.md`: design decisions, pin mapping, BOM candidates, PCB rules.
 - `netlist.py`: the exact connectivity (refs, pins, net names). Use these refs and net names.
+- `sfp2usbc.kicad_sch`/`sfp2usbc.kicad_pcb`/`.kicad_pro`/`.kicad_dru`: generated schematic, unrouted
+  placed board, net classes and rules. Change the connectivity only in `netlist.py` (regenerate).
 - `check_netlist.py`: must report 0 errors on the schematic netlist export.
 
 Rules:
 - Do not change the connectivity or add circuits that are not in `netlist.py` (except test points
   TP*, mounting holes H*, fiducials, logos). Ask if something looks wrong.
 - Footprints from the manufacturer datasheets (or KiCad libraries checked against them): report the
-  datasheet pages used for J1/J2, CG1/CG2, J3, U1/U2.
+  datasheet pages used for J1/J2, J3, U1/U2.
 - High-speed pairs: `L0_SFP_RD_P/N`, `L0_SSTX_P/N`, `L0_SSRX_P/N`, `L1_*` (diff pairs, 90 ohm).
 
-## Phase 1: parts and footprints
+## Phase 1: parts and footprints (review)
 
-1. Check the BOM candidates of README.md (datasheet, active, stock), propose alternatives if needed.
-2. Symbols/footprints for J1/J2 (SFP connector, SFF-8431 pinout, pads 1-20), CG1/CG2 (cage, press-fit
-   holes, board thickness), J3 (24-pin USB-C, pins A1-A12/B1-B12, shell), U1/U2 (map the netlist.py
-   IO1-IO4/GND to the datasheet pins, flow-through).
+1. Check the BOM of README.md (datasheet, active, stock), propose alternatives if needed.
+2. Check the KiCad footprints against the datasheets: J1/J2 (`Connector_SFP_and_Cage`, TE 2227302:
+   pads 1-20, cage pins, PCB edge), J3 (`USB_C_Receptacle_Amphenol_12401610E4-2A`: A/B rows, shell,
+   front vs board edge), U1/U2 (USON-10 TPD4E05U06 pinout, flow-through pad pairs).
 
-Review: footprints vs datasheets (pad sizes, pin 1, J3 A/B rows, cage/connector alignment).
+Review: footprints vs datasheets.
 
-## Phase 2: schematic
+## Phase 2: schematic (review)
 
-1. Schematic with the refs, values and net labels of `netlist.py` (one sheet: SFP-A/Lane 0, SFP-B/
-   Lane 1, USB-C, CC/VBUS/shield), no connect flags on the `NO_CONNECT` pins, test points on CC1,
-   CC2, VBUS, USB2_DP, USB2_DN, GND.
-2. ERC clean.
-3. `kicad-cli sch export netlist --format kicadsexpr -o sfp2usbc.net sfp2usbc.kicad_sch` then
+1. ERC in KiCad (eeschema): clean or justified.
+2. `kicad-cli sch export netlist --format kicadsexpr -o sfp2usbc.net sfp2usbc.kicad_sch` then
    `./check_netlist.py sfp2usbc.net`: 0 errors.
 
-Review: schematic + check_netlist.py output.
+Review: schematic + ERC + check_netlist.py output.
 
-## Phase 3: board setup and placement
+## Phase 3: stackup, rules and placement (review/adjust)
 
-1. Board ~50 x 45mm, 4 layers 1.6mm, fab stackup with controlled impedance (L2 solid GND), 4 M3
-   mounting holes.
-2. Net classes/diff pair rules: 90 ohm differential widths/gaps from the fab calculator, intra-pair
-   skew < 0.15mm, clearance to other nets >= 3x the trace width.
-3. Placement: cages + J1/J2 on one edge (front per the cage datasheet), J3 on the opposite edge,
-   AC caps C1-C4 symmetric per pair, U1/U2 close to J3 (flow-through), R1/R2/R3/C5/C6 near J3.
+1. Fab stackup with controlled impedance (4 layers 1.6mm, L2 solid GND): set the `HS_90R` net class
+   width/gap for 90 ohm differential from the fab calculator (sfp2usbc.kicad_pro, Board Setup).
+2. Adjust the placement if needed (AC caps symmetric on the RD pairs, U1/U2 close to J3 in the
+   signal flow, cage/J3 edges per the datasheets), intra-pair skew < 0.15mm.
 
-Review: placement, stackup, rules (before routing).
+Review: stackup, rules, placement (before routing).
 
 ## Phase 4: routing
 

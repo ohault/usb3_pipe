@@ -6,10 +6,15 @@
 
 """Dual SFP to USB-C (USB 3.2 Gen 1x2) breakout: intended netlist (design intent, see README.md).
 
-Single source of truth for the schematic (drawn in KiCad/Backplane) and its check against the KiCad
-netlist export (check_netlist.py). Connector pins are numbered as in the KiCad footprints:
-- J1/J2: SFP host connectors (SFF-8431 host pinout, 20 pins), with their 1x1 cages (CG1/CG2).
-- J3   : USB Type-C receptacle, full-featured (24 pins: A1-A12/B1-B12, SHIELD: shell).
+Single source of truth for the schematic (gen_schematic.py, KiCad) and its check against the KiCad
+netlist export (check_netlist.py). Pins are numbered as in the KiCad library symbols/footprints:
+- J1/J2: SFP host connector + 1x1 cage (Interface_Optical:SFP+, Connector:Connector_SFP_and_Cage, TE
+         2227302: SFF-8431 pinout, pins 1-20, cage pins CAGE).
+- J3   : USB Type-C receptacle, full-featured (Connector:USB_C_Receptacle, Amphenol 12401610E4-2A:
+         A1-A12/B1-B12, shell S1).
+- U1/U2: TI TPD4E05U06 (Power_Protection:TPD4E05U06DQA, USON-10): D1+ 1, D1- 2, D2+ 4, D2- 5, GND 3/8,
+         NC 6/7/9/10 (not internally connected): flow-through routing, each line routed over its pad
+         pair 1/10, 2/9, 4/7, 5/6, the NC pad on the line's net.
 
 Data paths (passive SFP DAC cables cross TD <-> RD between their two ends):
 - Acorn SFP-0 TD (FPGA TX Lane 0) -> DAC -> J1 RD -> AC caps C1/C2 -> J3 TX1 (device SSTX, Lane 0).
@@ -28,10 +33,8 @@ USB3PHY, per lane).
 
 # ref: (description, value)
 COMPONENTS = {
-    "J1"  : ("SFP host connector, 20 pins (SFP-A: to Acorn SFP-0, Lane 0)", "SFP"),
-    "J2"  : ("SFP host connector, 20 pins (SFP-B: to Acorn SFP-1, Lane 1)", "SFP"),
-    "CG1" : ("SFP 1x1 cage (J1)", "SFP cage"),
-    "CG2" : ("SFP 1x1 cage (J2)", "SFP cage"),
+    "J1"  : ("SFP host connector + cage (SFP-A: to Acorn SFP-0, Lane 0)", "SFP"),
+    "J2"  : ("SFP host connector + cage (SFP-B: to Acorn SFP-1, Lane 1)", "SFP"),
     "J3"  : ("USB Type-C receptacle, full-featured 24 pins, USB 3.2", "USB-C"),
     "C1"  : ("Lane 0 SSTX+ AC coupling", "100nF"),
     "C2"  : ("Lane 0 SSTX- AC coupling", "100nF"),
@@ -54,8 +57,9 @@ SFP_GND_PINS = ["1", "10", "11", "14", "17", "20"]
 SFP_NC_PINS  = ["2", "3", "4", "5", "6", "7", "8", "9", "15", "16"]
 SFP_RD_N, SFP_RD_P, SFP_TD_P, SFP_TD_N = "12", "13", "18", "19"
 
-# ESD arrays: logical I/O pins (the footprint pins are checked by net membership only).
-ESD_IO = ["IO1", "IO2", "IO3", "IO4"]
+# ESD arrays (TPD4E05U06): D1+, D1-, D2+, D2- (I/O) with their flow-through NC pads, GND.
+ESD_IO      = [("1", "10"), ("2", "9"), ("4", "7"), ("5", "6")]
+ESD_GND     = ["3", "8"]
 
 def _lane_nets(lane, sfp, tx_p, tx_n, rx_p, rx_n, c_p, c_n, esd):
     """Nets of one lane: SFP RD -> AC caps -> USB-C SSTX, USB-C SSRX -> SFP TD, ESD on the USB-C
@@ -64,10 +68,10 @@ def _lane_nets(lane, sfp, tx_p, tx_n, rx_p, rx_n, c_p, c_n, esd):
     return {
         f"{p}_SFP_RD_P"  : [(sfp, SFP_RD_P), (c_p, "1")],
         f"{p}_SFP_RD_N"  : [(sfp, SFP_RD_N), (c_n, "1")],
-        f"{p}_SSTX_P"    : [(c_p, "2"), ("J3", tx_p), (esd, "IO1")],
-        f"{p}_SSTX_N"    : [(c_n, "2"), ("J3", tx_n), (esd, "IO2")],
-        f"{p}_SSRX_P"    : [("J3", rx_p), (sfp, SFP_TD_P), (esd, "IO3")],
-        f"{p}_SSRX_N"    : [("J3", rx_n), (sfp, SFP_TD_N), (esd, "IO4")],
+        f"{p}_SSTX_P"    : [(c_p, "2"), ("J3", tx_p)] + [(esd, pin) for pin in ESD_IO[0]],
+        f"{p}_SSTX_N"    : [(c_n, "2"), ("J3", tx_n)] + [(esd, pin) for pin in ESD_IO[1]],
+        f"{p}_SSRX_P"    : [("J3", rx_p), (sfp, SFP_TD_P)] + [(esd, pin) for pin in ESD_IO[2]],
+        f"{p}_SSRX_N"    : [("J3", rx_n), (sfp, SFP_TD_N)] + [(esd, pin) for pin in ESD_IO[3]],
     }
 
 NETS = {}
@@ -83,13 +87,13 @@ NETS.update({
     # test points.
     "USB2_DP": [("J3", "A6"), ("J3", "B6")],
     "USB2_DN": [("J3", "A7"), ("J3", "B7")],
-    "SHIELD" : [("J3", "SHIELD"), ("R3", "1"), ("C5", "1")],
+    "SHIELD" : [("J3", "S1"), ("R3", "1"), ("C5", "1")],
     "GND"    : (
-        [("J1", pin) for pin in SFP_GND_PINS] +
-        [("J2", pin) for pin in SFP_GND_PINS] +
-        [("CG1", "GND"), ("CG2", "GND")] +
+        [("J1", pin) for pin in SFP_GND_PINS + ["CAGE"]] +
+        [("J2", pin) for pin in SFP_GND_PINS + ["CAGE"]] +
         [("J3", pin) for pin in ["A1", "A12", "B1", "B12"]] +
-        [("U1", "GND"), ("U2", "GND")] +
+        [("U1", pin) for pin in ESD_GND] +
+        [("U2", pin) for pin in ESD_GND] +
         [("R1", "2"), ("R2", "2"), ("R3", "2"), ("C5", "2"), ("C6", "2")]
     ),
 })
@@ -104,6 +108,3 @@ NO_CONNECT = (
 # High-speed differential pairs (layout rules: README.md).
 DIFF_PAIRS = [(f"L{lane}_{name}_P", f"L{lane}_{name}_N")
     for lane in range(2) for name in ["SFP_RD", "SSTX", "SSRX"]]
-
-# Components checked by net membership only (logical pin names, footprint pinout to verify).
-SYMBOLIC_PIN_REFS = ["U1", "U2", "CG1", "CG2"]

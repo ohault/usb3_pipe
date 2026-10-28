@@ -9,8 +9,8 @@
 """Check a KiCad netlist export of the breakout schematic against the intended netlist (netlist.py).
 
 Connectivity is compared, not net names: each intended net must be exactly one KiCad net (same
-pins, no extra pins except test points/mounting holes), no connect pins must be unconnected. The
-components with symbolic pins in netlist.py (ESD arrays, cages) are checked by net membership.
+pins, no extra pins except test points/mounting holes/power flags), no connect pins must be
+unconnected.
 
 Usage:
   kicad-cli sch export netlist --format kicadsexpr -o sfp2usbc.net sfp2usbc.kicad_sch
@@ -24,10 +24,11 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from netlist import COMPONENTS, NETS, NO_CONNECT, SYMBOLIC_PIN_REFS
+from netlist import COMPONENTS, NETS, NO_CONNECT
 
-# Refs allowed on nets without being in the intended netlist (test points, mounting holes, logos).
-EXTRA_REF_PREFIXES = ("TP", "H", "MH", "FID", "LOGO", "G")
+# Refs allowed on nets without being in the intended netlist (test points, mounting holes, logos,
+# power flags).
+EXTRA_REF_PREFIXES = ("TP", "H", "MH", "FID", "LOGO", "G", "#FLG", "#PWR")
 
 # KiCad netlist (s-expression) parser -------------------------------------------------------------
 
@@ -95,13 +96,9 @@ def check(components, nets):
         for node in nodes:
             pin_net[node] = name
 
-    def concrete(nodes):
-        return {(ref, pin) for ref, pin in nodes if ref not in SYMBOLIC_PIN_REFS}
-
     # Intended nets.
-    used = set()
     for name, nodes in NETS.items():
-        pins = concrete(nodes)
+        pins  = set(nodes)
         found = {pin_net.get(pin) for pin in pins}
         if None in found:
             missing = sorted(pin for pin in pins if pin not in pin_net)
@@ -113,29 +110,11 @@ def check(components, nets):
         if not found:
             continue
         kicad_name = found.pop()
-        used.add(kicad_name)
-        kicad_pins = nets[kicad_name]
-        extra = sorted(p for p in concrete(kicad_pins) - pins if not is_extra(p[0]))
+        extra = sorted(p for p in nets[kicad_name] - pins if not is_extra(p[0]))
         if extra:
             errors.append(f"{name}: extra pins {extra} (KiCad net '{kicad_name}').")
-        # Symbolic pins: one pin of the component per intended node on this net.
-        for ref in SYMBOLIC_PIN_REFS:
-            expected = sum(1 for r, _ in nodes if r == ref)
-            actual   = sum(1 for r, _ in kicad_pins if r == ref)
-            if (name != "GND") and (expected != actual):
-                errors.append(f"{name}: {actual} pin(s) of {ref}, expected {expected}.")
-            if (name == "GND") and expected and not actual:
-                errors.append(f"GND: no pin of {ref}.")
         if kicad_name.lstrip("/") != name and not kicad_name.startswith("Net-("):
             warnings.append(f"{name}: KiCad net named '{kicad_name}'.")
-
-    # Symbolic components: no pin on a net outside the intended ones (except no connects).
-    for name, nodes in nets.items():
-        if name in used or len(nodes) <= 1:
-            continue
-        refs = sorted({ref for ref, _ in nodes if ref in SYMBOLIC_PIN_REFS})
-        if refs:
-            errors.append(f"KiCad net '{name}': unexpected connection of {refs}: {sorted(nodes)}.")
 
     # No connect pins.
     for pin in NO_CONNECT:

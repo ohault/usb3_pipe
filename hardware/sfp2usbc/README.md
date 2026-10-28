@@ -16,9 +16,28 @@ cables, the USB-C to a USB 3.2 Gen 1x2/Gen 2x2 host with a full-featured USB-C c
                                                        U1/U2 ESD, R1/R2 Rd on CC1/CC2
 ```
 
-The design intent is [netlist.py](netlist.py) (single source of truth), checked against the KiCad
-netlist export with [check_netlist.py](check_netlist.py). The Backplane workflow is in
-[backplane-brief.md](backplane-brief.md).
+## Files
+
+| File | Role |
+|---|---|
+| [netlist.py](netlist.py) | Design intent: components, pins, nets (single source of truth). |
+| [gen_schematic.py](gen_schematic.py) | Generates `sfp2usbc.kicad_sch` from netlist.py (KiCad library symbols, net labels, footprints). |
+| [gen_board.py](gen_board.py) | Generates `sfp2usbc.kicad_pcb` (4 layers, outline, footprints/nets, placement), `sfp2usbc.kicad_pro` (net classes) and `sfp2usbc.kicad_dru` (custom rules): unrouted. |
+| [check_netlist.py](check_netlist.py) | Checks a KiCad netlist export against netlist.py. |
+| [backplane-brief.md](backplane-brief.md) | Routing and fab outputs with Backplane (or by hand in KiCad). |
+| [sfp2usbc-schematic.pdf](sfp2usbc-schematic.pdf), [sfp2usbc-placement.png](sfp2usbc-placement.png) | Previews (schematic, board placement before routing). |
+
+```sh
+# KiCad 7+ (kicad-cli, pcbnew Python module).
+$ ./gen_schematic.py
+$ kicad-cli sch export netlist --format kicadsexpr -o sfp2usbc.net sfp2usbc.kicad_sch
+$ ./check_netlist.py sfp2usbc.net        # 0 errors.
+$ ./gen_board.py --drc drc.rpt           # Unrouted board + DRC report (unconnected items before routing).
+```
+
+`gen_board.py` overwrites the board: once the routing has started in KiCad, change the schematic
+(regenerated from netlist.py) and use KiCad's "Update PCB from Schematic" (footprints linked to the
+schematic symbols) instead of regenerating the board. Tests: `test/test_sfp2usbc_netlist.py`.
 
 ## Design decisions
 
@@ -43,8 +62,9 @@ netlist export with [check_netlist.py](check_netlist.py). The Backplane workflow
   baseboard already inverts some pairs: P/N may be swapped on any pair to avoid vias/crossings.
 - **SFP low-speed/power pins not connected** (VccT/VccR, TX_DISABLE, MOD_DEF0-2, RS0/RS1, LOS,
   TX_FAULT): nothing to power or read in a passive DAC plug for this use.
-- **ESD**: low capacitance 4-line arrays (U1/U2, ex: TI TPD4E05U06, 0.5pF) on the USB-C side of the
-  AC capacitors, close to J3 (flow-through routing).
+- **ESD**: low capacitance 4-line arrays (U1/U2, TI TPD4E05U06, 0.5pF) on the USB-C side of the
+  AC capacitors, close to J3. Flow-through routing: each line runs over its pad pair (1/10, 2/9,
+  4/7, 5/6), the NC pads (not internally connected) are on the line's net.
 - **Shield**: 1M || 100nF to GND (R3/C5, as the SFP2USB adapter). Cages to GND.
 
 ## Pin mapping
@@ -67,38 +87,44 @@ arrives on the breakout RD pins and the breakout TD pins go to the Acorn RD (FPG
 | VBUS | | | A4/A9/B4/B9 | C6 1uF |
 | GND | 1/10/11/14/17/20, cages | | A1/A12/B1/B12 | |
 
-## Bill of materials (candidates, to verify)
+## Bill of materials
 
-| Ref | Part | Notes |
-|---|---|---|
-| J1, J2 | SFP 20-pin host connector, SMT (ex: TE 1367073-1) | Footprint from the datasheet, SFF-8431 pinout. |
-| CG1, CG2 | SFP 1x1 press-fit cage matching the connector (ex: TE 2007194-1) | Board thickness/press-fit holes per datasheet. |
-| J3 | USB-C receptacle, full-featured 24 pins, USB 3.2 rated (ex: GCT USB4085, Amphenol 12401610E4#2A) | All 4 SuperSpeed pairs (16-pin USB 2.0 receptacles do not fit). |
-| C1-C4 | 100nF X7R 0201/0402, 16V | USB3 75-265nF. |
-| U1, U2 | TI TPD4E05U06 (or equivalent <= 0.5pF array) | Pinout to map to the IO1-IO4/GND of netlist.py. |
-| R1, R2 | 5.1k 1% 0402 | Rd (UFP). |
-| R3, C5 | 1M 0402, 100nF 0402 | Shield. |
-| C6 | 1uF 0402 | VBUS. |
-| TP | CC1, CC2, VBUS, USB2_DP, USB2_DN, GND | Test points. |
+| Ref | Part | KiCad footprint | Notes |
+|---|---|---|---|
+| J1, J2 | SFP 20-pin connector + 1x1 press-fit cage (TE drawing 2227302) | `Connector:Connector_SFP_and_Cage` | Order the connector and the cage per the TE drawing; PCB edge 43mm from the footprint origin. |
+| J3 | Amphenol 12401610E4#2A (USB-C, 24 pins, USB 3.2, R/A SMT) | `Connector_USB:USB_C_Receptacle_Amphenol_12401610E4-2A` | All 4 SuperSpeed pairs (the 16-pin USB 2.0 receptacles, ex GCT USB4085, do not fit). Alternative: Molex 105450-0101. |
+| C1-C4 | 100nF X7R 0402, 16V | `Capacitor_SMD:C_0402_1005Metric` | USB3 75-265nF. |
+| U1, U2 | TI TPD4E05U06DQAR | `Package_SON:USON-10_2.5x1.0mm_P0.5mm` | 0.5pF, flow-through. |
+| R1, R2 | 5.1k 1% 0402 | `Resistor_SMD:R_0402_1005Metric` | Rd (UFP). |
+| R3, C5 | 1M 0402, 100nF 0402 | 0402 | Shield. |
+| C6 | 1uF 0402 | 0402 | VBUS. |
+| TP1-TP6 | Test pads (CC1, CC2, VBUS, USB2_DP, USB2_DN, GND) | `TestPoint:TestPoint_Pad_D1.0mm` | |
+| H1-H4 | M3 mounting holes | `MountingHole:MountingHole_3.2mm_M3` | |
 
-Part numbers are candidates from memory and must be checked (datasheet, availability, footprint)
-before the layout.
+Check the datasheets, availability and footprints (pad sizes, J3 front/board edge position) before
+ordering.
 
 ## PCB
 
 - **Stackup**: 4 layers, 1.6mm (L1 signals, L2 GND, L3 GND/VBUS, L4 signals/GND), FR-4 from the fab's
   controlled impedance stackup.
-- **Impedance**: 90 ohm differential (USB 3.2; SFP is 100 ohm: negligible on a few cm), widths/gaps
-  from the fab's impedance calculator. Reference all pairs to the solid L2 GND, no plane splits
-  under them.
+- **Impedance**: 90 ohm differential (USB 3.2; SFP is 100 ohm: negligible on a few cm), net class
+  `HS_90R` (all `L*` nets) with 0.30mm width/0.20mm gap (estimate for a ~0.21mm prepreg, to replace
+  with the fab's stackup/impedance calculator values before routing). Reference all pairs to the
+  solid L2 GND, no plane splits under them. Custom rule: 0.3mm between the HS tracks and other nets
+  (pads: net class clearance, fine pitch connectors).
 - **Lengths**: pairs as short as possible (< 50mm), intra-pair skew < 0.15mm (5 mil); lane-to-lane
   skew not critical (deskewed by the USB3PHY: keep within ~25mm).
 - **No vias** on the high-speed pairs if possible (P/N swaps allowed); else GND stitching vias next
   to each signal via.
 - **AC caps/ESD**: symmetric placement per pair, ESD close to J3 with flow-through routing, GND voids
   on L2 under the AC capacitor and SFP/USB-C pads (pad capacitance), per the connector datasheets.
-- **Placement**: cages at one board edge (bezel side of their datasheet), J3 at the opposite edge,
-  board ~50 x 45mm, 4 mounting holes (M3), GND stitching along the edges.
+- **Placement** (gen_board.py): 78 x 50mm, cages on the left edge, J3 on the right edge, AC caps on
+  the SFP RD pairs, ESD arrays between the caps and J3, Rd/VBUS/shield parts next to J3, test pads
+  in the middle, 4 M3 holes on the right half (the cages take the left half). GND stitching along
+  the edges.
+- **Known DRC items before routing**: unconnected items (to route), J3 footprint own NPTH-to-shield
+  pad spacing (0.298mm, under the 0.3mm edge clearance: footprint from the connector drawing).
 - **Outputs**: Gerbers, drill, IPC netlist, BOM, placement (CPL), fab stackup/impedance notes.
 
 ## Bring-up
