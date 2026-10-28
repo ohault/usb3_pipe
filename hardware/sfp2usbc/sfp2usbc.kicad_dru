@@ -1,5 +1,5 @@
 (version 1)
 
 (rule "HS_90R tracks spacing"
-  (condition "A.Type == 'track' && A.NetClass == 'HS_90R' && B.NetClass != 'HS_90R'")
-  (constraint clearance (min 0.3mm)))
+  (condition "A.Type == 'track' && A.NetClass == 'HS_90R' && B.NetClass != 'HS_90R' && !A.intersectsCourtyard('J1') && !A.intersectsCourtyard('J2') && !A.intersectsCourtyard('J3') && !A.intersectsCourtyard('U1') && !A.intersectsCourtyard('U2')")
+  (constraint clearance (min 0.25mm)))

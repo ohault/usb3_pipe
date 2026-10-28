@@ -67,11 +67,17 @@ class TestSFP2USBCNetlist(unittest.TestCase):
                 self.assertIn((cap, "1"), NETS[f"L{lane}_SFP_RD_{pol}"])
                 self.assertIn((cap, "2"), NETS[f"L{lane}_SSTX_{pol}"])
                 self.assertFalse(any(r.startswith("C") for r, _ in NETS[f"L{lane}_SSRX_{pol}"]))
-        # Lane 0 on TX1/RX1 (Configuration Lane with the CC1 orientation), Lane 1 on TX2/RX2.
-        self.assertIn(("J3", "A2"),  NETS["L0_SSTX_P"])
-        self.assertIn(("J3", "B11"), NETS["L0_SSRX_P"])
-        self.assertIn(("J3", "B2"),  NETS["L1_SSTX_P"])
-        self.assertIn(("J3", "A11"), NETS["L1_SSRX_P"])
+        # Lane 0 on TX1/RX1 (Configuration Lane with the CC1 orientation), Lane 1 on TX2/RX2, P/N
+        # swaps of the routing (Lane 0 TX1, Lane 1 SFP TD: receivers polarity inversion).
+        self.assertIn(("J3", "A3"),  NETS["L0_SSTX_P"])  # TX1- (swapped).
+        self.assertIn(("J3", "B11"), NETS["L0_SSRX_P"])  # RX1+.
+        self.assertIn(("J1", "18"),  NETS["L0_SSRX_P"])  # TD+.
+        self.assertIn(("J3", "B2"),  NETS["L1_SSTX_P"])  # TX2+.
+        self.assertIn(("J3", "A11"), NETS["L1_SSRX_P"])  # RX2+.
+        self.assertIn(("J2", "19"),  NETS["L1_SSRX_P"])  # TD- (swapped).
+        for lane, sfp in [(0, "J1"), (1, "J2")]:
+            self.assertIn((sfp, "13"), NETS[f"L{lane}_SFP_RD_P"]) # RD+ (FPGA TX).
+            self.assertIn((sfp, "12"), NETS[f"L{lane}_SFP_RD_N"])
         for p, n in DIFF_PAIRS:
             self.assertIn(p, NETS)
             self.assertIn(n, NETS)
@@ -116,7 +122,7 @@ class TestSFP2USBCNetlist(unittest.TestCase):
 
         # ESD array line not connected (one line unprotected).
         def esd(nets):
-            nets["L1_SSRX_N"].remove(("U2", "5"))
+            nets["L1_SSRX_N"].remove(("U2", "2"))
         self.assertTrue(errors_of(esd))
 
         # VBUS row pin missing.
@@ -125,11 +131,11 @@ class TestSFP2USBCNetlist(unittest.TestCase):
         self.assertTrue(errors_of(vbus))
 
         # Missing component.
-        components = {k: v for k, v in COMPONENTS.items() if k != "C6"}
-        def no_c6(nets):
-            nets["VBUS"].remove(("C6", "1"))
-            nets["GND"].remove(("C6", "2"))
-        self.assertTrue(errors_of(no_c6, components=components))
+        components = {k: v for k, v in COMPONENTS.items() if k != "C5"}
+        def no_c5(nets):
+            nets["SHIELD"].remove(("C5", "1"))
+            nets["GND"].remove(("C5", "2"))
+        self.assertTrue(errors_of(no_c5, components=components))
 
 # KiCad (optional: skipped without KiCad 7+) -------------------------------------------------------
 
@@ -153,13 +159,27 @@ class TestSFP2USBCKiCad(unittest.TestCase):
 
     @unittest.skipUnless(HAS_PCBNEW, "KiCad (pcbnew Python module, footprints) not installed.")
     def test_board(self):
-        # Generated board: pads nets as netlist.py, lanes in the 90 ohm net class.
+        # Generated board: pads nets as netlist.py, lanes in the 90 ohm net class, routed: DRC clean
+        # (the KiCad library table is not configured here: footprints library issues only), pairs
+        # length matched.
         import pcbnew
         import gen_board
         with tempfile.TemporaryDirectory() as d:
             pcb = str(Path(d) / "sfp2usbc.kicad_pcb")
             gen_board.build(pcb)
+            counts = gen_board.drc(pcb, str(Path(d) / "drc.rpt"))
+            self.assertEqual(set(counts) - {"lib_footprint_issues"}, set(), counts)
             board = pcbnew.LoadBoard(pcb)
+            lengths = {}
+            for t in board.GetTracks():
+                if t.Type() != pcbnew.PCB_VIA_T:
+                    net = t.GetNetname()
+                    lengths[net] = lengths.get(net, 0) + pcbnew.ToMM(t.GetLength())
+            for lane in range(2):
+                for p, n in [(["SFP_RD_P", "SSTX_P"], ["SFP_RD_N", "SSTX_N"]), (["SSRX_P"], ["SSRX_N"])]:
+                    lp = sum(lengths[f"/L{lane}_{x}"] for x in p)
+                    ln = sum(lengths[f"/L{lane}_{x}"] for x in n)
+                    self.assertLess(abs(lp - ln), 0.15, (lane, p, lp, ln))
             pads  = {(fp.GetReference(), pad.GetNumber()): pad.GetNetname()
                 for fp in board.GetFootprints() for pad in fp.Pads()}
             for name, nodes in NETS.items():

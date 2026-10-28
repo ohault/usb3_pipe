@@ -45,19 +45,13 @@ PARTS = {
     "J3" : ("Connector:USB_C_Receptacle",            "Connector_USB:USB_C_Receptacle_Amphenol_12401610E4-2A",   292.1, 127.0),
     "R1" : ("Device:R",                              "Resistor_SMD:R_0402_1005Metric",                          355.6,  88.9),
     "R2" : ("Device:R",                              "Resistor_SMD:R_0402_1005Metric",                          381.0,  88.9),
-    "C6" : ("Device:C",                              "Capacitor_SMD:C_0402_1005Metric",                         355.6, 127.0),
     "R3" : ("Device:R",                              "Resistor_SMD:R_0402_1005Metric",                          355.6, 177.8),
     "C5" : ("Device:C",                              "Capacitor_SMD:C_0402_1005Metric",                         381.0, 177.8),
 }
 
 # Extra parts (not in netlist.py): ref: (lib_id, footprint, value, x, y, net of pin 1 or None).
 EXTRA_PARTS = {
-    "TP1"    : ("Connector:TestPoint",       "TestPoint:TestPoint_Pad_D1.0mm",       "CC1",     317.5, 228.6, "CC1"),
-    "TP2"    : ("Connector:TestPoint",       "TestPoint:TestPoint_Pad_D1.0mm",       "CC2",     335.28, 228.6, "CC2"),
-    "TP3"    : ("Connector:TestPoint",       "TestPoint:TestPoint_Pad_D1.0mm",       "VBUS",    353.06, 228.6, "VBUS"),
-    "TP4"    : ("Connector:TestPoint",       "TestPoint:TestPoint_Pad_D1.0mm",       "USB2_DP", 370.84, 228.6, "USB2_DP"),
-    "TP5"    : ("Connector:TestPoint",       "TestPoint:TestPoint_Pad_D1.0mm",       "USB2_DN", 388.62, 228.6, "USB2_DN"),
-    "TP6"    : ("Connector:TestPoint",       "TestPoint:TestPoint_Pad_D1.0mm",       "GND",     406.4, 228.6, "GND"),
+    "TP1"    : ("Connector:TestPoint",       "TestPoint:TestPoint_Pad_D1.0mm",       "VBUS",    355.6, 127.0, "VBUS"),
     "#FLG01" : ("power:PWR_FLAG",            "",                                     "PWR_FLAG", 266.7, 228.6, "GND"),
     "H1"     : ("Mechanical:MountingHole",   "MountingHole:MountingHole_3.2mm_M3",   "M3",       38.1, 254.0, None),
     "H2"     : ("Mechanical:MountingHole",   "MountingHole:MountingHole_3.2mm_M3",   "M3",       50.8, 254.0, None),
@@ -271,8 +265,8 @@ def build():
     sch.text("TX AC coupling",                 119.38, 45.72)
     sch.text("ESD (close to J3)",              190.5,  45.72)
     sch.text("USB-C (CC1: TX1/RX1 = Lane 0)",  269.24, 71.12)
-    sch.text("Rd (UFP), VBUS, shield",         345.44, 71.12)
-    sch.text("Test points, power flag",        261.62, 215.9)
+    sch.text("Rd (UFP), VBUS test pad, shield", 345.44, 71.12)
+    sch.text("Power flag",                     261.62, 215.9)
     sch.text("Mounting holes (M3)",             33.02, 241.3)
     return sch.render("Dual SFP to USB-C breakout (USB 3.2 Gen 1x2)")
 

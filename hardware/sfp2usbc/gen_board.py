@@ -6,15 +6,15 @@
 # Copyright (c) 2026 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
-"""Generate the breakout KiCad 7 board (sfp2usbc.kicad_pcb, unrouted) and project (sfp2usbc.kicad_pro)
-from netlist.py/gen_schematic.py: 4-layer board outline, footprints with their nets, placement,
-mounting holes, net classes (90 ohm differential pairs for the lanes) and design rules. The footprints
-are linked to the schematic symbols (Update PCB from Schematic keeps them).
+"""Generate the breakout KiCad 7 board (sfp2usbc.kicad_pcb) and project (sfp2usbc.kicad_pro) from
+netlist.py/gen_schematic.py: 4-layer board outline, footprints with their nets, placement, mounting
+holes, net classes (90 ohm differential pairs for the lanes), design rules and the routing
+(route_board.py: tracks, vias, GND planes/pours, stitching). The footprints are linked to the
+schematic symbols (Update PCB from Schematic keeps them).
 
-The routing is done in KiCad (by hand or with Backplane, README.md: PCB). Run with the KiCad Python
-(pcbnew module):
-  ./gen_board.py
-  ./gen_board.py --drc drc.rpt   # DRC report (unrouted connections expected before the routing).
+Run with the KiCad Python (pcbnew module):
+  ./gen_board.py --drc drc.rpt   # Routed board + DRC report.
+  ./gen_board.py --no-route      # Placement only.
 """
 
 import os
@@ -29,6 +29,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from netlist import COMPONENTS, NETS
 from gen_schematic import PARTS, EXTRA_PARTS, ROOT_UUID, symbol_uuid
 
+import route_board
+
 KICAD_FOOTPRINTS = "/usr/share/kicad/footprints"
 
 # Board --------------------------------------------------------------------------------------------
@@ -39,28 +41,23 @@ X0, Y0 = 100.0, 100.0
 WIDTH  = 78.0
 HEIGHT = 50.0
 
-# ref: (x, y, rotation in degrees) relative to (X0, Y0).
+# ref: (x, y, rotation in degrees[, "bottom"]) relative to (X0, Y0). Lane 1 on the top half, Lane 0
+# on the bottom half (as the USB-C TX2/RX2 and TX1/RX1 pins): the routing has no crossings.
 PLACEMENT = {
-    "J1"  : (43.0, 14.0,   0), # SFP-A cage/connector (Lane 0), front on the left edge.
-    "J2"  : (43.0, 36.0,   0), # SFP-B cage/connector (Lane 1).
-    "C1"  : (49.0, 15.0,   0), # Lane 0 TX AC coupling, on the J1 RD+/RD- pair.
-    "C2"  : (49.0, 17.8,   0),
-    "C3"  : (49.0, 37.0,   0), # Lane 1 TX AC coupling, on the J2 RD+/RD- pair.
-    "C4"  : (49.0, 39.8,   0),
-    "U1"  : (63.0, 18.0,   0), # ESD, close to J3.
-    "U2"  : (63.0, 32.0,   0),
+    "J2"  : (43.0, 14.0,   0), # SFP-B cage/connector (Lane 1), front on the left edge.
+    "J1"  : (43.0, 36.0,   0), # SFP-A cage/connector (Lane 0).
+    "C3"  : (45.5, 15.8,   0), # Lane 1 TX AC coupling, in line with the J2 RD+/RD- pads (staggered).
+    "C4"  : (47.5, 16.6,   0),
+    "C1"  : (45.5, 37.8,   0), # Lane 0 TX AC coupling, in line with the J1 RD+/RD- pads (staggered).
+    "C2"  : (47.5, 38.6,   0),
+    "U2"  : (61.5, 21.0,   0), # ESD (flow-through, left to right), close to J3.
+    "U1"  : (61.5, 29.75,  0),
     "J3"  : (73.0, 25.0,  90), # USB-C, opening on the right edge.
-    "R1"  : (64.5, 22.2,   0), # CC1/CC2 Rd.
-    "R2"  : (64.5, 27.8,   0),
-    "C6"  : (64.5, 25.0,   0), # VBUS.
-    "R3"  : (70.0, 33.2,   0), # Shield.
-    "C5"  : (70.0, 36.0,   0),
-    "TP1" : (51.0, 23.0,   0),
-    "TP2" : (54.0, 23.0,   0),
-    "TP3" : (57.0, 23.0,   0),
-    "TP4" : (51.0, 27.0,   0),
-    "TP5" : (54.0, 27.0,   0),
-    "TP6" : (57.0, 27.0,   0),
+    "R2"  : (64.6, 24.5, 180), # CC2/CC1 Rd (pad 1 on the right: CC).
+    "R1"  : (64.6, 25.75, 180),
+    "R3"  : (70.0, 32.6, 270), # Shield (pad 1 on the top: SHIELD).
+    "C5"  : (71.6, 32.6, 270),
+    "TP1" : (73.0, 25.25,  0, "bottom"), # VBUS test pad, under J3.
     "H1"  : (49.0,  4.0,   0),
     "H2"  : (49.0, 46.0,   0),
     "H3"  : (74.0,  4.0,   0),
@@ -74,15 +71,15 @@ NET_CLASSES = [
     # name,     track, clearance, dp width, dp gap, via diameter, via drill.
     ("Default", 0.20,  0.15,      0.20,     0.25,   0.60,         0.30),
     ("HS_90R",  0.30,  0.15,      0.30,     0.20,   0.60,         0.30),
-    ("Power",   0.40,  0.20,      0.20,     0.25,   0.60,         0.30),
+    ("Power",   0.40,  0.15,      0.20,     0.25,   0.60,         0.30),
 ]
-# Custom rules (sfp2usbc.kicad_dru): HS_90R tracks spaced from the other nets (pads: fine pitch
-# connectors/ESD arrays, net class clearance).
+# Custom rules (sfp2usbc.kicad_dru): HS_90R tracks spaced from the other nets, except the tracks
+# entering the fine pitch footprints (SFP connectors, USB-C, ESD arrays: net class clearance).
 CUSTOM_RULES = """(version 1)
 
 (rule "HS_90R tracks spacing"
-  (condition "A.Type == 'track' && A.NetClass == 'HS_90R' && B.NetClass != 'HS_90R'")
-  (constraint clearance (min 0.3mm)))
+  (condition "A.Type == 'track' && A.NetClass == 'HS_90R' && B.NetClass != 'HS_90R' && !A.intersectsCourtyard('J1') && !A.intersectsCourtyard('J2') && !A.intersectsCourtyard('J3') && !A.intersectsCourtyard('U1') && !A.intersectsCourtyard('U2')")
+  (constraint clearance (min 0.25mm)))
 """
 
 NET_CLASS_PATTERNS = [
@@ -100,7 +97,7 @@ def net_name(name):
 def mm(v):
     return pcbnew.FromMM(v)
 
-def build(board_file):
+def build(board_file, route=True):
     board = pcbnew.BOARD()
     board.SetCopperLayerCount(4)
     board.GetDesignSettings().SetBoardThickness(mm(1.6))
@@ -131,12 +128,14 @@ def build(board_file):
         fp.SetValue(value)
         fp.SetPath(pcbnew.KIID_PATH(f"/{symbol_uuid(ref)}"))
         fp.SetFPIDAsString(footprint)
-        x, y, rot = PLACEMENT[ref]
+        x, y, rot, *side = PLACEMENT[ref]
         fp.SetPosition(pcbnew.VECTOR2I(mm(X0 + x), mm(Y0 + y)))
         fp.SetOrientationDegrees(rot)
-        if ref.startswith("H"):
-            fp.Reference().SetVisible(False) # (Mounting holes near the board edges.)
+        if ref.startswith(("H", "C", "R", "TP")):
+            fp.Reference().SetVisible(False) # (Small parts/holes: references on the fab layer.)
         board.Add(fp)
+        if side == ["bottom"]:
+            fp.Flip(fp.GetPosition(), False) # (After board.Add: layers from the board.)
         for pad in fp.Pads():
             net = pin_net.get((ref, pad.GetNumber()))
             if net is not None:
@@ -162,15 +161,19 @@ def build(board_file):
     tb = board.GetTitleBlock()
     tb.SetTitle("Dual SFP to USB-C breakout (USB 3.2 Gen 1x2)")
     tb.SetCompany("USB3-PIPE")
-    tb.SetComment(0, "Generated by gen_board.py (placement), routing in KiCad.")
+    tb.SetComment(0, "Generated by gen_board.py (placement, routing: route_board.py).")
 
     apply_rules(board)
+    if route:
+        route_board.route(board)
     pcbnew.SaveBoard(board_file, board) # (Also saves the project file.)
     patch_project(os.path.splitext(board_file)[0] + ".kicad_pro")
     with open(os.path.splitext(board_file)[0] + ".kicad_dru", "w") as f:
         f.write(CUSTOM_RULES)
     # Unload the project saved with the board (kept open by KiCad): reloaded with the patterns.
     pcbnew.GetSettingsManager().UnloadProject(board.GetProject(), False)
+    if route:
+        route_board.fill_zones(board_file)
     return board
 
 def apply_rules(board):
@@ -178,11 +181,12 @@ def apply_rules(board):
     ds = board.GetDesignSettings()
     ds.m_MinClearance            = mm(0.127)
     ds.m_TrackMinWidth           = mm(0.127)
-    ds.m_ViasMinSize             = mm(0.45)
+    ds.m_ViasMinSize             = mm(0.35) # (USB-C rows: 0.35/0.2mm vias between the rows.)
     ds.m_MinThroughDrill         = mm(0.2)
+    ds.m_ViasMinAnnularWidth     = mm(0.075)
     ds.m_HoleToHoleMin           = mm(0.25)
     ds.m_HoleClearance           = mm(0.25)
-    ds.m_CopperEdgeClearance     = mm(0.3)
+    ds.m_CopperEdgeClearance     = mm(0.25) # (J3 footprint: 0.298mm between a NPTH and a shell pad.)
     for name, track, clearance, dp_width, dp_gap, via_dia, via_drill in NET_CLASSES:
         nc = ds.m_NetSettings.m_DefaultNetClass if name == "Default" else pcbnew.NETCLASS(name)
         nc.SetTrackWidth(mm(track))
@@ -217,12 +221,13 @@ def drc(board_file, report):
 
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
-    parser = argparse.ArgumentParser(description="Generate the breakout KiCad board (placement, unrouted).")
-    parser.add_argument("--output", default=os.path.join(here, "sfp2usbc.kicad_pcb"))
-    parser.add_argument("--drc",    default=None, help="Write a DRC report.")
+    parser = argparse.ArgumentParser(description="Generate the breakout KiCad board (placement, routing).")
+    parser.add_argument("--output",   default=os.path.join(here, "sfp2usbc.kicad_pcb"))
+    parser.add_argument("--no-route", action="store_true", help="Placement only (unrouted board).")
+    parser.add_argument("--drc",      default=None, help="Write a DRC report.")
     args = parser.parse_args()
 
-    build(args.output)
+    build(args.output, route=not args.no_route)
     print(f"Wrote {args.output}.")
     if args.drc:
         counts = drc(args.output, args.drc)
