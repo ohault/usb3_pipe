@@ -30,6 +30,8 @@ TX2/RX2 and TX1/RX1 pins: no crossings).
 | [check_netlist.py](check_netlist.py) | Checks a KiCad netlist export against netlist.py. |
 | [backplane-brief.md](backplane-brief.md) | Review and fab outputs with Backplane (or in KiCad). |
 | [sfp2usbc-schematic.pdf](sfp2usbc-schematic.pdf), [sfp2usbc-top.png](sfp2usbc-top.png), [sfp2usbc-bottom.png](sfp2usbc-bottom.png) | Previews (schematic, routing on F.Cu/B.Cu without the GND pours). |
+| [3d/gen_models.py](3d/gen_models.py) | 3D models (VRML) of the parts missing from the KiCad 3D library: SFP cage + connector (TE 2227302), USB-C receptacle (Amphenol 12401610E4#2A, no model in KiCad 7). Referenced by the board as `${KIPRJMOD}/3d/*.wrl`. |
+| [sfp2usbc-3d-iso.png](sfp2usbc-3d-iso.png), [sfp2usbc-3d-iso2.png](sfp2usbc-3d-iso2.png), [sfp2usbc-3d-bottom.png](sfp2usbc-3d-bottom.png) | 3D views of the assembled board (KiCad VRML export with the KiCad library and 3d/ models). |
 
 ```sh
 # KiCad 7+ (kicad-cli, pcbnew Python module).
@@ -142,6 +144,9 @@ Generated (gen_board.py + route_board.py), DRC clean (KiCad 7: 0 violations, 0 u
 - **To review in KiCad**: impedance values, return paths (GND planes are solid under all the pairs),
   the J3/SFP footprints vs datasheets, the vias under the J3 body (tented), silkscreen.
 - **Outputs**: Gerbers, drill, IPC netlist, BOM, placement (CPL), fab stackup/impedance notes.
+- **3D**: KiCad 3D viewer (View > 3D Viewer) with the KiCad 3D library (0402, USON-10) and the `3d/`
+  models (approximate shapes: use the manufacturers' STEP files for enclosure work). KiCad 8+:
+  `kicad-cli pcb render` for raytraced images. The previews were made from KiCad 7's VRML export.
 
 ## Bring-up
 

@@ -82,6 +82,13 @@ CUSTOM_RULES = """(version 1)
   (constraint clearance (min 0.25mm)))
 """
 
+# 3D models of the parts missing from the KiCad 3D library (3d/gen_models.py).
+MODELS_3D = {
+    "J1" : "${KIPRJMOD}/3d/SFP_Cage_TE_2227302.wrl",
+    "J2" : "${KIPRJMOD}/3d/SFP_Cage_TE_2227302.wrl",
+    "J3" : "${KIPRJMOD}/3d/USB_C_Receptacle_Amphenol_12401610E4-2A.wrl",
+}
+
 NET_CLASS_PATTERNS = [
     ("HS_90R", "/L*"),
     ("Power",  "/VBUS"),
@@ -131,6 +138,11 @@ def build(board_file, route=True):
         x, y, rot, *side = PLACEMENT[ref]
         fp.SetPosition(pcbnew.VECTOR2I(mm(X0 + x), mm(Y0 + y)))
         fp.SetOrientationDegrees(rot)
+        if ref in MODELS_3D:
+            models = fp.Models()
+            if len(models) == 0:
+                models.push_back(pcbnew.FP_3DMODEL())
+            models[0].m_Filename = MODELS_3D[ref]
         if ref.startswith(("H", "C", "R", "TP")):
             fp.Reference().SetVisible(False) # (Small parts/holes: references on the fab layer.)
         board.Add(fp)
