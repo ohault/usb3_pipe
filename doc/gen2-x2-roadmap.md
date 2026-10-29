@@ -288,7 +288,8 @@ breakout (two SFP cages, both SuperSpeed lane pairs routed to the USB-C connecto
 capable host ([issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140)).
 
 **M0: two-lane link between two boards** (gateware ready, hardware validation to do): the same test
-as `sim.py --lanes 2`, on hardware, without the SuperSpeedPlus Link Layer or a USB host.
+as `sim.py --lanes 2`, on hardware, without the SuperSpeedPlus Link Layer or a USB host. Step by step
+procedure: [gen1x2-hardware-validation.md](gen1x2-hardware-validation.md).
 `bench/acorn.py --lanes 2 --role host|device` builds `USB3PHY(lanes=2)` (Host or Device role) on
 SFP-0 (Lane 0, Configuration Lane) and SFP-1 (Lane 1), Lane 1 on the Lane 0 Quad PLL and TX clock
 (`A7USB3SerDes(pll=, tx_clk=)`: the lanes TX run in lockstep, as required by `USB3PHY(lanes=2)`), with
