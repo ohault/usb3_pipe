@@ -136,6 +136,8 @@ shared host helpers: `bench/common.py`).
 - [doc/debugging-guide.md](doc/debugging-guide.md): hardware debugging (CSRs, trace, LiteScope, soak).
 - [doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md): Gen 2x1 (10Gbps) bring-up milestones and results,
   Gen 1x2 (2x5Gbps)/Gen 2x2 roadmap (Gen 1x2 two boards link test: `bench/acorn.py --lanes 2`).
+- [doc/gen1x2-hardware-validation.md](doc/gen1x2-hardware-validation.md): Gen 1x2 hardware validation
+  procedure (two LiteX Acorn Baseboard Minis, two SFP DAC cables).
 
 [> Credits
 ----------
