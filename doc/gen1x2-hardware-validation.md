@@ -200,9 +200,9 @@ the training failures and restarts the Polling) and the lanes are deskewed again
 
 ## Single Board With a USB 3 Host (SFP2USB Adapter)
 
-One Acorn Mini built with `--lanes 2 --lanes-core`: `USB3PHY(lanes=2)` on SFP-0/SFP-1, not Gen 1x2
-capable, and the USB3 Device Core example design on the Configuration Lane interface
-(`USB3PHYX1Link`): Gen 1x1 with any USB 3 host. The SFP2USB adapter carries a single lane: in SFP-0,
+One Acorn Mini built with `--lanes 2 --lanes-core`: `USB3PHY(lanes=2)` on SFP-0/SFP-1 and the USB3
+Device Core example design (`bench`: `USB3PHYX2Link`, Gen 1x2 capable; a Gen 1x1 host through the
+single lane adapter negotiates Gen 1x1 on the Configuration Lane, SuperSpeed operation). The SFP2USB adapter carries a single lane: in SFP-0,
 the host Configuration Lane is on SFP-0 (`lane_swap: 0`); in SFP-1, the Device detects it from the
 host Polling.LFPS and swaps its lanes (`lane_swap: 1`), as for a flipped plug on the dual SFP to
 USB-C breakout. Simulation: `sim.py --lanes 2 --lanes-core` (`test/test_phy.py` `TestPHYX2Core`).

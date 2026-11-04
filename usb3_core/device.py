@@ -51,9 +51,10 @@ class USB3DeviceCore(LiteXModule):
         # Link Power Management: U1/U2 exit latencies in the BOS.
         if with_lpm:
             descriptors.enable_lpm()
-        # SuperSpeedPlus (Gen 2 capable PHY): SuperSpeedPlus USB Device Capability in the BOS.
-        if hasattr(phy, "gen2_active"):
-            descriptors.enable_ssp()
+        # SuperSpeedPlus (Gen 2 or Gen 1x2 capable PHY): SuperSpeedPlus USB Device Capability in the
+        # BOS (lane speed: 10Gbps Gen 2, 5Gbps Gen 1x2).
+        if hasattr(phy, "gen2_active") or hasattr(phy, "ssp_active"):
+            descriptors.enable_ssp(lane_speed=getattr(phy, "ssp_lane_speed", 10))
 
         # Link Layer (Transfer Types of the endpoints for SuperSpeedPlus operation).
         ssp_tt = {0: TT_CONTROL}

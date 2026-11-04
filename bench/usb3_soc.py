@@ -31,7 +31,7 @@ from litex.soc.integration.builder import *
 
 from litescope import LiteScopeAnalyzer
 
-from usb3_pipe.phy   import USB3PHY, USB3PHYX1Link
+from usb3_pipe.phy   import USB3PHY, USB3PHYX1Link, USB3PHYX2Link
 from usb3_pipe.prbs  import PRBSLinkTester
 from usb3_pipe.debug import USB3PHYDebug, USB3LanesDebug, USB3SerDesDebug
 from usb3_pipe.debug import usb3_analyzer_groups, USB3_ANALYZER_GROUPS
@@ -476,15 +476,19 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     boards (one in each role, as sim.py --lanes 2), not with a USB host. x2_capable=False: Gen 1x1
     negotiated with the partner (single lane fallback on Lane 0, as sim.py --dev-mode x1).
 
-    with_core (Device role): USB3 Device Core example design on the Lane 0 interface
-    (USB3PHYX1Link, soc.usb3_link) instead of the PRBS stand-ins, the PHY not x2 capable: Gen 1x1 with
-    any USB 3 host through a dual SFP to USB-C breakout, Configuration Lane (plug orientation)
-    detected (as sim.py --lanes 2 --lanes-core). LEDs: SerDes ready, U0, lanes swapped."""
+    with_core (Device role): USB3 Device Core example design instead of the PRBS stand-ins, through a
+    dual SFP to USB-C breakout, Configuration Lane (plug orientation) detected (as sim.py --lanes 2
+    --lanes-core), soc.usb3_link:
+    - examples with 64-bit endpoints (loopback, wishbone, bench): USB3PHYX2Link, SuperSpeedPlus at
+      Gen 1x2 with a Gen 1x2 host, SuperSpeed at Gen 1x1 otherwise.
+    - other examples (32-bit endpoints): USB3PHYX1Link, the PHY not x2 capable: Gen 1x1.
+    LEDs: SerDes ready, U0, lanes swapped."""
     sys_clk_freq = soc.sys_clk_freq
     assert len(serdes) == 2
     assert (not with_core) or (role == "device")
-    if with_core:
-        x2_capable = False # Gen 1 Link Layer: Gen 1x1 only.
+    lanes_x2 = with_core and (example in ["loopback", "wishbone", "bench"])
+    if with_core and not lanes_x2:
+        x2_capable = False # Gen 1 Link Layer on 32-bit words: Gen 1x1 only.
 
     # USB3 SerDes ----------------------------------------------------------------------------------
     soc.usb3_serdes  = serdes[0]
@@ -507,7 +511,10 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
 
     if with_core:
         # USB3 Device Core on the Lane 0 interface ---------------------------------------------------
-        soc.usb3_link = usb3_link = USB3PHYX1Link(usb3_phy)
+        if lanes_x2:
+            soc.usb3_link = usb3_link = USB3PHYX2Link(usb3_phy)
+        else:
+            soc.usb3_link = usb3_link = USB3PHYX1Link(usb3_phy)
         add_usb3_example(soc, usb3_link, sys_clk_freq, example=example, with_lpm=with_lpm,
             max_burst=max_burst)
     else:

@@ -220,7 +220,7 @@ def main():
     x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2, SFP-0/SFP-1, Mini only).", choices=[1, 2])
     x2_group.add_argument("--role",       default="device",    help="USB3PHY role with --lanes 2 (one board in each role).", choices=["device", "host"])
     x2_group.add_argument("--no-x2",      action="store_true", help="--lanes 2: not Gen 1x2 capable (Gen 1x1 negotiated: single lane fallback on SFP-0).")
-    x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2 Device: USB3 Device Core (--example) on the Configuration Lane (Gen 1x1 with a USB 3 host through a dual SFP to USB-C breakout) instead of the PRBS stand-ins.")
+    x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2 Device: USB3 Device Core (--example) through a dual SFP to USB-C breakout instead of the PRBS stand-ins: Gen 1x2 (SuperSpeedPlus) with loopback/wishbone/bench, Gen 1x1 otherwise.")
     args = parser.parse_args()
 
     # Gen 1x2: two SFPs (Mini), PHY + PRBS Link-Layer stand-ins only (no SuperSpeedPlus Link Layer).
