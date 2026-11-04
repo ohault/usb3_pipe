@@ -125,8 +125,9 @@ LANES_CORE_EXAMPLES = [e for e in USB3_EXAMPLES if e not in CPU_EXAMPLES + DRAM_
 
 @pytest.mark.parametrize("example", LANES_CORE_EXAMPLES)
 def test_target_lanes_core(example, tmp_path):
-    # Acorn Mini, Gen 1x2 PHY with the USB3 Device Core on the Lane 0 interface (USB3PHYX1Link, Gen
-    # 1x1 through a dual SFP to USB-C breakout): the core CSRs, no PRBS stand-ins, both lanes.
+    # Acorn Mini, Gen 1x2 PHY with the USB3 Device Core (USB3PHYX2Link: Gen 1x2 with the 64-bit
+    # endpoints examples, USB3PHYX1Link: Gen 1x1 otherwise): the core CSRs, no PRBS stand-ins, both
+    # lanes.
     csr = elaborate("acorn", tmp_path, ["--lanes", "2", "--lanes-core", "--example", example])
     assert "usb3_lanes_debug_status" in csr
     assert "usb3_prbs" not in csr

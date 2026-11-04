@@ -28,7 +28,8 @@ from usb3_pipe.lfps import (LFPSRXFrontEnd, SCDGenerator, SCDChecker, LBPMGenera
 #   U3 p224, Compliance p218-219, Loopback p229-232, Hot Reset p233-235, Recovery p226-229,
 #   SS.Inactive p191 (Table 7-12 timeouts).
 # - Section 7.2.4.2 (Link Power Management, PDF p173-177): LGO_Ux/LAU/LXU/LPMA handshake and
-#   PM_LC_TIMER (4us) / PM_ENTRY_TIMER (8us) / Ux_EXIT_TIMER (6ms) / U1_MIN_RESIDENCY (3us).
+#   PM_LC_TIMER (4us, x2: 8us) / PM_ENTRY_TIMER (8us, x2: 16us) / Ux_EXIT_TIMER (6ms) /
+#   U1_MIN_RESIDENCY (3us).
 # - Section 6.9   (LFPS, PDF p130-134): Table 6-30 patterns, Table 6-31 handshake timings.
 # Simplifications:
 # - Rx.Detect family is not modelled (Polling.ExitToRxDetect is a transient state towards
@@ -114,6 +115,7 @@ class USB3LTSSM(LiteXModule):
         # PortConfig) instead of the SuperSpeed Polling.LFPS handshake: ssp_done exits to
         # Polling.RxEQ, ssp_fallback (SuperSpeed partner) after 4 Polling.LFPS bursts sent.
         self.ssp_polling  = Signal() # o
+        self.x2           = Signal() # i: Gen 1x2 operation (x2 timers values, Table 7-8).
         self.ssp_done     = Signal() # i
         self.ssp_fallback = Signal() # i
 
@@ -159,10 +161,26 @@ class USB3LTSSM(LiteXModule):
         self.t_hot_reset_exit = t_hot_reset_exit = WaitTimer(scaled(2e-3))
         # Ux_EXIT_TIMER (6ms, 7.2.4.2.1).
         self.t_ux_exit = t_ux_exit = WaitTimer(scaled(6e-3))
-        # PM_LC_TIMER (4us, 7.2.4.2.3).
+        # PM_LC_TIMER (4us, 8us in x2 operation, 7.2.4.2.3, Table 7-8).
         self.t_pm_lc = t_pm_lc = WaitTimer(scaled(4e-6))
-        # PM_ENTRY_TIMER (8us, 7.2.4.2.3).
+        # PM_ENTRY_TIMER (8us, 16us in x2 operation, 7.2.4.2.3, Table 7-8).
         self.t_pm_entry = t_pm_entry = WaitTimer(scaled(8e-6))
+        pm_lc_done    = Signal()
+        pm_entry_done = Signal()
+        if ssp:
+            self.t_pm_lc_x2    = t_pm_lc_x2    = WaitTimer(scaled(8e-6))
+            self.t_pm_entry_x2 = t_pm_entry_x2 = WaitTimer(scaled(16e-6))
+            self.comb += [
+                t_pm_lc_x2.wait.eq(t_pm_lc.wait),
+                t_pm_entry_x2.wait.eq(t_pm_entry.wait),
+                pm_lc_done.eq(Mux(self.x2, t_pm_lc_x2.done, t_pm_lc.done)),
+                pm_entry_done.eq(Mux(self.x2, t_pm_entry_x2.done, t_pm_entry.done)),
+            ]
+        else:
+            self.comb += [
+                pm_lc_done.eq(t_pm_lc.done),
+                pm_entry_done.eq(t_pm_entry.done),
+            ]
         # teSSInactiveQuietTimeout (12ms, eSS.Inactive).
         self.t_ess_quiet = t_ess_quiet = WaitTimer(scaled(12e-3))
         # tU3WakeupRetryDelay (100ms, 7.2.4.2.7).
@@ -642,7 +660,7 @@ class USB3LTSSM(LiteXModule):
                         NextValue(pm_conc_kind, 0),
                         NextValue(pm_lau_fire, 1)
                     )
-                ).Elif(t_pm_lc.done,
+                ).Elif(pm_lc_done,
                     # PM_LC_TIMER timeout -> Recovery (7.2.4.2.3). U3 entry (pm_kind==3)
                     # counts consecutive failures: the 3rd strike -> eSS.Inactive
                     # (7.2.4.2.4) instead of another Recovery round trip.
@@ -660,7 +678,7 @@ class USB3LTSSM(LiteXModule):
             ).Elif(pm_acc_kind != 0,
                 # Acceptor resolution: enter Ux on LPMA reception or on PM_ENTRY_TIMER timeout with
                 # no LPMA and no TS1 (7.2.4.2.3).
-                If(t_pm_entry.done | self.lpma,
+                If(pm_entry_done | self.lpma,
                     NextValue(pm_acc_kind, 0),
                     *goto_ux(pm_acc_kind)
                 ).Elif(self.ts_rx_ts1,

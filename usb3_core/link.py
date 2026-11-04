@@ -10,7 +10,7 @@
 - Header Packets flow control (7.2.4.1): Header Sequence Numbers, Rx/Tx Header Buffers and credits
   (LGOOD_n/LCRD_x), LBAD/LRTY retries, Header Sequence Number/Rx Header Buffer Credit
   Advertisements on each U0 entry (link state kept across Recovery).
-- SuperSpeedPlus operation (phy.gen2_active, Gen 2x1, 7.2.4.1): 4-bit Header Sequence Numbers,
+- SuperSpeedPlus operation (phy.ssp_active: Gen 1x2, or phy.gen2_active: Gen 2x1, 7.2.4.1): 4-bit Header Sequence Numbers,
   Type 1/Type 2 Rx Header Buffer Credits (LCRD1_x/LCRD2_x, 4 each), Type 2: asynchronous DPs (TT:
   Control/Bulk), Transfer Type (TT) set in the transmitted ACK TPs/DPHs (ssp_tt: {ept: TT}).
 - Timers: PENDING_HP_TIMER (10us), CREDIT_HP_TIMER (Recovery on timeout), U0 LUP keep-alive.
@@ -88,14 +88,15 @@ class USB3LinkLayer(LiteXModule):
             return max(int(t*sys_clk_freq/timer_scale), 2)
 
         # SuperSpeed/SuperSpeedPlus operation ------------------------------------------------------
-        # SuperSpeedPlus (Gen 2x1) when the PHY operates at Gen 2: 4-bit Header Sequence Numbers
-        # (masked to 3 bits in SuperSpeed operation), Type 1/Type 2 credits.
-        ssp_capable = hasattr(phy, "gen2_active")
+        # SuperSpeedPlus when the PHY operates at Gen 1x2 (ssp_active) or Gen 2 (gen2_active): 4-bit
+        # Header Sequence Numbers (masked to 3 bits in SuperSpeed operation), Type 1/Type 2 credits.
+        ssp_active  = getattr(phy, "ssp_active", getattr(phy, "gen2_active", None))
+        ssp_capable = ssp_active is not None
         sw          = 4 if ssp_capable else 3 # Header Sequence Numbers width.
         ssp         = Signal()
         seq_mask    = Signal(sw)
         self.comb += [
-            ssp.eq(phy.gen2_active if ssp_capable else 0),
+            ssp.eq(ssp_active if ssp_capable else 0),
             seq_mask.eq(Mux(ssp, 0xf, 0x7)),
         ]
         def is_type2(dw0, dw1):

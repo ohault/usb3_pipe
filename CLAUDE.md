@@ -34,13 +34,14 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
 - Done in simulation (`sim.py --lanes 2`, `test/test_phy.py` `TestPHYX2`): Gen 1x2 to U0 with PRBS
   Link-Layer stand-ins, TX lanes lockstep (Logical Idle striped), single lane fallback (Gen 1x1 on
   Lane 0, `sink_x1`/`source_x1`), SuperSpeed partner fallback, lanes swap (Configuration Lane
-  detection, `--lanes-crossed`), deskew on the first COM words after a gap, Gen 1 Device Core on the
-  Configuration Lane (`USB3PHYX1Link`, `sim.py --lanes 2 --lanes-core`, `bench/acorn.py --lanes 2
-  --lanes-core`).
+  detection, `--lanes-crossed`), deskew on the first COM words after a gap, SuperSpeedPlus Link
+  Layer/Device Core at Gen 1x2 (`USB3PHYX2Link`, `sim.py --lanes 2 --lanes-core`, `TestPHYX2Core`;
+  `bench/acorn.py --lanes 2 --lanes-core`), Gen 1x1 fallback on the Configuration Lane.
 - Next: hardware validation on two Acorn Minis with two SFP DAC cables
   ([doc/gen1x2-hardware-validation.md](doc/gen1x2-hardware-validation.md)), the Device Core build
-  with a USB 3 host through the breakout (once built), then the SuperSpeedPlus Link Layer on the x2
-  datapath ([doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md)).
+  with a USB 3 host through the SFP2USB adapter/the breakout, then a Gen 1x2 host
+  ([doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md): framing re-alignment for any host packet
+  placement, throughput).
 
 ## Environment Notes (Claude Code cloud sessions)
 

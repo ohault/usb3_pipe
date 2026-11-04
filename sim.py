@@ -27,7 +27,8 @@ from litex.soc.cores.code_8b10b import Encoder, Decoder
 
 from usb3_pipe.common   import SKP
 from usb3_pipe.datapath import TXDatapath, RXDatapath, RXErrorMonitor
-from usb3_pipe.phy      import USB3PHY, USB3PHYX1Link
+from usb3_pipe.phy      import USB3PHY, USB3PHYX2Link
+from usb3_pipe.framing  import WordsToPairs, PairsToWords
 from usb3_pipe.prbs     import PRBSPacketGenerator, PRBSPacketChecker
 from usb3_core.host_model import USB3HostModel, enumeration_script
 from usb3_core.common      import endpoint_layout
@@ -290,9 +291,10 @@ class USB3PIPESim(SoCMini):
                         the model).
     - lanes_crossed:    Host Lane i on the Device SerDes 1 - i (flipped USB Type-C plug): the Device
                         detects the Configuration Lane (lane_swap) from the Host Polling.LFPS.
-    - with_core:        Host script on the Host USB3PHYX1Link (Lane 0 interface), Device Core on the
-                        Device USB3PHYX1Link (dev_mode x1) or USB3PHY (dev_mode ss): Gen 1x1 on
-                        Lane 0, enumeration and Bulk transfers (no extra lane SKP).
+    - with_core:        Host script/Device Core on the USB3PHYX2Link of the PHYs (words pairs, 64-bit
+                        Device endpoints): SuperSpeedPlus at Gen 1x2 (dev_mode x2), SuperSpeed at
+                        Gen 1x1 on Lane 0 (dev_mode x1, or ss: Device USB3PHY(lanes=1)), enumeration
+                        and Bulk transfers (no extra lane SKP).
     - dev_mode:         Device x2 (Gen 1x2), x1 (two lanes, not x2 capable: Gen 1x1 negotiated, single
                         lane fallback on Lane 0) or ss (Gen 1x1 SuperSpeed Device on Lane 0, no
                         SuperSpeedPlus Polling: SuperSpeed fallback of the Host).
@@ -322,11 +324,11 @@ class USB3PIPESim(SoCMini):
         assert dev_mode in ["x2", "x1", "ss"]
         assert (lanes == 2) or (dev_mode == "x2")
         if with_core and (lanes == 2):
-            # Gen 1x2 PHYs with the Gen 1 Host script/Device Core (no SuperSpeedPlus Link Layer on the
-            # x2 datapath yet): Gen 1x1 on Lane 0 (Device not x2 capable, or SuperSpeed Device), the
-            # Host script on the Host USB3PHYX1Link, its SKP Ordered Sets only (no extra lane SKP).
-            assert dev_mode != "x2", "--lanes 2 with the Device Core: --dev-mode x1 or ss."
+            # Gen 1x2 PHYs with the Host script/Device Core on their USB3PHYX2Link (words pairs):
+            # SuperSpeedPlus at Gen 1x2 (dev_mode x2), SuperSpeed at Gen 1x1 on Lane 0 (x1/ss). No
+            # extra lane SKP Ordered Sets (the Host script SKP Ordered Sets on Lane 0 in Gen 1x1 only).
             lane_skp = 0
+        ssp_x2 = with_core and (lanes == 2) and (dev_mode == "x2") # SuperSpeedPlus at Gen 1x2.
         x1 = (lanes == 2) and (dev_mode != "x2") # Gen 1x1 negotiated by the Gen 1x2 Host.
         assert (not dev_pipe_cd) or ((lanes == 1) and (not gen2_capable))
         sys_clk_freq = int(133e6)
@@ -404,11 +406,12 @@ class USB3PIPESim(SoCMini):
                     self.add_module(name=f"{name}_usb3_serdes{lane}", module=serdes[lane])
             self.add_module(name=f"{name}_usb3_phy",    module=phy)
             ltssm = phy.ltssm
-            # Gen 1 Link Layer (Host script/Device Core) on a Gen 1x2 PHY: its Lane 0 interface.
+            # Link Layer (Host script/Device Core) on a Gen 1x2 PHY: words pairs (USB3PHYX2Link), the
+            # Host script RX buffer for Device bursts (DPPs at two words per cycle, the script takes one).
             link_phy = phy
             if with_core and (lanes_n == 2):
-                link_phy = renamer(USB3PHYX1Link(phy))
-                self.add_module(name=f"{name}_usb3_phy_x1", module=link_phy)
+                link_phy = renamer(USB3PHYX2Link(phy, rx_buffer_depth={"host": 4096, "dev": 64}[name]))
+                self.add_module(name=f"{name}_usb3_phy_x2", module=link_phy)
             if lanes_n == 1:
                 # Inverse TX polarity to test RX auto-polarity.
                 self.comb += serdes[0].tx_polarity.eq(1)
@@ -419,16 +422,29 @@ class USB3PIPESim(SoCMini):
                 # Scripted host Link/Protocol Layer (link initialization, enumeration).
                 # Gen 2: no Gen 1 SKP Ordered Sets/packets offsets in the script (Gen 2 SKP Ordered
                 # Sets by the Gen2TX, packets re-aligned by the Gen 2 framing).
-                host_model = renamer(USB3HostModel(enumeration_script(skp=host_skp and not gen2, latency=host_latency,
-                    status_gap=host_status_gap, pm=host_pm, lpm=host_lpm, ssp=gen2, itp=host_itp).steps))
+                host_model = renamer(USB3HostModel(enumeration_script(skp=host_skp and not (gen2 or ssp_x2),
+                    latency=host_latency, status_gap=host_status_gap, pm=host_pm, lpm=host_lpm,
+                    ssp=gen2 or ssp_x2, itp=host_itp).steps))
                 self.add_module(name="host_model", module=host_model)
+                host_sink, host_source = link_phy.sink, link_phy.source
+                if getattr(link_phy, "link_words", 1) == 2:
+                    # Script words <-> words pairs.
+                    host_pairs = renamer(WordsToPairs())
+                    host_words = renamer(PairsToWords())
+                    self.add_module(name="host_pairs", module=host_pairs)
+                    self.add_module(name="host_words", module=host_words)
+                    self.comb += [
+                        host_pairs.source.connect(link_phy.sink),
+                        link_phy.source.connect(host_words.sink),
+                    ]
+                    host_sink, host_source = host_pairs.sink, host_words.source
                 # Script running in U0, kept running through U1/U2 and the Recovery to U0 that follows.
                 host_ux = Signal()
                 sync    = getattr(self.sync, cds[name])
                 sync   += If(ltssm.u1 | ltssm.u2, host_ux.eq(1)).Elif(ltssm.u0, host_ux.eq(0))
                 self.comb += [
-                    link_phy.source.connect(host_model.sink),
-                    host_model.source.connect(link_phy.sink),
+                    host_source.connect(host_model.sink),
+                    host_model.source.connect(host_sink),
                     host_model.enable.eq(ltssm.u0 | ltssm.u1 | ltssm.u2 | host_ux),
                     host_model.u0.eq(ltssm.u0),
                     ltssm.req_u1.eq(host_model.pm[0]),
@@ -440,7 +456,7 @@ class USB3PIPESim(SoCMini):
                 ]
             elif with_core:
                 # USB3 Device Core, Bulk loopback: EP2 OUT -> EP1 IN.
-                dw   = 32*link_words
+                dw   = 32*getattr(link_phy, "link_words", link_words)
                 core = renamer(USB3DeviceCore(link_phy, link_clk_freq,
                     descriptors = bulk_descriptors(max_burst=8),
                     endpoints   = [
@@ -632,7 +648,7 @@ def main():
     parser.add_argument("--trace-end",     default=-1,          help="Cycle to end VCD tracing.")
     parser.add_argument("--timer-scale",   default=1,           help="LTSSM/LFPS timers scale factor (1 = spec exact).")
     parser.add_argument("--no-core",       action="store_true", help="Replace the USB3 Core with PRBS Link-Layer stand-ins.")
-    parser.add_argument("--lanes-core",    action="store_true", help="--lanes 2: Host script/USB3 Device Core (Gen 1x1 on Lane 0, --dev-mode x1 or ss) instead of the PRBS stand-ins.")
+    parser.add_argument("--lanes-core",    action="store_true", help="--lanes 2: Host script/USB3 Device Core (SuperSpeedPlus at Gen 1x2, or Gen 1x1 with --dev-mode x1/ss) instead of the PRBS stand-ins.")
     parser.add_argument("--prbs-words",    default=None,        help="Words to check on both sides (with --no-core, default: 2^16, 2^14 with --lanes 2).")
     parser.add_argument("--rx-word-shift", default=0,           help="SerDes models RX shift (0-3 symbols).")
     parser.add_argument("--ppm",           default=0,           help="Device clock offset vs Host clock (ppm).")

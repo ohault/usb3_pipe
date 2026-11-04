@@ -103,8 +103,8 @@ the fastest way to check what a target or an option really produces.
 - CPU examples (`console`, `composite`) need `--cpu-type vexriscv`, and the RISC-V gcc for a full
   build; `msc_dram` is Acorn only; `--link-words 2` applies to `loopback`/`bench`.
 - Gen 2 (10Gbps) needs UltraScale+ GTY; `--lanes 2` is Acorn Mini only: PRBS Link-Layer stand-ins
-  (two boards link tests), or `--lanes-core` (Device Core at Gen 1x1 on the Configuration Lane, no
-  SuperSpeedPlus Link Layer on the x2 datapath yet).
+  (two boards link tests), or `--lanes-core` (Device Core: SuperSpeedPlus at Gen 1x2 with the
+  64-bit endpoints examples, `USB3PHYX2Link`; Gen 1x1 otherwise).
 
 ## Contribute back
 

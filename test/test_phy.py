@@ -168,8 +168,8 @@ CONFIGS_SLOW = {
 }
 
 class TestPHYX2Core(unittest.TestCase):
-    """Gen 1x2 PHYs with the Gen 1 Host script/Device Core (sim.py --lanes 2 --lanes-core): Gen 1x1
-    on Lane 0 (USB3PHYX1Link), enumeration and Bulk loopback."""
+    """Gen 1x2 PHYs with the Host script/Device Core on USB3PHYX2Link (sim.py --lanes 2 --lanes-core):
+    SuperSpeedPlus at Gen 1x2, or Gen 1x1 on Lane 0, enumeration and Bulk loopback."""
     def run_sim(self, name, args):
         cmd = [sys.executable, str(ROOT / "sim.py"), "--lanes", "2", "--lanes-core",
             "--output-dir", str(get_output_dir(self, name))] + args
@@ -186,6 +186,25 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertRegex(out, r"HOST\s*entering U0 state", tail)
         self.assertRegex(out, r"DEV\s*entering U0 state", tail)
         return out
+
+    def test_core_x2(self):
+        # Gen 1x2: SuperSpeedPlus Link Layer (4-bit HSEQ, Type 1/Type 2 credits) on the striped lanes,
+        # 64-bit Device endpoints.
+        out = self.run_sim("core_x2", ["--dev-mode", "x2"])
+        self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 1, gen2: 0\)")
+        self.assertRegex(out, r"DEV\s*lanes deskewed")
+
+    def test_core_x2_crossed(self):
+        # Gen 1x2 with a flipped USB Type-C plug (lanes swap).
+        out = self.run_sim("core_x2_crossed", ["--dev-mode", "x2", "--lanes-crossed"])
+        self.assertRegex(out, r"DEV\s*lanes swap: 1")
+        self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 1, gen2: 0\)")
+
+    @pytest.mark.slow
+    def test_core_x2_lpm(self):
+        # Gen 1x2: U1/U2 entries/exits (x2 PM timers) and Recovery to U0.
+        out = self.run_sim("core_x2_lpm", ["--dev-mode", "x2", "--host-lpm"])
+        self.assertRegex(out, r"DEV\s*entering U2 state")
 
     def test_core_x1(self):
         # Device USB3PHY(lanes=2) not x2 capable: Gen 1x1 negotiated, Device Core on Lane 0.
