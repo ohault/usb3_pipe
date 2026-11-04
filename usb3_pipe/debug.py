@@ -183,9 +183,12 @@ class USB3LanesDebug(LiteXModule):
     - Status: negotiated x2/gen2, lanes deskewed/swapped, per lane SerDes ready/RX idle/RX polarity.
     - Per lane event counters (TS1/TS1 inverted/TS2 detections, RX errors cycles) and deskew
       acquisitions.
+    - With link (USB3PHYX2Link): RX buffer overflow status (since the last clear) and dropped
+      entries counter (Gen 1x2 RX: the Link Layer did not consume the words fast enough).
     """
-    def __init__(self, phy, serdes):
+    def __init__(self, phy, serdes, link=None):
         assert len(serdes) == 2
+        with_rx_drop = hasattr(link, "rx_drop")
         self._clear  = CSR() # Clear counters (write).
         self._status = CSRStatus(fields=[
             CSRField("x2",             size=1, offset=0, description="Gen 1x2 negotiated (SuperSpeedPlus Polling)."),
@@ -195,6 +198,7 @@ class USB3LanesDebug(LiteXModule):
             CSRField("ready",          size=2, offset=4, description="SerDes ready (per lane)."),
             CSRField("rx_idle",        size=2, offset=6, description="SerDes RX idle (per lane)."),
             CSRField("rx_polarity",    size=2, offset=8, description="SerDes RX polarity (per lane)."),
+            CSRField("rx_overflow",    size=1, offset=10, description="Link RX buffer overflow since the last clear (USB3PHYX2Link, 0 without)."),
         ])
 
         # # #
@@ -211,6 +215,8 @@ class USB3LanesDebug(LiteXModule):
 
         # Event Counters.
         events = [("deskew", phy.deskew_aligned, 1)]
+        if with_rx_drop:
+            events += [("rx_drop", link.rx_drop, 0)] # Dropped RX buffer entries.
         for lane, (pipe, s) in enumerate(zip(phy.pipes, serdes)):
             events += [
                 # Name,                          Signal,             Edge (1) or Level (0).
@@ -231,6 +237,8 @@ class USB3LanesDebug(LiteXModule):
             ).Elif(event & (csr.status != (2**32 - 1)),
                 csr.status.eq(csr.status + 1)
             )
+            if name == "rx_drop":
+                self.comb += self._status.fields.rx_overflow.eq(csr.status != 0)
 
 # USB3 RX Errors Debug -----------------------------------------------------------------------------
 
