@@ -46,6 +46,10 @@ class USB3LanesClient:
     def reg(self, name):
         return getattr(self.bus.regs, name)
 
+    def has_prbs(self):
+        # PRBS Link-Layer stand-ins (not in the --lanes-core builds: USB3 Device Core instead).
+        return hasattr(self.bus.regs, "usb3_prbs_control")
+
     def prbs(self):
         return {name: self.reg(f"usb3_prbs_{name}").read() for name in PRBS_COUNTERS}
 
@@ -66,7 +70,8 @@ class USB3LanesClient:
             "recovery_count" : dbg["recovery"],
         }
         r.update({name: self.reg(f"usb3_lanes_debug_{name}_count").read() for name in LANES_COUNTERS})
-        r.update({f"prbs_{k}": v for k, v in self.prbs().items()})
+        if self.has_prbs():
+            r.update({f"prbs_{k}": v for k, v in self.prbs().items()})
         return r
 
     def clear(self):
@@ -119,6 +124,8 @@ def main():
                 time.sleep(args.period)
         except KeyboardInterrupt:
             pass
+    elif args.command.startswith("prbs") and not lanes.has_prbs():
+        raise SystemExit("No PRBS Link-Layer stand-ins in this build (--lanes-core: USB3 Device Core).")
     elif args.command == "prbs":
         # PRBS packets rate/errors from the counters differences (polled faster than the 32-bit
         # counters wrap: ~34s for the words at 125M words/s).

@@ -20,6 +20,12 @@ What is validated:
 - Single lane fallback (Gen 1x1 negotiated) with a board built without the x2 capability.
 - LFPS/electrical idle through the SFP DAC cables, and the Host role (first time on hardware).
 
+A second, single board test runs the USB3 Device Core on the Gen 1x2 PHY with a USB 3 host through
+the single lane SFP2USB adapter ([Single Board With a USB 3 Host](#single-board-with-a-usb-3-host-sfp2usb-adapter)):
+enumeration and transfers at Gen 1x1, with the host Configuration Lane on SFP-0 and then on SFP-1
+(lanes swap), as with the dual SFP to USB-C breakout in both plug orientations. It needs only one
+board and no DAC cable, and can be run first.
+
 ## Hardware
 
 - 2x LiteX Acorn Baseboard Mini, each with a SQRL Acorn CLE-215+ (Artix7 GTP) in the M.2 socket.
@@ -192,12 +198,69 @@ half the Gen 1x2 rate). With crossed cables (step 4), the same on the Device SFP
 Unplug and replug a DAC cable: the link leaves U0, then retrains (the LTSSM exits to Rx.Detect on
 the training failures and restarts the Polling) and the lanes are deskewed again.
 
-## Report
+## Single Board With a USB 3 Host (SFP2USB Adapter)
+
+One Acorn Mini built with `--lanes 2 --lanes-core`: `USB3PHY(lanes=2)` on SFP-0/SFP-1, not Gen 1x2
+capable, and the USB3 Device Core example design on the Configuration Lane interface
+(`USB3PHYX1Link`): Gen 1x1 with any USB 3 host. The SFP2USB adapter carries a single lane: in SFP-0,
+the host Configuration Lane is on SFP-0 (`lane_swap: 0`); in SFP-1, the Device detects it from the
+host Polling.LFPS and swaps its lanes (`lane_swap: 1`), as for a flipped plug on the dual SFP to
+USB-C breakout. Simulation: `sim.py --lanes 2 --lanes-core` (`test/test_phy.py` `TestPHYX2Core`).
+
+Hardware: one Acorn Mini (power, J7 to the PC, J10 Pico-EZmate as above), the SFP2USB adapter and a
+USB 3 cable to the host (xHCI, Linux: `bench/99-usb3-pipe.rules` for user access to the vendor
+class examples). The device is `1d50:605a`.
+
+### Build and load
+
+```sh
+./bench/acorn.py --lanes 2 --lanes-core --example bench --with-jtagbone --output-dir build/acorn_x1_bench --build --load
+litex_server --jtag --jtag-config openocd.cfg --jtag-port 20040 --bind-port 1240 # OpenOCD config: see above.
+B="--port 1240 --csr-csv build/acorn_x1_bench/csr.csv"
+```
+
+With a single FT4232H connected, `--load` and the default OpenOCD config can be used; select the
+board by its USB location as above when the other board is also connected. Other examples:
+`--example loopback` (`bench/usb3_bulk.py loopback`), `cdc_uartbone`, `uvc`... (the examples
+without CPU/DRAM). LEDs: SerDes ready, U0, lanes swapped.
+
+### 7. SFP2USB in SFP-0 (no lanes swap)
+
+```sh
+lsusb -d 1d50:605a -v | grep -i bcdUSB                          # Enumerated (USB 3).
+lsusb -t                                                         # 5000M.
+./bench/usb3_lanes.py $B status                                  # U0, x2: 0, lane_swap: 0.
+./bench/usb3_bench.py in   --duration 30                         # IN data checked.
+./bench/usb3_bench.py out  --duration 30 $B                      # OUT, device checker errors.
+./bench/usb3_bench.py both --duration 60 $B
+```
+
+Pass: enumerated at 5000M, `ltssm_state` U0, `x2: 0`, `lane_swap: 0`, `rx_idle: [0, 1]` (SFP-1
+without signal), no IN/OUT data errors, `recovery_count` stable; rates in the range of the Gen 1x1
+Acorn build ([examples.md](examples.md): ~450MB/s IN/OUT).
+
+### 8. SFP2USB in SFP-1 (lanes swap)
+
+Unplug the USB cable, move the SFP2USB adapter to SFP-1, plug the USB cable (the PHY retrains:
+Polling from Rx.Detect, or `./bench/usb3_lanes.py $B retrain --wait 2`), then the same commands as
+step 7.
+
+Pass: the same results with `lane_swap: 1` (third LED on) and `rx_idle: [1, 0]`; moved back to SFP-0:
+`lane_swap: 0` again.
+
+### 9. Host reconnections (optional)
+
+Unplug/replug the USB cable and the adapter a few times in both cages (`./bench/usb3_lanes.py $B
+watch` running), suspend/resume or unbind/bind the device on the host: enumerated again each time,
+with the lanes swap following the adapter cage.
+
 
 Results to report (in [issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140) or with the
 branch), per test and per board:
 - `status` JSON (LTSSM state, x2, deskew/lanes swap, per lane ready/RX idle/RX polarity, counters).
 - `prbs` final JSON (rates, errors, recoveries).
+- Single board: `lsusb -t` line of the device, `status` JSON, `usb3_bench.py` results, host
+  controller (`lspci`), SFP2USB cage.
 - On a failure: `retrain` output (LTSSM state history), per lane counters (`lane0/1_ts1`,
   `ts1_inv`, `ts2`, `rx_errors_cycles`, `deskew`), DAC cables references/lengths.
 
@@ -212,11 +275,13 @@ branch), per test and per board:
 | U0 but `deskew_aligned: 0`, or PRBS errors in one direction only | `retrain` output of both boards (history), `deskew` counter. |
 | PRBS errors increasing slowly | `rx_errors_cycles` per lane (link quality), `recovery_count`, cable length. |
 | `lane_swap: 1` with straight cables | Cables swapped (SFP-0/SFP-1 cages). |
+| Single board: not enumerated, U0 not reached | `status`/`retrain` history, the same SFP2USB/host/cable with the Gen 1x1 build (`bench/acorn.py` without `--lanes`) for a reference. |
+| Single board: enumerated in one cage only | `lane_swap` and `rx_idle` per cage, `retrain` history in the failing cage. |
 
 ## References
 
 - [gen2-x2-roadmap.md](gen2-x2-roadmap.md): Gen 1x2 PHY (`USB3PHY(lanes=2)`), simulation coverage,
   hardware milestones.
 - [debugging-guide.md](debugging-guide.md): JTAG/`litex_server` setup, CSRs, LiteScope.
-- `bench/acorn.py` (`--lanes 2`, `--role`, `--no-x2`), `bench/usb3_soc.py` (`add_usb3_lanes_link`),
+- `bench/acorn.py` (`--lanes 2`, `--role`, `--no-x2`, `--lanes-core`), `bench/usb3_soc.py` (`add_usb3_lanes_link`),
   `bench/usb3_lanes.py` (client), `bench/acorn_run.py` (OpenOCD config by USB location).
