@@ -1,4 +1,4 @@
-# Gen 1x2 Hardware Validation: Two LiteX Acorn Baseboard Minis With Two SFP DAC Cables
+# Gen 1x2 Hardware Validation: LiteX Acorn Baseboard Mini (Two Boards, SFP2USB, Gen 1x2 Host)
 
 Hardware validation of the USB 3.2 Gen 1x2 PHY (`USB3PHY(lanes=2)`) between two boards, one in the
 Host role and one in the Device role, without a Gen 1x2 USB host or a USB Type-C breakout
@@ -9,8 +9,9 @@ simulation with `sim.py --lanes 2` (`test/test_phy.py` `TestPHYX2`).
 Each board runs `bench/acorn.py --lanes 2`: `USB3PHY(lanes=2)` on SFP-0 (Lane 0, Configuration Lane)
 and SFP-1 (Lane 1), `USB3PHYDebug` (Lane 0), `USB3LanesDebug` (x2/deskew/lanes swap status, per lane
 counters) and the PRBS Link-Layer stand-ins (`PRBSLinkTester`: PRBS packets sent and checked in U0,
-64-bit link words with Gen 1x2, 32-bit words on Lane 0 when Gen 1x1 is negotiated). There is no
-SuperSpeedPlus Link Layer yet: the link is tested with PRBS packets, not with USB transfers.
+64-bit link words with Gen 1x2, 32-bit words on Lane 0 when Gen 1x1 is negotiated). Between two
+boards the link is tested with PRBS packets (there is no USB host Link Layer on the boards); the
+SuperSpeedPlus Link Layer/Device Core at Gen 1x2 is tested with a USB host in the last part.
 
 What is validated:
 - SuperSpeedPlus Polling (SCD1/SCD2, LBPM PHY Capability/Ready) with Gen 1x2 negotiated.
@@ -25,6 +26,17 @@ the single lane SFP2USB adapter ([Single Board With a USB 3 Host](#single-board-
 enumeration and transfers at Gen 1x1, with the host Configuration Lane on SFP-0 and then on SFP-1
 (lanes swap), as with the dual SFP to USB-C breakout in both plug orientations. It needs only one
 board and no DAC cable, and can be run first.
+
+A third part runs the same Device Core at Gen 1x2 (SuperSpeedPlus, both lanes) with a Gen 1x2
+capable host through the dual SFP to USB-C breakout
+([Gen 1x2 Device Core With a Gen 1x2 Host](#gen-1x2-device-core-with-a-gen-1x2-host-dual-sfp-to-usb-c-breakout)):
+it needs the breakout (`dual-sfp2usbc-breakout` branch, `hardware/sfp2usbc/`) and such a host.
+
+| Part | Boards | Link partner | Link Layer | Simulation |
+|------|--------|--------------|------------|------------|
+| Two boards (tests 1-6) | 2 | Acorn Mini, Host role, 2 DAC cables | PRBS stand-ins | `sim.py --lanes 2` (`TestPHYX2`) |
+| Single board (tests 7-9) | 1 | USB 3 host, SFP2USB adapter (1 lane) | Device Core, Gen 1x1 | `sim.py --lanes 2 --lanes-core --dev-mode x1` (`TestPHYX2Core`) |
+| Gen 1x2 core (tests 10-14) | 1 | Gen 1x2 host, dual SFP to USB-C breakout | Device Core, SuperSpeedPlus at Gen 1x2 | `sim.py --lanes 2 --lanes-core` (`TestPHYX2Core`) |
 
 ## Hardware
 
@@ -254,6 +266,72 @@ Unplug/replug the USB cable and the adapter a few times in both cages (`./bench/
 watch` running), suspend/resume or unbind/bind the device on the host: enumerated again each time,
 with the lanes swap following the adapter cage.
 
+## Gen 1x2 Device Core With a Gen 1x2 Host (Dual SFP to USB-C Breakout)
+
+The `--lanes-core` build of the single board part (`bench` example: `USB3PHYX2Link`, Gen 1x2 capable)
+with both lanes connected to a USB 3.2 x2 capable host: SuperSpeedPlus Polling with Gen 1x2
+negotiated, then the SuperSpeedPlus Link Layer (4-bit Header Sequence Numbers, Type 1/Type 2
+credits) on the striped lanes, 64-bit Bulk endpoints. Simulation: `sim.py --lanes 2 --lanes-core`
+(`--lanes-crossed`, `--host-lpm`; `test/test_phy.py` `TestPHYX2Core` `core_x2`/`core_x2_crossed`/
+`core_x2_lpm`).
+
+Hardware:
+- The Acorn Mini with the dual SFP to USB-C breakout: Lane 0 on SFP-0 (TX1/RX1, CC1 orientation),
+  Lane 1 on SFP-1, Rd on CC1/CC2 (Device), no USB 2.0 ([breakout README](https://github.com/ohault/usb3_pipe/tree/dual-sfp2usbc-breakout/hardware/sfp2usbc)).
+- A USB 3.2 x2 capable host (ex: ASMedia ASM3242 based Gen 2x2 PCIe card; Gen 1x2 support to check
+  in its specification), a USB-C to USB-C cable rated for USB 3.2 x2 (both SuperSpeed pairs wired,
+  ex: USB 3.2 Gen 2x2/20Gbps or USB4 cable), Linux (the negotiated lanes are in the sysfs).
+- Optional: a Gen 1x1/Gen 2x1 host with a USB-C port (fallback test).
+
+Build and load as in the single board part (the same bitstream: `build/acorn_x1_bench`, `$B`).
+
+### 10. Enumeration at Gen 1x2
+
+```sh
+lsusb -t                                                          # Device under the x2 host port.
+D=$(grep -l 605a /sys/bus/usb/devices/*/idProduct | xargs -n1 dirname | head -1)
+cat $D/speed $D/rx_lanes $D/tx_lanes                              # Negotiated speed/lanes.
+./bench/usb3_lanes.py $B status                                   # U0, x2: 1, deskew_aligned: 1.
+./bench/usb3_debug.py host                                        # SuperSpeed devices (speed).
+```
+
+Pass: enumerated, `rx_lanes`/`tx_lanes` = 2 (`speed`: 10000, SuperSpeedPlus), `x2: 1`,
+`deskew_aligned: 1`, `rx_idle: [0, 0]`, `recovery_count` stable. With `x2: 0` the host negotiated
+Gen 1x1 (see Troubleshooting).
+
+### 11. Bulk transfers at Gen 1x2
+
+```sh
+./bench/usb3_bench.py in   --duration 30 --transfer-size 65536            # IN data checked.
+./bench/usb3_bench.py out  --duration 30 --transfer-size 65536 $B         # OUT, device checker.
+./bench/usb3_bench.py both --duration 60 --transfer-size 65536 $B
+./bench/usb3_soak.py --bench 20 --duration 300 $B                         # Soak (optional).
+```
+
+Pass: no IN/OUT data errors, no LBAD/retries growing, `recovery_count` stable. Rates: above the
+Gen 1x1 build (~450MB/s), up to ~1GB/s for 64-bit link words at 125MHz (the Gen 1x2 throughput has
+not been characterized yet: report the rates, they are a result).
+
+### 12. Plug orientations
+
+Unplug the USB-C cable at the breakout, flip it, plug it back; then test 10 and 11 again.
+
+Pass: the same results in both orientations, `lane_swap` changing with the orientation (`0`: host
+Configuration Lane on SFP-0, `1`: on SFP-1).
+
+### 13. Gen 1x1 host (fallback, optional)
+
+Connect the breakout to a Gen 1x1/Gen 2x1 host USB-C port: enumerated at 5000M, `x2: 0` (single
+lane on the Configuration Lane, SuperSpeed operation), test 11 rates in the range of the Gen 1x1
+build, in both plug orientations.
+
+### 14. Reconnections and power management (optional)
+
+Unplug/replug, flip, suspend/resume, unbind/bind on the host (`./bench/usb3_lanes.py $B watch`
+running): enumerated again at Gen 1x2 each time. U1/U2 (only if the host enables them: x2 Link flow
+control timers): entries/exits in the `usb3_debug.py` counters, transfers still without errors.
+
+## Report
 
 Results to report (in [issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140) or with the
 branch), per test and per board:
@@ -261,6 +339,8 @@ branch), per test and per board:
 - `prbs` final JSON (rates, errors, recoveries).
 - Single board: `lsusb -t` line of the device, `status` JSON, `usb3_bench.py` results, host
   controller (`lspci`), SFP2USB cage.
+- Gen 1x2 core: `speed`/`rx_lanes`/`tx_lanes`, `status` JSON, `usb3_bench.py` results per plug
+  orientation, host controller and cable references, `dmesg` lines of the enumeration.
 - On a failure: `retrain` output (LTSSM state history), per lane counters (`lane0/1_ts1`,
   `ts1_inv`, `ts2`, `rx_errors_cycles`, `deskew`), DAC cables references/lengths.
 
@@ -277,11 +357,16 @@ branch), per test and per board:
 | `lane_swap: 1` with straight cables | Cables swapped (SFP-0/SFP-1 cages). |
 | Single board: not enumerated, U0 not reached | `status`/`retrain` history, the same SFP2USB/host/cable with the Gen 1x1 build (`bench/acorn.py` without `--lanes`) for a reference. |
 | Single board: enumerated in one cage only | `lane_swap` and `rx_idle` per cage, `retrain` history in the failing cage. |
+| Gen 1x2 core: `x2: 0` with a x2 host | Host x2 support (port, `rx_lanes`), cable with both SuperSpeed pairs, Lane 1 signal (`rx_idle[1]`, `lane1_ts1`), the two boards part (tests 1-4) for the lanes themselves. |
+| Gen 1x2 core: U0 at x2 but not enumerated/transfer errors | `usb3_debug.py` Link Layer counters (LBAD/retries, recovery causes), `retrain` history; an RX buffer overflow (`USB3PHYX2Link.rx_overflow`, no CSR yet: LiteScope); framing re-alignment (host packets right after a DPP of a length not a multiple of 4: not supported yet, [gen2-x2-roadmap.md](gen2-x2-roadmap.md)). |
+| Gen 1x2 core: works in one plug orientation only | `lane_swap` per orientation, CC/lane routing of the breakout (TX1/RX1 on SFP-0). |
 
 ## References
 
 - [gen2-x2-roadmap.md](gen2-x2-roadmap.md): Gen 1x2 PHY (`USB3PHY(lanes=2)`), simulation coverage,
   hardware milestones.
 - [debugging-guide.md](debugging-guide.md): JTAG/`litex_server` setup, CSRs, LiteScope.
+- `usb3_pipe/phy.py` (`USB3PHYX2Link`), `usb3_pipe/lanes.py` (`LanesTXPacker`, `LanesFramingAligner`,
+  `LanesIdleFilter`): the Gen 1x2 Link interface.
 - `bench/acorn.py` (`--lanes 2`, `--role`, `--no-x2`, `--lanes-core`), `bench/usb3_soc.py` (`add_usb3_lanes_link`),
   `bench/usb3_lanes.py` (client), `bench/acorn_run.py` (OpenOCD config by USB location).
