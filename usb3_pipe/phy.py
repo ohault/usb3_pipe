@@ -671,3 +671,38 @@ class USB3PHY(LiteXModule):
             source_x1.valid.eq(framing_aligner.source.valid & ltssm.rx_ready & ~x2),
             framing_aligner.source.ready.eq(source_x1.ready | ~ltssm.rx_ready | x2),
         ]
+
+# USB3 PHY Gen 1x1 Link Interface (Gen 1x2 PHY) ----------------------------------------------------
+
+class USB3PHYX1Link(LiteXModule):
+    """Gen 1x1 Link interface of a USB3PHY(lanes=2): its single lane (Lane 0, Configuration Lane)
+    interface seen as a USB3PHY(lanes=1) by a Gen 1 Link Layer (USB3DeviceCore, Host model).
+
+    sink/source: 32-bit/4-bit link words of sink_x1/source_x1 (endianness swapped with
+    with_endianness_swap, as USB3PHY(lanes=1) by default), the status/Link-Layer control signals are
+    the ones of the USB3PHY (same Signal objects). Only valid when Gen 1x1 is negotiated (x2 = 0):
+    build the USB3PHY with x2_capable=False for a Gen 1 Link Layer (no SuperSpeedPlus Link Layer on
+    the x2 datapath yet, doc/gen2-x2-roadmap.md).
+    """
+    def __init__(self, phy, with_endianness_swap=True):
+        assert len(phy.pipes) == 2
+        object.__setattr__(self, "phy", phy) # Reference only (not a submodule).
+        self.sink   = stream.Endpoint([("data", 32), ("ctrl", 4)])
+        self.source = stream.Endpoint([("data", 32), ("ctrl", 4)])
+
+        # # #
+
+        if with_endianness_swap:
+            self.sink_swap   = EndiannessSwap(self.sink, phy.sink_x1)
+            self.source_swap = EndiannessSwap(phy.source_x1, self.source)
+        else:
+            self.comb += [
+                self.sink.connect(phy.sink_x1),
+                phy.source_x1.connect(self.source),
+            ]
+
+        # Status / Link-Layer control signals: the USB3PHY ones.
+        for name in USB3PHY_STATUS + [name for name, _ in USB3PHY_LINK_CTRL] + ["u2_timeout",
+            "ready", "ltssm_state", "x2", "gen2", "lane_swap"]:
+            setattr(self, name, getattr(phy, name))
+        self.ltssm_states = phy.ltssm_states

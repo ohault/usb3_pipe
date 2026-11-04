@@ -34,15 +34,17 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
 - Done in simulation (`sim.py --lanes 2`, `test/test_phy.py` `TestPHYX2`): Gen 1x2 to U0 with PRBS
   Link-Layer stand-ins, TX lanes lockstep (Logical Idle striped), single lane fallback (Gen 1x1 on
   Lane 0, `sink_x1`/`source_x1`), SuperSpeed partner fallback, lanes swap (Configuration Lane
-  detection, `--lanes-crossed`), deskew on the first COM words after a gap.
+  detection, `--lanes-crossed`), deskew on the first COM words after a gap, Gen 1 Device Core on the
+  Configuration Lane (`USB3PHYX1Link`, `sim.py --lanes 2 --lanes-core`, `bench/acorn.py --lanes 2
+  --lanes-core`).
 - Next: hardware validation on two Acorn Minis with two SFP DAC cables
-  ([doc/gen1x2-hardware-validation.md](doc/gen1x2-hardware-validation.md)), then the Gen 1 Device
-  Core on the single lane interface (enumeration with any USB 3 host through the breakout), then the
-  SuperSpeedPlus Link Layer on the x2 datapath ([doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md)).
+  ([doc/gen1x2-hardware-validation.md](doc/gen1x2-hardware-validation.md)), the Device Core build
+  with a USB 3 host through the breakout (once built), then the SuperSpeedPlus Link Layer on the x2
+  datapath ([doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md)).
 
 ## Environment Notes (Claude Code cloud sessions)
 
-- No Vivado: elaborate (`test/test_targets.py`, `--build --no-compile`), never claim a timing result.
+- No Vivado: elaborate (`test/test_targets.py` `elaborate()`), never claim a timing result.
 - `pip` installs from git and `litex_setup.py` may be refused: the preinstalled PyPI migen (0.9.2)
   cannot simulate `SyncFIFO` memories (about 78 tests fail identically on `master`: compare the
   failure lists with an upstream worktree before blaming a change).

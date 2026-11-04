@@ -167,6 +167,47 @@ CONFIGS_SLOW = {
     "lane0_late_shift": ["--lane0-delay", "1", "--lane1-delay", "0", "--lane1-word-shift", "2"],
 }
 
+class TestPHYX2Core(unittest.TestCase):
+    """Gen 1x2 PHYs with the Gen 1 Host script/Device Core (sim.py --lanes 2 --lanes-core): Gen 1x1
+    on Lane 0 (USB3PHYX1Link), enumeration and Bulk loopback."""
+    def run_sim(self, name, args):
+        cmd = [sys.executable, str(ROOT / "sim.py"), "--lanes", "2", "--lanes-core",
+            "--output-dir", str(get_output_dir(self, name))] + args
+        try:
+            p = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, timeout=1200)
+        except subprocess.TimeoutExpired:
+            self.fail(f"{name}: Simulation timeout.")
+        out  = p.stdout or ""
+        tail = "\n---- tail ----\n" + out[-4000:]
+        self.assertEqual(p.returncode, 0, f"{name}: Simulation failed." + tail)
+        self.assertIn("HOST script done", out, tail)
+        self.assertNotIn("Simulation timeout", out, tail)
+        self.assertRegex(out, r"HOST\s*entering U0 state", tail)
+        self.assertRegex(out, r"DEV\s*entering U0 state", tail)
+        return out
+
+    def test_core_x1(self):
+        # Device USB3PHY(lanes=2) not x2 capable: Gen 1x1 negotiated, Device Core on Lane 0.
+        out = self.run_sim("core_x1", ["--dev-mode", "x1"])
+        self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 0, gen2: 0\)")
+
+    def test_core_x1_crossed(self):
+        # Flipped USB Type-C plug: Configuration Lane on the Device SerDes 1 (lanes swap).
+        out = self.run_sim("core_x1_crossed", ["--dev-mode", "x1", "--lanes-crossed"])
+        self.assertRegex(out, r"DEV\s*lanes swap: 1")
+
+    def test_core_ss(self):
+        # Gen 1x2 Host PHY with a Gen 1x1 SuperSpeed Device (SuperSpeed fallback of the Host).
+        out = self.run_sim("core_ss", ["--dev-mode", "ss"])
+        self.assertRegex(out, r"HOST\s*SSP entering SS-FALLBACK state")
+
+    @pytest.mark.slow
+    def test_core_x1_lpm(self):
+        # U1/U2 entries/exits (LFPS on the Configuration Lane) and Recovery to U0.
+        out = self.run_sim("core_x1_lpm", ["--dev-mode", "x1", "--host-lpm"])
+        self.assertRegex(out, r"DEV\s*entering U2 state")
+
 class TestPHYX2(unittest.TestCase):
     def run_sim(self, name, args, mode="x2", swap=False):
         # mode: x2 (Gen 1x2 negotiated), x1 (Gen 1x1 negotiated by two Gen 1x2 PHYs, Device not x2
