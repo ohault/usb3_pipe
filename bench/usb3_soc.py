@@ -31,7 +31,7 @@ from litex.soc.integration.builder import *
 
 from litescope import LiteScopeAnalyzer
 
-from usb3_pipe.phy   import USB3PHY
+from usb3_pipe.phy   import USB3PHY, USB3PHYX1Link
 from usb3_pipe.prbs  import PRBSLinkTester
 from usb3_pipe.debug import USB3PHYDebug, USB3LanesDebug, USB3SerDesDebug
 from usb3_pipe.debug import usb3_analyzer_groups, USB3_ANALYZER_GROUPS
@@ -463,16 +463,28 @@ def add_usb3_device(soc, serdes, leds=[], leds_inverted=False,
 
 # USB3 Gen 1x2 Link (PRBS) -------------------------------------------------------------------------
 
-def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], leds_inverted=False):
+def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], leds_inverted=False,
+    with_core = False,
+    example   = "loopback",
+    with_lpm  = False,
+    max_burst = 8):
     """Add a Gen 1x2 link on serdes (2 lanes, Lane 0: Configuration Lane) to soc: USB3PHY(lanes=2) in
     the Host or Device role + debug (USB3PHYDebug on Lane 0, USB3LanesDebug), PRBS Link-Layer stand-ins
     (PRBSLinkTester on the 64-bit link words) and LEDs (SerDes ready, U0, x2 negotiated).
 
     No SuperSpeedPlus Link Layer yet (doc/gen2-x2-roadmap.md): the link is tested between two
     boards (one in each role, as sim.py --lanes 2), not with a USB host. x2_capable=False: Gen 1x1
-    negotiated with the partner (single lane fallback on Lane 0, as sim.py --dev-mode x1)."""
+    negotiated with the partner (single lane fallback on Lane 0, as sim.py --dev-mode x1).
+
+    with_core (Device role): USB3 Device Core example design on the Lane 0 interface
+    (USB3PHYX1Link, soc.usb3_link) instead of the PRBS stand-ins, the PHY not x2 capable: Gen 1x1 with
+    any USB 3 host through a dual SFP to USB-C breakout, Configuration Lane (plug orientation)
+    detected (as sim.py --lanes 2 --lanes-core). LEDs: SerDes ready, U0, lanes swapped."""
     sys_clk_freq = soc.sys_clk_freq
     assert len(serdes) == 2
+    assert (not with_core) or (role == "device")
+    if with_core:
+        x2_capable = False # Gen 1 Link Layer: Gen 1x1 only.
 
     # USB3 SerDes ----------------------------------------------------------------------------------
     soc.usb3_serdes  = serdes[0]
@@ -486,17 +498,25 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
         with_endianness_swap = False,
         lanes                = 2,
         x2_capable           = x2_capable)
-    soc.comb += usb3_phy.link_activity.eq(1) # No Link Layer: no PM activity.
+    if not with_core:
+        soc.comb += usb3_phy.link_activity.eq(1) # No Link Layer: no PM activity.
 
     # USB3 PHY/Lanes Debug -------------------------------------------------------------------------
     soc.usb3_debug       = USB3PHYDebug(usb3_phy, serdes[0], sys_clk_freq)
     soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes)
 
-    # PRBS Link-Layer Stand-Ins --------------------------------------------------------------------
-    soc.usb3_prbs = PRBSLinkTester(usb3_phy, data_width=64)
+    if with_core:
+        # USB3 Device Core on the Lane 0 interface ---------------------------------------------------
+        soc.usb3_link = usb3_link = USB3PHYX1Link(usb3_phy)
+        add_usb3_example(soc, usb3_link, sys_clk_freq, example=example, with_lpm=with_lpm,
+            max_burst=max_burst)
+    else:
+        # PRBS Link-Layer Stand-Ins ----------------------------------------------------------------
+        soc.usb3_prbs = PRBSLinkTester(usb3_phy, data_width=64)
 
     # Leds -----------------------------------------------------------------------------------------
-    for led, signal in zip(leds, [usb3_phy.ready, usb3_phy.u0, usb3_phy.x2]):
+    status = usb3_phy.lane_swap if with_core else usb3_phy.x2
+    for led, signal in zip(leds, [usb3_phy.ready, usb3_phy.u0, status]):
         soc.comb += led.eq(~signal if leds_inverted else signal)
 
 # USB3 Analyzer ------------------------------------------------------------------------------------

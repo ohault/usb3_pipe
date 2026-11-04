@@ -152,6 +152,11 @@ milestones](#gen-2x1-hardware-milestones)); the Gen 1x2 ones are still simulatio
   full TX CDC FIFO, holds the other lane, the lanes never get out of step). **Single lane fallback**:
   Gen 1x1 negotiated (x2 = 0, Gen 1x1 SuperSpeedPlus partner or SuperSpeed partner) -> Lane 0 only,
   Lane 1 in electrical idle, 32-bit link words on `sink_x1`/`source_x1` (framing aligned).
+  **Gen 1 Device Core on the Configuration Lane**: `USB3PHYX1Link` presents the Lane 0 interface as
+  a `USB3PHY(lanes=1)` to a Gen 1 Link Layer (`USB3DeviceCore`, Host script), the Device PHY not x2
+  capable: Gen 1x1 with any USB 3 host whatever the plug orientation (`sim.py --lanes 2 --lanes-core`:
+  enumeration and Bulk loopback with straight/crossed lanes, a SuperSpeed Device, U1/U2;
+  `bench/acorn.py --lanes 2 --lanes-core`).
   **Lanes swap** (USB Type-C plug orientation, `LaneSwap`): logical lanes muxed on the physical SerDes,
   the Device detects the Configuration Lane from the Host Polling.LFPS (sent on its Configuration
   Lane only), `lane_swap` = 1: Lane 0 on `serdes[1]`.
@@ -320,9 +325,11 @@ Device SFP-0, as a flipped USB-C plug): the Device swaps its lanes (`lane_swap: 
 **M1: Type-C breakout and a Gen 1x2 host** (to do): the Configuration Lane follows the USB-C plug
 orientation (a flipped plug swaps the lanes): detected in gateware (`LaneSwap`, the host sends the
 Polling LFPS on its Configuration Lane only, done in simulation), a CC controller on the breakout
-(through the SFP I2C, `sfp_i2c` on the Mini) is not needed. Rd pull-downs on CC1/CC2 (UFP). Needs the single lane fallback (Gen 1x1 negotiated by
-most hosts: done in simulation, `sink_x1`/`source_x1` to the Gen 1 Link Layer) and the
-SuperSpeedPlus Link Layer at Gen 1x2 for the enumeration and transfers; Linux
+(through the SFP I2C, `sfp_i2c` on the Mini) is not needed. Rd pull-downs on CC1/CC2 (UFP). First
+step, with any USB 3 host (Gen 1x1, as most hosts): `bench/acorn.py --lanes 2 --lanes-core` (USB3
+Device Core on the Configuration Lane, done in simulation): enumeration and transfers with the
+existing host tools (`bench/usb3_bulk.py`, `usb3_bench.py`), in both plug orientations. Then Gen 1x2
+with a Gen 1x2 capable host needs the SuperSpeedPlus Link Layer on the x2 datapath; Linux
 reports the negotiated lanes in `/sys/bus/usb/devices/*/rx_lanes` and `tx_lanes`.
 
 ## Next steps
@@ -333,8 +340,8 @@ reports the negotiated lanes in `/sys/bus/usb/devices/*/rx_lanes` and `tx_lanes`
    SerDes clocking on Kintex7 GTX/UltraScale GTH.
 2. Gen 1x2 on Artix7/Kintex7 with a Type-C breakout: PHY done in simulation (`USB3PHY(lanes=2)`), two
    boards link test ready ([M0](#gen-1x2-hardware-milestones)), single lane fallback and
-   Configuration Lane detection (lanes swap) in simulation; remaining: hardware validation, SSP Link
-   Layer on the x2 datapath (and the Gen 1 Link Layer on `sink_x1`/`source_x1`).
+   Configuration Lane detection (lanes swap), Gen 1 Device Core on the Configuration Lane
+   (`--lanes-core`) in simulation; remaining: hardware validation, SSP Link Layer on the x2 datapath.
 3. Gen 2x2 (20Gbps) on UltraScale+ GTY: combination of both, 7 buffers.
 4. Gen 2x1 on Gowin GW5AST (Tang Mega 138K Pro, `bench/sipeed_tang_mega_138k_pro.py`): Gen 1 is
    validated on hardware with the PIPE in its own clock domain (`pipe_cd`, GTR12 TX clock at 125MHz)

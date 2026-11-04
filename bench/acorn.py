@@ -109,6 +109,7 @@ class _CRG(LiteXModule):
 class USB3SoC(USB3BaseSoC):
     def __init__(self, platform, cpu_type=None, with_dram=False,
         gtp_params={}, rxcdr_cfg=None, lpm_hold="none", lanes=1, role="device", x2_capable=True,
+        lanes_core=False,
         with_analyzer=False, analyzer_group="link", analyzer_csv="analyzer.csv",
         usb3_kwargs={}, **kwargs):
         sys_clk_freq = int(125e6)
@@ -173,7 +174,11 @@ class USB3SoC(USB3BaseSoC):
                 role          = role,
                 x2_capable    = x2_capable,
                 leds          = leds,
-                leds_inverted = True)
+                leds_inverted = True,
+                with_core     = lanes_core,
+                example       = usb3_kwargs.get("example", "loopback"),
+                with_lpm      = usb3_kwargs.get("with_lpm", False),
+                max_burst     = usb3_kwargs.get("max_burst", 8))
         self.comb += platform.request("user_led", 3).eq(1) # Not Used.
 
         # FPGA temperature/voltages (RX quality vs temperature, bench/usb3_soak.py) ----------------
@@ -211,10 +216,11 @@ def main():
     gtp_group.add_argument("--rxcdr-cfg", default=None,   help="GTP RXCDR_CFG override (hex).")
     gtp_group.add_argument("--gtp-param", default=[],     help="GTP parameter override NAME=VALUE (ex: p_RXCDR_HOLD_DURING_EIDLE=1).", action="append")
     gtp_group.add_argument("--lpm-hold",  default="none", help="GTP LPM adaptation hold (rxeq: adapt only in Polling.RxEQ).", choices=["none", "rxeq", "always"])
-    x2_group = parser.add_argument_group(title="Gen 1x2 link tests (two boards, SFP-0/SFP-1, PRBS Link-Layer stand-ins)")
-    x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2, SFP-0/SFP-1, Mini only, no USB3 Device Core).", choices=[1, 2])
+    x2_group = parser.add_argument_group(title="Gen 1x2 (two lanes, SFP-0/SFP-1: two boards link tests with PRBS Link-Layer stand-ins, or dual SFP to USB-C breakout)")
+    x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2, SFP-0/SFP-1, Mini only).", choices=[1, 2])
     x2_group.add_argument("--role",       default="device",    help="USB3PHY role with --lanes 2 (one board in each role).", choices=["device", "host"])
     x2_group.add_argument("--no-x2",      action="store_true", help="--lanes 2: not Gen 1x2 capable (Gen 1x1 negotiated: single lane fallback on SFP-0).")
+    x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2 Device: USB3 Device Core (--example) on the Configuration Lane (Gen 1x1 with a USB 3 host through a dual SFP to USB-C breakout) instead of the PRBS stand-ins.")
     args = parser.parse_args()
 
     # Gen 1x2: two SFPs (Mini), PHY + PRBS Link-Layer stand-ins only (no SuperSpeedPlus Link Layer).
@@ -222,9 +228,12 @@ def main():
         assert args.variant == "mini", "--lanes 2 requires the Mini (SFP-0/SFP-1)."
         assert not args.with_serdes_debug, "--lanes 2: --with-serdes-debug not supported."
         assert args.cpu_type is None and not args.with_dram, "--lanes 2: no CPU/DRAM."
+        assert not (args.lanes_core and args.role == "host"), "--lanes-core: Device role only."
+        assert not (args.lanes_core and args.no_core), "--lanes-core: USB3 Device Core required."
     else:
         assert args.role == "device", "--role host requires --lanes 2."
         assert not args.no_x2, "--no-x2 requires --lanes 2."
+        assert not args.lanes_core, "--lanes-core requires --lanes 2."
 
     # DRAM disk: DDR3 SDRAM, initialized by the BIOS (VexRiscv CPU by default, console on a stub UART).
     with_dram = args.with_dram or (args.example == "msc_dram")
@@ -245,6 +254,7 @@ def main():
         lanes       = args.lanes,
         role        = args.role,
         x2_capable  = not args.no_x2,
+        lanes_core  = args.lanes_core,
         **usb3_soc_argdict(args))
     usb3_soc_build(parser, args, soc)
 

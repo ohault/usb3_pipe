@@ -52,7 +52,7 @@ python3 -m pytest -n 2 -m "not slow and sim"                 # the Verilator sim
 python3 -m pytest -m slow                                    # long simulations (nightly in CI)
 python3 -m pytest test/test_targets.py -k acorn              # elaborate the Acorn targets (no Vivado)
 ./sim.py                                                     # Host model <-> PHYs <-> Device Core in Verilator
-./bench/acorn.py --build --no-compile --output-dir=/tmp/x    # the map, CSRs and Verilog in seconds, no Vivado
+./bench/acorn.py --output-dir=/tmp/x                         # no --build: the csr.csv/map in seconds, no Vivado
 usb3_pipe_gen examples/a7_device.yml --output-dir build/usb3_pipe_core  # the standalone Verilog core
 ```
 
@@ -84,7 +84,7 @@ the fastest way to check what a target or an option really produces.
 
 1. Simulate: the relevant `test/` files, then the CI selections above; `./sim.py` for anything that
    touches link training, enumeration or the datapath end to end.
-2. Elaborate: `test/test_targets.py` (or a `--build --no-compile` of a target) for anything that
+2. Elaborate: `test/test_targets.py` (its `elaborate()` helper: CSRs and Verilog, no Vivado) for anything that
    touches a target, a SerDes wrapper or an example; a Python import alone proves nothing.
 3. Build: a real `--build` with Vivado when it is available; look at the timing report (the GTP/GTX/GTY
    clock domains are tight at 5/10Gbps).
@@ -102,8 +102,9 @@ the fastest way to check what a target or an option really produces.
   `build/` is written in the current directory, run them from the repository root.
 - CPU examples (`console`, `composite`) need `--cpu-type vexriscv`, and the RISC-V gcc for a full
   build; `msc_dram` is Acorn only; `--link-words 2` applies to `loopback`/`bench`.
-- Gen 2 (10Gbps) needs UltraScale+ GTY; `--lanes 2` is Acorn Mini only and has no Device Core yet
-  (PRBS Link-Layer stand-ins).
+- Gen 2 (10Gbps) needs UltraScale+ GTY; `--lanes 2` is Acorn Mini only: PRBS Link-Layer stand-ins
+  (two boards link tests), or `--lanes-core` (Device Core at Gen 1x1 on the Configuration Lane, no
+  SuperSpeedPlus Link Layer on the x2 datapath yet).
 
 ## Contribute back
 

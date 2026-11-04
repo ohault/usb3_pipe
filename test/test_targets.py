@@ -121,9 +121,26 @@ def test_target_lanes(name, tmp_path):
     tx_clks = set(re.findall(r"\.TXUSRCLK\s*\((\w+)\)", verilog))
     assert len(tx_clks) == 1
 
+LANES_CORE_EXAMPLES = [e for e in USB3_EXAMPLES if e not in CPU_EXAMPLES + DRAM_EXAMPLES]
+
+@pytest.mark.parametrize("example", LANES_CORE_EXAMPLES)
+def test_target_lanes_core(example, tmp_path):
+    # Acorn Mini, Gen 1x2 PHY with the USB3 Device Core on the Lane 0 interface (USB3PHYX1Link, Gen
+    # 1x1 through a dual SFP to USB-C breakout): the core CSRs, no PRBS stand-ins, both lanes.
+    csr = elaborate("acorn", tmp_path, ["--lanes", "2", "--lanes-core", "--example", example])
+    assert "usb3_lanes_debug_status" in csr
+    assert "usb3_prbs" not in csr
+    if example in ["loopback", "bench"]:
+        for csr_name in ["usb3_core_status", "usb3_core_link_state"]:
+            assert csr_name in csr
+    verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
+    assert verilog.count("\nGTPE2_CHANNEL ") == 2
+
 def test_target_lanes_args(tmp_path):
-    # --role host/--no-x2 require --lanes 2, --lanes 2 requires the Mini.
-    for args in [["--role", "host"], ["--no-x2"], ["--lanes", "2", "--variant", "standard"]]:
+    # --role host/--no-x2/--lanes-core require --lanes 2, --lanes 2 requires the Mini, --lanes-core
+    # requires the Device role and the core.
+    for args in [["--role", "host"], ["--no-x2"], ["--lanes-core"], ["--lanes", "2", "--variant", "standard"],
+        ["--lanes", "2", "--lanes-core", "--role", "host"], ["--lanes", "2", "--lanes-core", "--no-core"]]:
         cmd = [sys.executable, "-c", RUN_TARGET, "bench/acorn.py", "--output-dir", str(tmp_path)] + args
         p = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         assert p.returncode != 0
