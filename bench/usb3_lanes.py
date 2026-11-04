@@ -66,10 +66,13 @@ class USB3LanesClient:
             "ready"          : [(status >> (4 + lane)) & 0x1 for lane in range(2)],
             "rx_idle"        : [(status >> (6 + lane)) & 0x1 for lane in range(2)],
             "rx_polarity"    : [(status >> (8 + lane)) & 0x1 for lane in range(2)],
+            "rx_overflow"    : (status >> 10) & 0x1, # Link RX buffer (USB3PHYX2Link builds).
             "u0_count"       : dbg["u0"],
             "recovery_count" : dbg["recovery"],
         }
         r.update({name: self.reg(f"usb3_lanes_debug_{name}_count").read() for name in LANES_COUNTERS})
+        if hasattr(self.bus.regs, "usb3_lanes_debug_rx_drop_count"):
+            r["rx_drop"] = self.reg("usb3_lanes_debug_rx_drop_count").read()
         if self.has_prbs():
             r.update({f"prbs_{k}": v for k, v in self.prbs().items()})
         return r

@@ -134,6 +134,8 @@ def test_target_lanes_core(example, tmp_path):
     if example in ["loopback", "bench"]:
         for csr_name in ["usb3_core_status", "usb3_core_link_state"]:
             assert csr_name in csr
+    # USB3PHYX2Link (64-bit endpoints examples): RX buffer drops counter.
+    assert ("usb3_lanes_debug_rx_drop_count" in csr) == (example in ["loopback", "wishbone", "bench"])
     verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
     assert verilog.count("\nGTPE2_CHANNEL ") == 2
 

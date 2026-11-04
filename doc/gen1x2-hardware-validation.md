@@ -308,7 +308,8 @@ Gen 1x1 (see Troubleshooting).
 ./bench/usb3_soak.py --bench 20 --duration 300 $B                         # Soak (optional).
 ```
 
-Pass: no IN/OUT data errors, no LBAD/retries growing, `recovery_count` stable. Rates: above the
+Pass: no IN/OUT data errors, no LBAD/retries growing, `recovery_count` stable, `rx_overflow: 0`/
+`rx_drop: 0` in `usb3_lanes.py $B status` (no RX words dropped by the Gen 1x2 RX buffer). Rates: above the
 Gen 1x1 build (~450MB/s), up to ~1GB/s for 64-bit link words at 125MHz (the Gen 1x2 throughput has
 not been characterized yet: report the rates, they are a result).
 
@@ -335,7 +336,8 @@ control timers): entries/exits in the `usb3_debug.py` counters, transfers still 
 
 Results to report (in [issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140) or with the
 branch), per test and per board:
-- `status` JSON (LTSSM state, x2, deskew/lanes swap, per lane ready/RX idle/RX polarity, counters).
+- `status` JSON (LTSSM state, x2, deskew/lanes swap, per lane ready/RX idle/RX polarity, counters,
+  `rx_overflow`/`rx_drop` with the `--lanes-core` Gen 1x2 builds).
 - `prbs` final JSON (rates, errors, recoveries).
 - Single board: `lsusb -t` line of the device, `status` JSON, `usb3_bench.py` results, host
   controller (`lspci`), SFP2USB cage.
@@ -358,7 +360,7 @@ branch), per test and per board:
 | Single board: not enumerated, U0 not reached | `status`/`retrain` history, the same SFP2USB/host/cable with the Gen 1x1 build (`bench/acorn.py` without `--lanes`) for a reference. |
 | Single board: enumerated in one cage only | `lane_swap` and `rx_idle` per cage, `retrain` history in the failing cage. |
 | Gen 1x2 core: `x2: 0` with a x2 host | Host x2 support (port, `rx_lanes`), cable with both SuperSpeed pairs, Lane 1 signal (`rx_idle[1]`, `lane1_ts1`), the two boards part (tests 1-4) for the lanes themselves. |
-| Gen 1x2 core: U0 at x2 but not enumerated/transfer errors | `usb3_debug.py` Link Layer counters (LBAD/retries, recovery causes), `retrain` history; an RX buffer overflow (`USB3PHYX2Link.rx_overflow`, no CSR yet: LiteScope); framing re-alignment (host packets right after a DPP of a length not a multiple of 4: not supported yet, [gen2-x2-roadmap.md](gen2-x2-roadmap.md)). |
+| Gen 1x2 core: U0 at x2 but not enumerated/transfer errors | `usb3_debug.py` Link Layer counters (LBAD/retries, recovery causes), `retrain` history; RX buffer overflow (`rx_overflow`/`rx_drop` in `usb3_lanes.py status`: dropped RX words, the Link Layer too slow); framing re-alignment (host packets right after a DPP of a length not a multiple of 4: not supported yet, [gen2-x2-roadmap.md](gen2-x2-roadmap.md)). |
 | Gen 1x2 core: works in one plug orientation only | `lane_swap` per orientation, CC/lane routing of the breakout (TX1/RX1 on SFP-0). |
 
 ## References

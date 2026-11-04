@@ -506,11 +506,11 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
         soc.comb += usb3_phy.link_activity.eq(1) # No Link Layer: no PM activity.
 
     # USB3 PHY/Lanes Debug -------------------------------------------------------------------------
-    soc.usb3_debug       = USB3PHYDebug(usb3_phy, serdes[0], sys_clk_freq)
-    soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes)
+    soc.usb3_debug = USB3PHYDebug(usb3_phy, serdes[0], sys_clk_freq)
 
+    usb3_link = None
     if with_core:
-        # USB3 Device Core on the Lane 0 interface ---------------------------------------------------
+        # USB3 Device Core -------------------------------------------------------------------------
         if lanes_x2:
             soc.usb3_link = usb3_link = USB3PHYX2Link(usb3_phy)
         else:
@@ -520,6 +520,9 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     else:
         # PRBS Link-Layer Stand-Ins ----------------------------------------------------------------
         soc.usb3_prbs = PRBSLinkTester(usb3_phy, data_width=64)
+
+    # Lanes Debug (with the USB3PHYX2Link RX buffer overflow/drops) --------------------------------
+    soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes, link=usb3_link)
 
     # Leds -----------------------------------------------------------------------------------------
     status = usb3_phy.lane_swap if with_core else usb3_phy.x2

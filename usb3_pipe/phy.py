@@ -739,6 +739,7 @@ class USB3PHYX2Link(LiteXModule):
         self.sink           = sink   = stream.Endpoint(link_pairs_layout())
         self.source         = source = stream.Endpoint(link_pairs_layout())
         self.rx_overflow    = Signal() # o: RX buffer overflow (sticky).
+        self.rx_drop        = Signal() # o: RX buffer entry dropped (full buffer, pulse).
 
         # # #
 
@@ -784,7 +785,8 @@ class USB3PHYX2Link(LiteXModule):
                 rx_pairs.source.connect(rx),
             ),
         ]
-        self.sync += If(rx_filter.source.valid & ~rx_buffer.sink.ready, self.rx_overflow.eq(1))
+        self.comb += self.rx_drop.eq(rx_filter.source.valid & ~rx_buffer.sink.ready)
+        self.sync += If(self.rx_drop, self.rx_overflow.eq(1))
 
         # Status / Link-Layer control signals: the USB3PHY ones.
         for name in USB3PHY_STATUS + [name for name, _ in USB3PHY_LINK_CTRL] + ["u2_timeout",

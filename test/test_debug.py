@@ -158,7 +158,38 @@ class LanesDUT(Module):
         self.phy, self.serdes = fake_lanes_phy()
         self.submodules.debug = USB3LanesDebug(self.phy, self.serdes)
 
+class LanesLinkDUT(Module):
+    def __init__(self):
+        self.phy, self.serdes = fake_lanes_phy()
+        self.link = SimpleNamespace(rx_drop=Signal())
+        self.submodules.debug = USB3LanesDebug(self.phy, self.serdes, link=self.link)
+
 class TestUSB3LanesDebug(unittest.TestCase):
+    def test_rx_overflow(self):
+        # USB3PHYX2Link RX buffer: dropped entries counted (per cycle), overflow status set until a
+        # clear; no rx_drop counter without a link.
+        self.assertFalse(hasattr(LanesDUT().debug, "_rx_drop_count"))
+        dut = LanesLinkDUT()
+        dbg = dut.debug
+        def generator():
+            yield
+            self.assertEqual((yield dbg._status.fields.rx_overflow), 0)
+            yield dut.link.rx_drop.eq(1)
+            for _ in range(3):
+                yield
+            yield dut.link.rx_drop.eq(0)
+            yield
+            yield
+            self.assertEqual((yield dbg._rx_drop_count.status), 3)
+            self.assertEqual((yield dbg._status.fields.rx_overflow), 1)
+            yield dbg._clear.re.eq(1)
+            yield
+            yield dbg._clear.re.eq(0)
+            yield
+            self.assertEqual((yield dbg._rx_drop_count.status), 0)
+            self.assertEqual((yield dbg._status.fields.rx_overflow), 0)
+        run_simulation(dut, generator())
+
     def test_status_counters(self):
         dut = LanesDUT()
         dbg = dut.debug
