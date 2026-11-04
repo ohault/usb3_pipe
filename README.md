@@ -153,7 +153,8 @@ shared host helpers: `bench/common.py`).
 - [doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md): Gen 2x1 (10Gbps) bring-up milestones and results,
   Gen 1x2 (2x5Gbps)/Gen 2x2 roadmap (Gen 1x2 two boards link test: `bench/acorn.py --lanes 2`).
 - [doc/gen1x2-hardware-validation.md](doc/gen1x2-hardware-validation.md): Gen 1x2 hardware validation
-  procedure (two LiteX Acorn Baseboard Minis, two SFP DAC cables).
+  procedure (LiteX Acorn Baseboard Mini: two boards with SFP DAC cables, USB 3 host through the
+  SFP2USB adapter, Gen 1x2 host through the dual SFP to USB-C breakout).
 - [AGENTS.md](AGENTS.md): guidance for AI agents working on/with USB3-PIPE (follows LiteX's
   [LiteX for AI Agents](https://github.com/enjoy-digital/litex/blob/master/doc/wiki/LiteX-for-AI-Agents.md)).
 
