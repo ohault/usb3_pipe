@@ -298,6 +298,8 @@ class USB3PIPESim(SoCMini):
                         the model).
     - lanes_crossed:    Host Lane i on the Device SerDes 1 - i (flipped USB Type-C plug): the Device
                         detects the Configuration Lane (lane_swap) from the Host Polling.LFPS.
+    - lanes_tx_shift:   Gen 1x2 TX packets of the Host and Device delayed by 1-7 symbols (with_core:
+                        packets at any symbol position, on Lane 1 with an odd shift, 6.13.4).
     - with_core:        Host script/Device Core on the USB3PHYX2Link of the PHYs (words pairs, 64-bit
                         Device endpoints): SuperSpeedPlus at Gen 1x2 (dev_mode x2), SuperSpeed at
                         Gen 1x1 on Lane 0 (dev_mode x1, or ss: Device USB3PHY(lanes=1)), enumeration
@@ -325,7 +327,7 @@ class USB3PIPESim(SoCMini):
         ssc=False, prbs_words=2**16, max_cycles=2**24, host_skp=True, host_latency=256,
         host_status_gap=64, host_pm=False, host_lpm=False, host_itp=False, lanes=1,
         lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096, prbs_gap_bits=4, dev_mode="x2",
-        lanes_crossed=False, gen2_capable=False, gen2=False,
+        lanes_crossed=False, lanes_tx_shift=0, gen2_capable=False, gen2=False,
         link_words=1, dev_pipe_cd=False, dev_u1u2=True, gen2_data_width=None, host_recovery=False,
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
@@ -335,6 +337,7 @@ class USB3PIPESim(SoCMini):
         assert (not gen2) or ((lanes == 1) and gen2_capable)
         assert dev_mode in ["x2", "x1", "ss"]
         assert (lanes == 2) or (dev_mode == "x2")
+        assert (not lanes_tx_shift) or (with_core and (lanes == 2))
         if with_core and (lanes == 2):
             # Gen 1x2 PHYs with the Host script/Device Core on their USB3PHYX2Link (words pairs):
             # SuperSpeedPlus at Gen 1x2 (dev_mode x2), SuperSpeed at Gen 1x1 on Lane 0 (x1/ss). No
@@ -432,7 +435,8 @@ class USB3PIPESim(SoCMini):
             # Host script RX buffer for Device bursts (DPPs at two words per cycle, the script takes one).
             link_phy = phy
             if with_core and (lanes_n == 2):
-                link_phy = renamer(USB3PHYX2Link(phy, rx_buffer_depth={"host": 4096, "dev": 64}[name]))
+                link_phy = renamer(USB3PHYX2Link(phy, rx_buffer_depth={"host": 4096, "dev": 64}[name],
+                    tx_symbol_shift=lanes_tx_shift))
                 self.add_module(name=f"{name}_usb3_phy_x2", module=link_phy)
             if lanes_n == 1:
                 # Inverse TX polarity to test RX auto-polarity.
@@ -802,6 +806,7 @@ def main():
     parser.add_argument("--lane1-word-shift", default=2,        help="Device Lane 1 RX word shift (symbols, --lanes 2).")
     parser.add_argument("--dev-mode",      default="x2",          help="Device with --lanes 2: x2 (Gen 1x2), x1 (two lanes, not x2 capable: Gen 1x1 on Lane 0) or ss (Gen 1x1 SuperSpeed Device on Lane 0, no SuperSpeedPlus Polling).")
     parser.add_argument("--lanes-crossed", action="store_true",   help="--lanes 2: Host Lane 0/1 on the Device SerDes 1/0 (flipped USB Type-C plug, Device lanes swap).")
+    parser.add_argument("--lanes-tx-shift", default=0,          help="--lanes 2 --lanes-core: Gen 1x2 TX packets delayed by 1-7 symbols (packets at any symbol position).")
     parser.add_argument("--prbs-gap-bits", default=4,           help="Gaps of 0 to 2**N - 1 cycles between the PRBS packets (--no-core/--lanes 2).")
     parser.add_argument("--lane-skp",      default=4096,        help="Extra Host Lane 1/Lane 0 SKP Ordered Sets period (cycles, 0: disabled, --lanes 2).")
     parser.add_argument("--gen2-capable",  action="store_true", help="Gen 2x1 capability advertised/negotiated in the SuperSpeedPlus Polling (--lanes 1).")
@@ -851,6 +856,7 @@ def main():
         lane_skp              = int(args.lane_skp),
         dev_mode              = args.dev_mode,
         lanes_crossed         = args.lanes_crossed,
+        lanes_tx_shift        = int(args.lanes_tx_shift),
         prbs_gap_bits         = int(args.prbs_gap_bits),
         gen2_capable          = args.gen2_capable or args.gen2,
         gen2                  = args.gen2,

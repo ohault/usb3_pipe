@@ -45,8 +45,8 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
 - Next: hardware validation on two Acorn Minis with two SFP DAC cables
   ([doc/gen1x2-hardware-validation.md](doc/gen1x2-hardware-validation.md)), the Device Core build
   with a USB 3 host through the SFP2USB adapter/the breakout, then a Gen 1x2 host
-  ([doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md): framing re-alignment for any host packet
-  placement, throughput).
+  ([doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md): throughput; any host packet placement done in
+  simulation, `LanesPacketAligner`, `sim.py --lanes-tx-shift`).
 
 ## Environment Notes (Claude Code cloud sessions)
 
