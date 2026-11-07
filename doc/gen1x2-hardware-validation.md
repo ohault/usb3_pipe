@@ -1,10 +1,11 @@
 # Gen 1x2 Hardware Validation: LiteX Acorn Baseboard Mini (Two Boards, SFP2USB, Gen 1x2 Host)
 
-Hardware validation of the USB 3.2 Gen 1x2 PHY (`USB3PHY(lanes=2)`) between two boards, one in the
-Host role and one in the Device role, without a Gen 1x2 USB host or a USB Type-C breakout
+Hardware validation of the USB 3.2 Gen 1x2 PHY (`USB3PHY(lanes=2)`), first between two boards, one
+in the Host role and one in the Device role, without a Gen 1x2 USB host or a USB Type-C breakout
 ([Gen 1x2 hardware milestones](gen2-x2-roadmap.md#gen-1x2-hardware-milestones), M0,
-[issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140)). The same tests run in
-simulation with `sim.py --lanes 2` (`test/test_phy.py` `TestPHYX2`).
+[issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140)), then with USB hosts through
+the SFP2USB adapter and the dual SFP to USB-C breakout. The two boards tests run in simulation with
+`sim.py --lanes 2` (`test/test_phy.py` `TestPHYX2`).
 
 Each board runs `bench/acorn.py --lanes 2`: `USB3PHY(lanes=2)` on SFP-0 (Lane 0, Configuration Lane)
 and SFP-1 (Lane 1), `USB3PHYDebug` (Lane 0), `USB3LanesDebug` (x2/deskew/lanes swap status, per lane
@@ -76,7 +77,7 @@ One bitstream per role (Vivado), JTAGBone for the CSRs:
 ./bench/acorn.py --lanes 2 --role device --with-jtagbone --output-dir build/acorn_x2_device --build
 ```
 
-For the single lane fallback test (step 5), a Device without the x2 capability:
+For the single lane fallback test (test 5), a Device without the x2 capability:
 
 ```sh
 ./bench/acorn.py --lanes 2 --role device --no-x2 --with-jtagbone --output-dir build/acorn_x1_device --build
@@ -205,7 +206,7 @@ D1="--port 1241 --csr-csv build/acorn_x1_device/csr.csv"
 
 Pass: `x2: 0` on both boards (Gen 1x1 negotiated in the LBPM PHY Capability exchange), U0 on SFP-0
 only, SFP-1 in electrical idle (`rx_idle: [0, 1]`), PRBS without errors (32-bit link words: about
-half the Gen 1x2 rate). With crossed cables (step 4), the same on the Device SFP-1.
+half the Gen 1x2 rate). With crossed cables (test 4), the same on the Device SFP-1.
 
 ### 6. Unplug/replug (optional)
 
@@ -300,10 +301,11 @@ each run), no `rx_overflow`.
 
 One Acorn Mini built with `--lanes 2 --lanes-core`: `USB3PHY(lanes=2)` on SFP-0/SFP-1 and the USB3
 Device Core example design (`bench`: `USB3PHYX2Link`, Gen 1x2 capable; a Gen 1x1 host through the
-single lane adapter negotiates Gen 1x1 on the Configuration Lane, SuperSpeed operation). The SFP2USB adapter carries a single lane: in SFP-0,
-the host Configuration Lane is on SFP-0 (`lane_swap: 0`); in SFP-1, the Device detects it from the
-host Polling.LFPS and swaps its lanes (`lane_swap: 1`), as for a flipped plug on the dual SFP to
-USB-C breakout. Simulation: `sim.py --lanes 2 --lanes-core` (`test/test_phy.py` `TestPHYX2Core`).
+single lane adapter negotiates Gen 1x1 on the Configuration Lane, SuperSpeed operation). The SFP2USB
+adapter carries a single lane: in SFP-0, the host Configuration Lane is on SFP-0 (`lane_swap: 0`); in
+SFP-1, the Device detects it from the host Polling.LFPS and swaps its lanes (`lane_swap: 1`), as for
+a flipped plug on the dual SFP to USB-C breakout. Simulation: `sim.py --lanes 2 --lanes-core
+--dev-mode x1 [--lanes-crossed]` (`test/test_phy.py` `TestPHYX2Core` `core_x1`/`core_x1_crossed`).
 
 Hardware: one Acorn Mini (power, J7 to the PC, J10 Pico-EZmate as above), the SFP2USB adapter and a
 USB 3 cable to the host (xHCI, Linux: `bench/99-usb3-pipe.rules` for user access to the vendor
@@ -313,7 +315,7 @@ class examples). The device is `1d50:605a`.
 
 ```sh
 ./bench/acorn.py --lanes 2 --lanes-core --example bench --with-jtagbone --output-dir build/acorn_x1_bench --build --load
-litex_server --jtag --jtag-config openocd.cfg --jtag-port 20040 --bind-port 1240 # OpenOCD config: see above.
+./bench/acorn_ftdi.py server --port 1240     # --location <location> with several boards connected.
 B="--port 1240 --csr-csv build/acorn_x1_bench/csr.csv"
 ```
 
@@ -341,7 +343,7 @@ Acorn build ([examples.md](examples.md): ~450MB/s IN/OUT).
 
 Unplug the USB cable, move the SFP2USB adapter to SFP-1, plug the USB cable (the PHY retrains:
 Polling from Rx.Detect, or `./bench/usb3_lanes.py $B retrain --wait 2`), then the same commands as
-step 7.
+test 11.
 
 Pass: the same results with `lane_swap: 1` (third LED on) and `rx_idle: [1, 0]`; moved back to SFP-0:
 `lane_swap: 0` again.
@@ -375,8 +377,8 @@ Build and load as in the single board part (the same bitstream: `build/acorn_x1_
 
 ```sh
 lsusb -t                                                          # Device under the x2 host port.
-D=$(grep -l 605a /sys/bus/usb/devices/*/idProduct | xargs -n1 dirname | head -1)
-cat $D/speed $D/rx_lanes $D/tx_lanes                              # Negotiated speed/lanes.
+S=$(grep -l 605a /sys/bus/usb/devices/*/idProduct | xargs -n1 dirname | head -1)
+cat $S/speed $S/rx_lanes $S/tx_lanes                              # Negotiated speed/lanes.
 ./bench/usb3_lanes.py $B status                                   # U0, x2: 1, deskew_aligned: 1.
 ./bench/usb3_debug.py host                                        # SuperSpeed devices (speed).
 ```
@@ -395,9 +397,9 @@ Gen 1x1 (see Troubleshooting).
 ```
 
 Pass: no IN/OUT data errors, no LBAD/retries growing, `recovery_count` stable, `rx_overflow: 0`/
-`rx_drop: 0` in `usb3_lanes.py $B status` (no RX words dropped by the Gen 1x2 RX buffer). Rates: above the
-Gen 1x1 build (~450MB/s), up to ~1GB/s for 64-bit link words at 125MHz (the Gen 1x2 throughput has
-not been characterized yet: report the rates, they are a result).
+`rx_drop: 0` in `usb3_lanes.py $B status` (no RX words dropped by the Gen 1x2 RX buffer). Rates:
+above the Gen 1x1 build (~450MB/s), up to ~1GB/s for 64-bit link words at 125MHz (the Gen 1x2
+throughput has not been characterized yet: report the rates, they are a result).
 
 ### 16. Plug orientations
 
