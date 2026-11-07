@@ -15,8 +15,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   USB 3.2 Gen 1x2 (2x5Gbps, two lanes) on the LiteX Acorn Baseboard Mini + SQRL Acorn CLE-215+
   (Artix7 GTP), following [issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140).
 - **LiteX Acorn Baseboard Mini** ([enjoy-digital/litex-acorn-baseboard](https://github.com/enjoy-digital/litex-acorn-baseboard)):
-  two SFP cages (SFP-0 = J3, closest to the M.2; SFP-1 = J8, closest to the SATA), FT4232H on USB-C
-  J7 (JTAG channel A, UART channel B), J10 Pico-EZmate to the Acorn JTAG, power on USB-C J9.
+  two SFP cages (SFP-0 = J3, closest to the M.2; SFP-1 = J8, closest to the SATA), FTDI on USB-C J7
+  (FT2232H on the user's boards, FT4232H on other revisions: JTAG channel A, UART channel B;
+  `bench/acorn_ftdi.py`), J10 Pico-EZmate to the Acorn JTAG, power on USB-C J9.
 - LiteX, Migen, LiteICLink, LiteX-Boards: dependencies (LiteX `master`); fixes needed there go
   upstream (see AGENTS.md "Contribute back").
 

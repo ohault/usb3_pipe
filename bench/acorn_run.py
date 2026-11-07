@@ -29,29 +29,13 @@ import subprocess
 from pathlib import Path
 
 from common import ROOT, add_kern_log_args, KernLog # First: repository root on the path.
-from common import usb_find_device, usb_ports_state, usb_superspeed_devices
+from common import usb_ports_state, usb_superspeed_devices, acorn_ftdi_find, acorn_openocd_config
 
 from litex import RemoteClient
 
 from usb3_debug import USB3DebugClient
 
-ACORN_FTDI_PRODUCT = "Quad RS232-HS" # LiteX Acorn Baseboard (Mini) FT4232H.
-
 # Helpers ------------------------------------------------------------------------------------------
-
-def openocd_config(location, filename):
-    """OpenOCD config for the Acorn baseboard FT4232H (channel A), selected by USB location."""
-    with open(filename, "w") as f:
-        f.write(f"""interface ftdi
-adapter speed 25000
-transport select jtag
-ftdi_vid_pid 0x0403 0x6011
-ftdi_channel 0
-ftdi_location {location}
-ftdi_layout_init 0x00e8 0x60eb
-reset_config none
-source [find cpld/xilinx-xc7.cfg]
-""")
 
 def usb_kern_lines(kern):
     """New USB/xHCI kernel messages."""
@@ -84,13 +68,14 @@ def main():
         print(json.dumps(entry), flush=True)
 
     kern = KernLog(args.kern_log)
-    busnum, devnum, location = usb_find_device(ACORN_FTDI_PRODUCT)
-    record("setup", bitstream=str(bitstream), ftdi=f"{busnum}:{devnum}", location=location,
+    ftdi = acorn_ftdi_find() # FT2232H or FT4232H (baseboard revision).
+    busnum, devnum, location = ftdi["busnum"], ftdi["devnum"], ftdi["ocd_location"]
+    record("setup", bitstream=str(bitstream), ftdi=f"{busnum}:{devnum}", chip=ftdi["chip"], location=location,
         ports=usb_ports_state(), ss_devices=usb_superspeed_devices())
 
     # Load (JTAG, SRAM).
     if not args.no_load:
-        r = subprocess.run(["openFPGALoader", "--busdev-num", f"{busnum}:{devnum}", "-c", "ft4232",
+        r = subprocess.run(["openFPGALoader", "--busdev-num", f"{busnum}:{devnum}", "-c", ftdi["cable"],
             "--write-sram", str(bitstream)], capture_output=True, text=True)
         record("load", returncode=r.returncode, output=(r.stdout + r.stderr)[-2000:])
         if r.returncode != 0:
@@ -98,7 +83,7 @@ def main():
         time.sleep(1.0)
 
     # litex_server (JTAGBone).
-    openocd_config(location, out_dir / "openocd.cfg")
+    acorn_openocd_config(ftdi, out_dir / "openocd.cfg")
     server = subprocess.Popen(["litex_server", "--jtag", "--jtag-config", "openocd.cfg",
         "--jtag-port", str(args.port + 18800), "--bind-port", str(args.port)],
         cwd=out_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
