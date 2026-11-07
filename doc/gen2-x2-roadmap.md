@@ -156,19 +156,21 @@ milestones](#gen-2x1-hardware-milestones)); the Gen 1x2 ones are still simulatio
   Lane 1 in electrical idle, 32-bit link words on `sink_x1`/`source_x1` (framing aligned).
   **SuperSpeedPlus Link Layer at Gen 1x2** (`USB3PHYX2Link`, 7.1.1: Gen 1x2 is SuperSpeedPlus with
   the Gen 1 packets format): the `USB3DeviceCore` Link Layer in SuperSpeedPlus operation
-  (`gen2_active` = x2 on its Link interface: 4-bit Header Sequence Numbers, Type 1/Type 2
-  credits, nullified DPPs, as Gen 2x1) on 64-bit words pairs. TX: `LanesTXPacker` (64-bit link words, a 64-bit word never holds two
-  packets, Logical Idle after the last word of a packet: both lanes end the packets together,
-  6.4.3.2) and `PacketsBuffer` (packets stored and forwarded: the lanes take 8 symbols per cycle, no
-  Logical Idle inside a packet), packets first/last through the striper (SKP Ordered Sets between the
-  packets, on both lanes). RX: `LanesFramingAligner` (packets may start on either lane, 6.13.4:
-  framing re-aligned on 32-bit words), `LanesIdleFilter` (Logical Idle between the packets removed,
-  two words per cycle), RX buffer. Gen 1x1 negotiated: the same core in SuperSpeed operation on the
-  Lane 0 words. BOS: SuperSpeedPlus USB Device Capability with a 5Gbps lane speed, x2 Link flow
-  control timers (PM_LC_TIMER 8us, PM_ENTRY_TIMER 16us, Table 7-8). `sim.py --lanes 2 --lanes-core`
-  (`test/test_phy.py` `TestPHYX2Core`): enumeration and Bulk loopback (64-bit endpoints) at Gen 1x2
-  (straight/crossed lanes, U1/U2), Gen 1x1 (Device not x2 capable, SuperSpeed Device);
-  `bench/acorn.py --lanes 2 --lanes-core` (`USB3PHYX1Link`: the 32-bit endpoints examples at Gen 1x1).
+  (`gen2_active` = x2 on its Link interface: 4-bit Header Sequence Numbers, Type 1/Type 2 credits,
+  nullified DPPs, as Gen 2x1) on 64-bit words pairs. TX: `LanesTXPacker` (64-bit link words, a
+  64-bit word never holds two packets, Logical Idle after the last word of a packet: both lanes end
+  the packets together, 6.4.3.2) and `PacketsBuffer` (packets stored and forwarded: the lanes take 8
+  symbols per cycle, no Logical Idle inside a packet), packets first/last through the striper (SKP
+  Ordered Sets between the packets, on both lanes). RX: `LanesPacketAligner` (symbols parser:
+  packets at any symbol position, 6.13.4, with or without Logical Idle between them; packets symbols
+  packed, the last word of a packet completed with Logical Idle symbols: each packet starts on a
+  32-bit word; two words per cycle), RX buffer. Gen 1x1 negotiated: the same core in SuperSpeed
+  operation on the Lane 0 words. BOS: SuperSpeedPlus USB Device Capability with a 5Gbps lane speed,
+  x2 Link flow control timers (PM_LC_TIMER 8us, PM_ENTRY_TIMER 16us, Table 7-8). `sim.py --lanes 2
+  --lanes-core` (`test/test_phy.py` `TestPHYX2Core`): enumeration and Bulk loopback (64-bit
+  endpoints) at Gen 1x2 (straight/crossed lanes, U1/U2, TX packets delayed by 1-7 symbols:
+  `--lanes-tx-shift`), Gen 1x1 (Device not x2 capable, SuperSpeed Device); `bench/acorn.py --lanes 2
+  --lanes-core` (`USB3PHYX1Link`: the 32-bit endpoints examples at Gen 1x1).
   **Lanes swap** (USB Type-C plug orientation, `LaneSwap`): logical lanes muxed on the physical SerDes,
   the Device detects the Configuration Lane from the Host Polling.LFPS (sent on its Configuration
   Lane only), `lane_swap` = 1: Lane 0 on `serdes[1]`.
@@ -208,9 +210,10 @@ after Polling.PortConfig, timing at 250MHz (`Gen2TX` DC Balance pipelined). Rema
   Lane 0 as required, but not exercised in x2 simulation), Lane 1 Rx.Detect/Loopback/Compliance per
   lane not handled.
 - Gen 1x2 Link Layer: verified against the Host script of this repository only (packets on 64-bit
-  boundaries); a framing re-aligned by `LanesFramingAligner` needs 12 Logical Idle symbols before it
-  (a host starting a packet right after a DPP of a length not a multiple of 4 symbols, without
-  Logical Idle symbols, is not supported yet); no Sublink Speed Device Notifications (also not sent
+  boundaries, or shifted by 1-7 symbols); `LanesPacketAligner`: a corrupted first framing symbol or
+  DPP EPF is not recovered (packet lost: Link Layer retry), DPPs completions without Logical Idle
+  or SKP Ordered Sets for long (back to back short DPPs) overflow its symbols buffer (`rx_overflow`),
+  timing of its 8 symbols chains not checked with Vivado yet; no Sublink Speed Device Notifications (also not sent
   in Gen 2x1); throughput not characterized (store and forward of the TX packets).
 
 ### Hardware needed
@@ -360,8 +363,8 @@ negotiated lanes in `/sys/bus/usb/devices/*/rx_lanes` and `tx_lanes`.
 2. Gen 1x2 on Artix7/Kintex7 with a Type-C breakout: PHY done in simulation (`USB3PHY(lanes=2)`), two
    boards link test ready ([M0](#gen-1x2-hardware-milestones)), single lane fallback and
    Configuration Lane detection (lanes swap), SuperSpeedPlus Link Layer/Device Core at Gen 1x2
-   (`--lanes-core`) in simulation; remaining: hardware validation (two boards, then a Gen 1x2 host),
-   robust framing re-alignment for any host packet placement, Gen 1x2 throughput.
+   (`--lanes-core`, any host packet placement: `LanesPacketAligner`) in simulation; remaining:
+   hardware validation (two boards, then a Gen 1x2 host), Gen 1x2 throughput.
 3. Gen 2x2 (20Gbps) on UltraScale+ GTY: combination of both, 7 buffers.
 4. Gen 2x1 on Gowin GW5AST (Tang Mega 138K Pro, `bench/sipeed_tang_mega_138k_pro.py`, build flow
    and options in [targets.md](targets.md)): Gen 1 is validated on hardware with the PIPE in its own

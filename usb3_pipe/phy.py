@@ -24,7 +24,8 @@ from usb3_pipe.datapath   import GEN2_DATA_WIDTH
 from usb3_pipe.ltssm      import USB3LTSSM, SSPPolling
 from usb3_pipe.scrambling import LFSR_SEED_LANE0, LFSR_SEED_LANE1
 from usb3_pipe.lanes      import LaneStriper, LaneDestriper, LaneDeskew, LaneSwap, lane_layout, link_layout
-from usb3_pipe.lanes      import LanesTXPacker, LanesFramingAligner, LanesIdleFilter, link_pairs_layout
+from usb3_pipe.lanes      import LanesTXPacker, LanesPacketAligner, LanesTXSymbolShift
+from usb3_pipe.lanes      import link_pairs_layout
 from usb3_pipe.datapath   import RXWordAligner
 from usb3_pipe.framing    import gen2_link_layout, WordsToPairs, PairsToWords, WordsPacker
 from usb3_pipe.framing    import PacketsBuffer, LogicalIdleFilter, WordsNarrower
@@ -981,22 +982,23 @@ class USB3PHYX2Link(LiteXModule):
       never holds two packets) and stored and forwarded by packets (PacketsBuffer: the lanes take 8
       symbols per cycle, a packet is transmitted without Logical Idle inside it), striped on both
       lanes (packets first/last: SKP Ordered Sets between the packets on both lanes, 6.4.3.2). RX:
-      destriped 64-bit link words re-aligned on the packets framing (LanesFramingAligner: packets
-      may start on either lane, 6.13.4), Logical Idle removed between the packets (LanesIdleFilter)
-      and buffered (rx_buffer_depth pairs: the Link Layer consumes one word per cycle outside of the
+      destriped 64-bit link words parsed into packets (LanesPacketAligner: packets at any symbol
+      position, 6.13.4, each packet starting on a 32-bit word, Logical Idle removed) and buffered (rx_buffer_depth pairs: the Link Layer consumes one word per cycle outside of the
       DPP data, the lanes deliver two).
     - Gen 1x1 (x2 = 0): single lane (Lane 0, Configuration Lane) words (sink_x1/source_x1), one word
       per entry, SuperSpeed operation (Gen 1x1 is SuperSpeed, 7.1.1).
     The status/Link-Layer control signals are the ones of the USB3PHY (same Signal objects).
+    tx_symbol_shift (test only): Gen 1x2 TX packets delayed by 1-7 symbols (LanesTXSymbolShift).
     """
-    def __init__(self, phy, with_endianness_swap=True, rx_buffer_depth=64, tx_buffer_depth=256):
+    def __init__(self, phy, with_endianness_swap=True, rx_buffer_depth=64, tx_buffer_depth=256,
+        tx_symbol_shift=0):
         assert len(phy.pipes) == 2
         object.__setattr__(self, "phy", phy) # Reference only (not a submodule).
         self.link_words     = 2
         self.ssp_lane_speed = 5      # Lane speed (Gbps, SuperSpeedPlus USB Device Capability).
         self.sink           = sink   = stream.Endpoint(link_pairs_layout())
         self.source         = source = stream.Endpoint(link_pairs_layout())
-        self.rx_overflow    = Signal() # o: RX buffer overflow (sticky).
+        self.rx_overflow    = Signal() # o: RX buffer/packet aligner overflow (sticky).
         self.rx_drop        = Signal() # o: RX buffer entry dropped (full buffer, pulse).
 
         # # #
@@ -1023,19 +1025,26 @@ class USB3PHYX2Link(LiteXModule):
                 tx.connect(tx_words.sink),
             ),
             tx_packer.source.connect(tx_buffer.sink),
-            tx_buffer.source.connect(phy.sink), # Held by the USB3PHY out of U0 (as USB3PIPE).
             tx_words.source.connect(phy.sink_x1),
         ]
 
+        if tx_symbol_shift:
+            # Test: packets at any symbol position (receivers of the partner).
+            self.tx_shift = tx_shift = LanesTXSymbolShift(tx_symbol_shift)
+            self.comb += [
+                tx_buffer.source.connect(tx_shift.sink),
+                tx_shift.source.connect(phy.sink),
+            ]
+        else:
+            self.comb += tx_buffer.source.connect(phy.sink) # Held by the USB3PHY out of U0.
+
         # RX ---------------------------------------------------------------------------------------
-        self.rx_aligner = rx_aligner = LanesFramingAligner()
-        self.rx_filter  = rx_filter  = LanesIdleFilter()
+        self.rx_aligner = rx_aligner = LanesPacketAligner()
         self.rx_buffer  = rx_buffer  = stream.SyncFIFO(link_pairs_layout(), rx_buffer_depth, buffered=True)
         self.rx_pairs   = rx_pairs   = WordsToPairs()
         self.comb += [
             phy.source.connect(rx_aligner.sink),
-            rx_aligner.source.connect(rx_filter.sink),
-            rx_filter.source.connect(rx_buffer.sink),
+            rx_aligner.source.connect(rx_buffer.sink),
             phy.source_x1.connect(rx_pairs.sink),
             If(x2,
                 rx_buffer.source.connect(rx),
@@ -1043,8 +1052,8 @@ class USB3PHYX2Link(LiteXModule):
                 rx_pairs.source.connect(rx),
             ),
         ]
-        self.comb += self.rx_drop.eq(rx_filter.source.valid & ~rx_buffer.sink.ready)
-        self.sync += If(self.rx_drop, self.rx_overflow.eq(1))
+        self.comb += self.rx_drop.eq(rx_aligner.source.valid & ~rx_buffer.sink.ready)
+        self.sync += If(self.rx_drop | rx_aligner.overflow, self.rx_overflow.eq(1))
 
         # Status / Link-Layer control signals: the USB3PHY ones.
         for name in USB3PHY_STATUS + [name for name, _ in USB3PHY_LINK_CTRL] + ["u2_timeout",

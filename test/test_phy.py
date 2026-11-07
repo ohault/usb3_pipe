@@ -433,6 +433,19 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertRegex(out, r"DEV\s*lanes swap: 1")
         self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 1, gen2: 0\)")
 
+    def test_core_x2_tx_shift(self):
+        # Gen 1x2 with the Host/Device TX packets delayed by 3 symbols: packets starting on Lane 1,
+        # at any symbol position of the 64-bit words (LanesPacketAligner).
+        out = self.run_sim("core_x2_tx_shift", ["--dev-mode", "x2", "--lanes-tx-shift", "3"])
+        self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 1, gen2: 0\)")
+
+    @pytest.mark.slow
+    def test_core_x2_tx_shift_6(self):
+        # Gen 1x2 with the TX packets delayed by 6 symbols (packets starting on Lane 0, second half
+        # of the 64-bit words).
+        out = self.run_sim("core_x2_tx_shift_6", ["--dev-mode", "x2", "--lanes-tx-shift", "6"])
+        self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 1, gen2: 0\)")
+
     @pytest.mark.slow
     def test_core_x2_lpm(self):
         # Gen 1x2: U1/U2 entries/exits (x2 PM timers) and Recovery to U0.

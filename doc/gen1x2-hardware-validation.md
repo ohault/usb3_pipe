@@ -451,7 +451,7 @@ branch), per test and per board:
 | Single board: not enumerated, U0 not reached | `status`/`retrain` history, the same SFP2USB/host/cable with the Gen 1x1 build (`bench/acorn.py` without `--lanes`) for a reference. |
 | Single board: enumerated in one cage only | `lane_swap` and `rx_idle` per cage, `retrain` history in the failing cage. |
 | Gen 1x2 core: `x2: 0` with a x2 host | Host x2 support (port, `rx_lanes`), cable with both SuperSpeed pairs, Lane 1 signal (`rx_idle[1]`, `lane1_ts1`), the two boards part (tests 1-4) for the lanes themselves. |
-| Gen 1x2 core: U0 at x2 but not enumerated/transfer errors | `usb3_debug.py` Link Layer counters (LBAD/retries, recovery causes), `retrain` history; RX buffer overflow (`rx_overflow`/`rx_drop` in `usb3_lanes.py status`: dropped RX words, the Link Layer too slow); framing re-alignment (host packets right after a DPP of a length not a multiple of 4: not supported yet, [gen2-x2-roadmap.md](gen2-x2-roadmap.md)). |
+| Gen 1x2 core: U0 at x2 but not enumerated/transfer errors | `usb3_debug.py` Link Layer counters (LBAD/retries, recovery causes), `retrain` history; RX buffer overflow (`rx_overflow`/`rx_drop` in `usb3_lanes.py status`: dropped RX words, the Link Layer too slow); `rx_overflow` also set by a `LanesPacketAligner` symbols buffer overflow (host packets back to back right after short DPPs, [gen2-x2-roadmap.md](gen2-x2-roadmap.md)). |
 | Gen 1x2 core: works in one plug orientation only | `lane_swap` per orientation, CC/lane routing of the breakout (TX1/RX1 on SFP-0). |
 
 ## References
@@ -459,8 +459,8 @@ branch), per test and per board:
 - [gen2-x2-roadmap.md](gen2-x2-roadmap.md): Gen 1x2 PHY (`USB3PHY(lanes=2)`), simulation coverage,
   hardware milestones.
 - [debugging-guide.md](debugging-guide.md): JTAG/`litex_server` setup, CSRs, LiteScope.
-- `usb3_pipe/phy.py` (`USB3PHYX2Link`), `usb3_pipe/lanes.py` (`LanesTXPacker`, `LanesFramingAligner`,
-  `LanesIdleFilter`): the Gen 1x2 Link interface.
+- `usb3_pipe/phy.py` (`USB3PHYX2Link`), `usb3_pipe/lanes.py` (`LanesTXPacker`,
+  `LanesPacketAligner`): the Gen 1x2 Link interface.
 - `bench/acorn.py` (`--lanes 2`, `--role`, `--no-x2`, `--lanes-core`), `bench/usb3_soc.py` (`add_usb3_lanes_link`),
   `bench/usb3_lanes.py` (client), `bench/acorn_ftdi.py` (FT2232H/FT4232H boards selection: list, load,
   litex_server).
