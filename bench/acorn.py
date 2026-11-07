@@ -220,7 +220,7 @@ def main():
     x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2, SFP-0/SFP-1, Mini only).", choices=[1, 2])
     x2_group.add_argument("--role",       default="device",    help="USB3PHY role with --lanes 2 (one board in each role).", choices=["device", "host"])
     x2_group.add_argument("--no-x2",      action="store_true", help="--lanes 2: not Gen 1x2 capable (Gen 1x1 negotiated: single lane fallback on SFP-0).")
-    x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2 Device: USB3 Device Core (--example) through a dual SFP to USB-C breakout instead of the PRBS stand-ins: Gen 1x2 (SuperSpeedPlus) with loopback/wishbone/bench, Gen 1x1 otherwise.")
+    x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2 instead of the PRBS stand-ins: Device: USB3 Device Core (--example; Gen 1x2 (SuperSpeedPlus) with loopback/wishbone/bench, Gen 1x1 otherwise); Host: scripted USB host (enumeration + Bulk loopback with data checks, for a Device running --example loopback).")
     args = parser.parse_args()
 
     # Gen 1x2: two SFPs (Mini), PHY + PRBS Link-Layer stand-ins only (no SuperSpeedPlus Link Layer).
@@ -228,7 +228,6 @@ def main():
         assert args.variant == "mini", "--lanes 2 requires the Mini (SFP-0/SFP-1)."
         assert not args.with_serdes_debug, "--lanes 2: --with-serdes-debug not supported."
         assert args.cpu_type is None and not args.with_dram, "--lanes 2: no CPU/DRAM."
-        assert not (args.lanes_core and args.role == "host"), "--lanes-core: Device role only."
         assert not (args.lanes_core and args.no_core), "--lanes-core: USB3 Device Core required."
     else:
         assert args.role == "device", "--role host requires --lanes 2."

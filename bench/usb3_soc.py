@@ -476,6 +476,10 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     boards (one in each role, as sim.py --lanes 2), not with a USB host. x2_capable=False: Gen 1x1
     negotiated with the partner (single lane fallback on Lane 0, as sim.py --dev-mode x1).
 
+    with_core (Host role): scripted USB host (USB3HostScript: USB3HostModel running the Gen 1x2
+    enumeration + Bulk loopback script with the data checks, on a USB3PHYX2Link) for a Device board
+    running the loopback example: the Gen 1x2 Device Core tested between two boards.
+
     with_core (Device role): USB3 Device Core example design instead of the PRBS stand-ins, through a
     dual SFP to USB-C breakout, Configuration Lane (plug orientation) detected (as sim.py --lanes 2
     --lanes-core), soc.usb3_link:
@@ -485,8 +489,8 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     LEDs: SerDes ready, U0, lanes swapped."""
     sys_clk_freq = soc.sys_clk_freq
     assert len(serdes) == 2
-    assert (not with_core) or (role == "device")
-    lanes_x2 = with_core and (example in ["loopback", "wishbone", "bench"])
+    host_script = with_core and (role == "host")
+    lanes_x2    = host_script or (with_core and (example in ["loopback", "wishbone", "bench"]))
     if with_core and not lanes_x2:
         x2_capable = False # Gen 1 Link Layer on 32-bit words: Gen 1x1 only.
 
@@ -502,14 +506,20 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
         with_endianness_swap = False,
         lanes                = 2,
         x2_capable           = x2_capable)
-    if not with_core:
-        soc.comb += usb3_phy.link_activity.eq(1) # No Link Layer: no PM activity.
+    if (not with_core) or host_script:
+        soc.comb += usb3_phy.link_activity.eq(1) # No (native) Link Layer: no PM activity.
 
     # USB3 PHY/Lanes Debug -------------------------------------------------------------------------
     soc.usb3_debug = USB3PHYDebug(usb3_phy, serdes[0], sys_clk_freq)
 
     usb3_link = None
-    if with_core:
+    if host_script:
+        # Scripted USB Host ------------------------------------------------------------------------
+        # RX buffer: a Device 1024-byte DPP (128 pairs at two words per cycle) taken by the script at
+        # one word per cycle.
+        soc.usb3_link   = usb3_link = USB3PHYX2Link(usb3_phy, rx_buffer_depth=512)
+        soc.usb3_script = USB3HostScript(usb3_link, sys_clk_freq=sys_clk_freq)
+    elif with_core:
         # USB3 Device Core -------------------------------------------------------------------------
         if lanes_x2:
             soc.usb3_link = usb3_link = USB3PHYX2Link(usb3_phy)
@@ -525,9 +535,102 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes, link=usb3_link)
 
     # Leds -----------------------------------------------------------------------------------------
-    status = usb3_phy.lane_swap if with_core else usb3_phy.x2
+    status = usb3_phy.lane_swap if (with_core and not host_script) else usb3_phy.x2
     for led, signal in zip(leds, [usb3_phy.ready, usb3_phy.u0, status]):
         soc.comb += led.eq(~signal if leds_inverted else signal)
+
+# USB3 Scripted Host -------------------------------------------------------------------------------
+
+def usb3_host_script(ssp=True):
+    """Scripted USB host script for the hardware tests (USB3HostScript, bench/usb3_lanes.py script):
+    link initialization, enumeration-like control transfers and Bulk loopback (EP2 OUT -> EP1 IN) with
+    the Bulk IN data checked, SuperSpeedPlus (Gen 1x2) or SuperSpeed (Gen 1x1) operation."""
+    from usb3_core.host_model import enumeration_script
+    return enumeration_script(skp=False, ssp=ssp, check_data=True)
+
+class USB3HostScript(LiteXModule):
+    """Scripted USB host (USB3HostModel) on a USB3PHYX2Link with CSRs: the script runs in U0 when
+    enabled (restarted when disabled or out of U0), done/error/step status, passes/fails counters.
+    Out of the script runs, a LUP keep-alive Link Command is sent every 10us in U0 (as a host,
+    7.5.6.1: the Device does not enter Recovery for a lack of link activity, 1ms)."""
+    def __init__(self, link, ssp=True, sys_clk_freq=125e6):
+        from litex.soc.interconnect.csr import CSRStorage, CSRStatus, CSRField
+        from usb3_pipe.framing  import WordsToPairs, PairsToWords
+        from usb3_core.host_model import USB3HostModel
+        self._control = CSRStorage(fields=[
+            CSRField("enable", size=1, offset=0, reset=0, description="Run the script (in U0, restarted on 0 -> 1)."),
+        ])
+        self._status = CSRStatus(fields=[
+            CSRField("done",    size=1, offset=0, description="Script done (all the steps matched)."),
+            CSRField("error",   size=1, offset=1, description="Script error (mismatch or timeout at step)."),
+            CSRField("running", size=1, offset=2, description="Script running."),
+        ])
+        self._step   = CSRStatus(32, description="Current script step (failing step on error).")
+        self._passes = CSRStatus(32, description="Scripts done count.")
+        self._fails  = CSRStatus(32, description="Scripts errors count.")
+
+        # # #
+
+        from migen.genlib.misc import WaitTimer
+        from usb3_core.host_model import link_command, LUP
+        script = usb3_host_script(ssp=ssp)
+        self.model = model = USB3HostModel(script.steps)
+        self.pairs = pairs = WordsToPairs()
+        self.words = words = PairsToWords()
+
+        # LUP keep-alive (out of the script runs).
+        lup       = link_command(LUP())
+        lup_timer = WaitTimer(int(10e-6*sys_clk_freq))
+        lup_busy  = Signal()
+        lup_word  = Signal()
+        run       = Signal() # Script enabled (started between two LUPs).
+        active    = Signal() # Script running.
+        self.submodules += lup_timer
+        self.sync += If(~self._control.fields.enable | ~link.u0,
+            run.eq(0)
+        ).Elif(~lup_busy,
+            run.eq(1)
+        )
+        self.comb += [
+            active.eq(run & ~model.done & ~model.error),
+            lup_timer.wait.eq(link.u0 & ~active & ~lup_busy),
+            If(active,
+                model.source.connect(pairs.sink),
+            ).Elif(lup_busy,
+                pairs.sink.valid.eq(1),
+                pairs.sink.first.eq(~lup_word),
+                pairs.sink.last.eq(lup_word),
+                pairs.sink.data.eq(Mux(lup_word, lup[1][0], lup[0][0])),
+                pairs.sink.ctrl.eq(Mux(lup_word, lup[1][1], lup[0][1])),
+            ),
+        ]
+        self.sync += [
+            If(lup_timer.done & ~lup_busy & ~active,
+                lup_busy.eq(1),
+                lup_word.eq(0),
+            ).Elif(lup_busy & pairs.sink.ready,
+                lup_word.eq(1),
+                If(lup_word, lup_busy.eq(0)),
+            ),
+        ]
+        self.comb += [
+            pairs.source.connect(link.sink),
+            link.source.connect(words.sink),
+            words.source.connect(model.sink),
+            model.enable.eq(run),
+            model.u0.eq(link.u0),
+            self._status.fields.done.eq(model.done),
+            self._status.fields.error.eq(model.error),
+            self._status.fields.running.eq(model.enable & ~model.done & ~model.error),
+            self._step.status.eq(model.step),
+        ]
+        for name, signal in [("passes", model.done), ("fails", model.error)]:
+            csr = getattr(self, f"_{name}")
+            signal_d = Signal()
+            self.sync += [
+                signal_d.eq(signal),
+                If(signal & ~signal_d, csr.status.eq(csr.status + 1)),
+            ]
 
 # USB3 Analyzer ------------------------------------------------------------------------------------
 

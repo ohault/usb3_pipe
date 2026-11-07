@@ -19,6 +19,11 @@ Examples (litex_server --jtag on ports 1234/1235, one per board):
   ./bench/usb3_lanes.py --port 1235 --csr-csv build/acorn_x2_device/csr.csv retrain --wait 2
   ./bench/usb3_lanes.py --port 1235 --csr-csv build/acorn_x2_device/csr.csv prbs --duration 60
   ./bench/usb3_lanes.py --port 1235 --csr-csv build/acorn_x2_device/csr.csv watch
+
+Gen 1x2 Device Core between the two boards (Host: scripted USB host, Device: loopback example):
+  ./bench/acorn.py --lanes 2 --role host   --lanes-core --with-jtagbone --output-dir build/acorn_x2_host_script --build --load
+  ./bench/acorn.py --lanes 2 --role device --lanes-core --example loopback --with-jtagbone --output-dir build/acorn_x2_device_core --build --load
+  ./bench/usb3_lanes.py --port 1234 --csr-csv build/acorn_x2_host_script/csr.csv script --runs 100
 """
 
 import json
@@ -97,8 +102,10 @@ def main():
     parser.add_argument("--wait",     default=1.0,  type=float, help="Wait time (s) after retrain.")
     parser.add_argument("--period",   default=1.0,  type=float, help="watch/prbs polling period (s).")
     parser.add_argument("--duration", default=10.0, type=float, help="prbs: test duration (s).")
+    parser.add_argument("--runs",     default=1,    type=int,   help="script: runs of the scripted host.")
+    parser.add_argument("--timeout",  default=2.0,  type=float, help="script: run timeout (s).")
     parser.add_argument("command",    choices=["status", "clear", "retrain", "watch", "prbs",
-        "prbs-enable", "prbs-disable"])
+        "prbs-enable", "prbs-disable", "script"])
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -165,6 +172,42 @@ def main():
             "recoveries"   : status["recovery_count"] - recovery,
             "x2"           : status["x2"],
         }))
+    elif args.command == "script":
+        # Scripted USB host (bench/acorn.py --lanes 2 --role host --lanes-core): runs of the
+        # enumeration + Bulk loopback script (Bulk IN data checked), failing step and script section.
+        from usb3_soc import usb3_host_script
+        from usb3_core.host_model import OP_MARK
+        assert hasattr(bus.regs, "usb3_script_control"), "No scripted host in this build (--role host --lanes-core)."
+        script  = usb3_host_script()
+        def section(step):
+            name = "start"
+            for i, s in enumerate(script.steps[:step + 1]):
+                if s[0] == OP_MARK:
+                    name = script.marks[s[1]]
+            return name
+        results = {"done": 0, "error": 0, "timeout": 0}
+        for run in range(args.runs):
+            lanes.reg("usb3_script_control").write(0)
+            lanes.reg("usb3_script_control").write(1)
+            start = time.time()
+            while True:
+                status = lanes.reg("usb3_script_status").read()
+                step   = lanes.reg("usb3_script_step").read()
+                if status & 0b011:
+                    result = "done" if (status & 0b001) else "error"
+                    break
+                if time.time() - start > args.timeout:
+                    result = "timeout" # Script not done (ex: link not in U0).
+                    break
+            results[result] += 1
+            print(json.dumps({"run": run, "result": result, "step": step, "section": section(step),
+                "time_ms": round(1e3*(time.time() - start), 1)}), flush=True)
+        lanes.reg("usb3_script_control").write(0)
+        status = lanes.status()
+        print(json.dumps({**results, "passes_csr": lanes.reg("usb3_script_passes").read(),
+            "fails_csr": lanes.reg("usb3_script_fails").read(), "x2": status["x2"],
+            "lane_swap": status["lane_swap"], "recovery_count": status["recovery_count"],
+            "rx_overflow": status["rx_overflow"]}))
     elif args.command == "prbs-enable":
         lanes.prbs_enable(True)
     elif args.command == "prbs-disable":

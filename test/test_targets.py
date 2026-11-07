@@ -139,11 +139,22 @@ def test_target_lanes_core(example, tmp_path):
     verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
     assert verilog.count("\nGTPE2_CHANNEL ") == 2
 
+def test_target_lanes_host_script(tmp_path):
+    # Acorn Mini, Gen 1x2 PHY in the Host role with the scripted USB host (USB3HostScript on a
+    # USB3PHYX2Link): the script CSRs, no PRBS stand-ins, both lanes.
+    csr = elaborate("acorn", tmp_path, ["--lanes", "2", "--role", "host", "--lanes-core"])
+    for csr_name in ["usb3_script_control", "usb3_script_status", "usb3_script_step",
+        "usb3_script_passes", "usb3_script_fails", "usb3_lanes_debug_rx_drop_count"]:
+        assert csr_name in csr
+    assert "usb3_prbs" not in csr
+    verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
+    assert verilog.count("\nGTPE2_CHANNEL ") == 2
+
 def test_target_lanes_args(tmp_path):
     # --role host/--no-x2/--lanes-core require --lanes 2, --lanes 2 requires the Mini, --lanes-core
-    # requires the Device role and the core.
+    # requires the core.
     for args in [["--role", "host"], ["--no-x2"], ["--lanes-core"], ["--lanes", "2", "--variant", "standard"],
-        ["--lanes", "2", "--lanes-core", "--role", "host"], ["--lanes", "2", "--lanes-core", "--no-core"]]:
+        ["--lanes", "2", "--lanes-core", "--no-core"]]:
         cmd = [sys.executable, "-c", RUN_TARGET, "bench/acorn.py", "--output-dir", str(tmp_path)] + args
         p = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         assert p.returncode != 0
