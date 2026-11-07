@@ -36,7 +36,11 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   Lane 0, `sink_x1`/`source_x1`), SuperSpeed partner fallback, lanes swap (Configuration Lane
   detection, `--lanes-crossed`), deskew on the first COM words after a gap, SuperSpeedPlus Link
   Layer/Device Core at Gen 1x2 (`USB3PHYX2Link`, `sim.py --lanes 2 --lanes-core`, `TestPHYX2Core`;
-  `bench/acorn.py --lanes 2 --lanes-core`), Gen 1x1 fallback on the Configuration Lane.
+  `bench/acorn.py --lanes 2 --lanes-core`), Gen 1x1 fallback on the Configuration Lane; scripted USB
+  host in gateware for the two boards Device Core test (`--role host --lanes-core`,
+  `usb3_lanes.py script`).
+- Hardware available (user): two Acorn Minis + CLE-215+ and two SFP DAC cables (no SFP2USB adapter,
+  no breakout, no Gen 1x2 host yet): tests 1-10 of doc/gen1x2-hardware-validation.md.
 - Next: hardware validation on two Acorn Minis with two SFP DAC cables
   ([doc/gen1x2-hardware-validation.md](doc/gen1x2-hardware-validation.md)), the Device Core build
   with a USB 3 host through the SFP2USB adapter/the breakout, then a Gen 1x2 host

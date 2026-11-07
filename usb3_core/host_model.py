@@ -212,6 +212,7 @@ OP_END  = 4 # End of script.
 OP_IDLE = 5 # Logical Idle for data cycles.
 OP_PM   = 6 # Pulse the Host LTSSM PM controls (data: PM_* flags).
 OP_U0   = 7 # Wait the Host LTSSM U0 (re-)entry.
+OP_CHECK = 8 # Next received word must match data (under mask)/ctrl, else error (strict checks).
 
 # Host LTSSM PM controls (OP_PM).
 PM_REQ_U1  = 0b00001
@@ -242,7 +243,7 @@ class USB3HostModel(LiteXModule):
         # # #
 
         # Script ROM.
-        layout = [("op", 3), ("data", 32), ("ctrl", 4), ("mask", 32), ("first", 1), ("last", 1)]
+        layout = [("op", 4), ("data", 32), ("ctrl", 4), ("mask", 32), ("first", 1), ("last", 1)]
         width  = sum(w for _, w in layout)
         def encode(step):
             value, offset = 0, 0
@@ -253,7 +254,7 @@ class USB3HostModel(LiteXModule):
         mem  = Memory(width, len(script) + 1, init=[encode(s) for s in script] + [encode((OP_END, 0, 0, 0, 0, 0))])
         port = mem.get_port(async_read=True)
         self.specials += mem, port
-        step  = Signal(max=len(script) + 1)
+        self.step = step = Signal(max=len(script) + 1) # o: Current step (failing step on error).
         fields = {}
         offset = 0
         for name, w in layout:
@@ -291,6 +292,9 @@ class USB3HostModel(LiteXModule):
             OP_WAIT: [
                 timer.wait.eq(run),
             ],
+            OP_CHECK: [
+                timer.wait.eq(run),
+            ],
             OP_SKP: [
                 self.skp.eq(run),
             ],
@@ -315,6 +319,19 @@ class USB3HostModel(LiteXModule):
                 OP_WAIT: [
                     If(match,
                         step.eq(step + 1)
+                    ).Elif(timer.done,
+                        self.error.eq(1),
+                        Display("HOST_TIMEOUT step %d", step)
+                    )
+                ],
+                OP_CHECK: [
+                    If(sink.valid,
+                        If(match,
+                            step.eq(step + 1)
+                        ).Else(
+                            self.error.eq(1),
+                            Display("HOST_CHECK step %d: %08x %01x", step, sink.data, sink.ctrl)
+                        )
                     ).Elif(timer.done,
                         self.error.eq(1),
                         Display("HOST_TIMEOUT step %d", step)
@@ -382,10 +399,21 @@ class HostScript:
     def wait(self, data, ctrl=0, mask=0xffffffff):
         self.steps.append((OP_WAIT, data, ctrl, mask, 0, 0))
 
-    def wait_hp(self, type2=False):
+    def check(self, data, ctrl=0, mask=0xffffffff):
+        self.steps.append((OP_CHECK, data, ctrl, mask, 0, 0))
+
+    def wait_hp(self, type2=False, dpp=None):
         # Wait a device Header Packet and acknowledge it (LGOOD_n + LCRD_x/LCRD1_x/LCRD2_x, 7.2.4,
-        # type2: asynchronous DP in SuperSpeedPlus operation).
+        # type2: asynchronous DP in SuperSpeedPlus operation). dpp: payload of the DP, its words
+        # checked (strict: the next received words) before the acknowledgement: the DPH words (not
+        # checked: mask 0), then the DPP (SDP framing, data, CRC-32, END framing) right after its DPH
+        # (no spacing, 7.2.1.2.3; aligned DPP: no Packets offset), a mismatch is a script error.
         self.wait(0xfbfbfbf7, ctrl=0b1111)
+        if dpp is not None:
+            for _ in range(4):
+                self.check(0, ctrl=0, mask=0) # DPH words (header, CRC-16/Link Control Word).
+            for data, ctrl in data_packet_payload(dpp):
+                self.check(data, ctrl=ctrl)
         self.send(link_command(LGOOD(self.rx_seq)))
         if self.ssp and type2:
             self.send(link_command(LCRD2(self.lcrd2)))
@@ -464,14 +492,15 @@ class HostScript:
         self.send(data_packet_payload(payload))
         self.wait_hp()                                                # ACK TP.
 
-    def bulk_in(self, ept, dp_seq, name, latency=256, erdy=False):
+    def bulk_in(self, ept, dp_seq, name, latency=256, erdy=False, payload=None):
         # ACK TP (NumP=1) requesting a data packet, DPH + DPP from the device, ACK TP acknowledging it.
         # With erdy: the window closed by the host (NumP=0) with more data available, the device sends
-        # an ERDY (as Linux xHCI hosts, the next request waits for it).
+        # an ERDY (as Linux xHCI hosts, the next request waits for it). payload: expected DPP data,
+        # checked by the script (hardware scripted host: no simulation output to check).
         self.mark(name)
         blk = self.tt(TT_BULK)
         self.send_hp(tp, TP_SUB_ACK, ept=ept, direction=1, nump=1, tp_seq=dp_seq, pp=1, tt=blk)
-        self.wait_hp(type2=True)                                      # DPH (+DPP).
+        self.wait_hp(type2=True, dpp=payload)                         # DPH (+DPP).
         self.idle(latency)                                            # DPP (END framing not aligned).
         self.send_hp(tp, TP_SUB_ACK, ept=ept, direction=1, nump=0, tp_seq=(dp_seq + 1) % 32, tt=blk)
         if erdy:
@@ -513,9 +542,12 @@ def setup_packet(bmRequestType, bRequest, wValue, wIndex, wLength):
     return [bmRequestType, bRequest] + le_bytes(wValue, 2) + le_bytes(wIndex, 2) + le_bytes(wLength, 2)
 
 def enumeration_script(skp=True, latency=256, status_gap=64, bulk=True, pm=False, lpm=False,
-    ssp=False, itp=False):
+    ssp=False, itp=False, check_data=False):
     """Link initialization + enumeration-like control transfers (as Linux on an xHCI host).
-    itp: Isochronous Timestamp Packets (sent periodically by a host in U0) between the transfers."""
+    itp: Isochronous Timestamp Packets (sent periodically by a host in U0) between the transfers.
+    check_data: Bulk IN DPPs (looped back Bulk OUT payloads) checked by the script (without SKP
+    Ordered Sets requests: aligned DPPs)."""
+    assert not (check_data and skp)
     s = HostScript(ssp=ssp)
     def send_itp():
         if itp:
@@ -544,7 +576,8 @@ def enumeration_script(skp=True, latency=256, status_gap=64, bulk=True, pm=False
         send_itp()
         for i in range(len(bulk_payloads())):
             s.bulk_in(ept=1, dp_seq=i, name=f"bulk_in_{i}", latency=latency + 256,
-                erdy = (i + 1) < len(bulk_payloads()))
+                erdy    = (i + 1) < len(bulk_payloads()),
+                payload = bulk_payloads()[i] if check_data else None)
     if pm:
         # U1/U2 requests (rejected by the device: LXU, link stays in U0), then a control transfer.
         s.lgo(1, LXU(), "lgo_u1")

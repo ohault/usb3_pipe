@@ -333,6 +333,10 @@ idle through the SFP DAC cables, and the AC coupling of the lanes on the baseboa
 USB3). The Host role is exercised on hardware for the first time (Rx.Detect is not modelled by the
 LTSSM: both boards start in Polling). Crossed DAC cables (Host SFP-0 <-> Device SFP-1, Host SFP-1 <->
 Device SFP-0, as a flipped USB-C plug): the Device swaps its lanes (`lane_swap: 1` in the status).
+Then the Gen 1x2 Device Core between the same two boards: `--role device --lanes-core --example
+loopback` and a scripted USB host on the Host board (`--role host --lanes-core`: the simulation
+`USB3HostModel` in gateware, `USB3HostScript`, LUP keep-alive): link initialization, enumeration-like
+control transfers and Bulk loopback with the Bulk IN data checked (`usb3_lanes.py script --runs N`).
 
 **M1: Type-C breakout and a Gen 1x2 host** (to do): the Configuration Lane follows the USB-C plug
 orientation (a flipped plug swaps the lanes): detected in gateware (`LaneSwap`, the host sends the

@@ -422,9 +422,10 @@ class USB3PIPESim(SoCMini):
                 # Scripted host Link/Protocol Layer (link initialization, enumeration).
                 # Gen 2: no Gen 1 SKP Ordered Sets/packets offsets in the script (Gen 2 SKP Ordered
                 # Sets by the Gen2TX, packets re-aligned by the Gen 2 framing).
+                # Gen 1x2: Bulk IN data also checked by the script (as the hardware scripted host).
                 host_model = renamer(USB3HostModel(enumeration_script(skp=host_skp and not (gen2 or ssp_x2),
                     latency=host_latency, status_gap=host_status_gap, pm=host_pm, lpm=host_lpm,
-                    ssp=gen2 or ssp_x2, itp=host_itp).steps))
+                    ssp=gen2 or ssp_x2, itp=host_itp, check_data=ssp_x2).steps))
                 self.add_module(name="host_model", module=host_model)
                 host_sink, host_source = link_phy.sink, link_phy.source
                 if getattr(link_phy, "link_words", 1) == 2:
