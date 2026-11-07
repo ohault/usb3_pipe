@@ -31,8 +31,8 @@ from litex.gen.fhdl.verilog import convert
 
 from litex.soc.interconnect import stream
 
+from usb3_pipe.crc         import CRC16, CRC32
 from usb3_core.host_model  import PHYStandIn
-from usb3_core.crc         import CRC16, CRC32
 from usb3_core.link        import USB3LinkLayer
 from usb3_core.protocol    import USB3ProtocolLayer
 from usb3_core.control     import USB3EndpointControl
@@ -60,7 +60,8 @@ BLOCKS = {
 # Ports --------------------------------------------------------------------------------------------
 
 def interface_signals(obj, depth=0):
-    """Signals of the block interface (Signals/Records/stream Endpoints attributes, PHY stand-in)."""
+    """Signals of the block interface (Signals/Records/stream Endpoints attributes, PHY
+    stand-in)."""
     signals = set()
     for name, value in vars(obj).items():
         if name.startswith("_"):
@@ -121,7 +122,8 @@ def parse_reports(name, build_dir):
 # Main ---------------------------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--blocks",       nargs="+", default=list(BLOCKS), choices=list(BLOCKS))
     parser.add_argument("--sys-clk-freq", default=125e6, type=float, help="Target frequency (Hz).")
     parser.add_argument("--part",         default="xc7a200tfbg484-3",  help="FPGA part.")

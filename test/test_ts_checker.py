@@ -8,6 +8,8 @@ import unittest
 
 from migen import *
 
+from litex.gen import *
+
 from usb3_pipe.common import TS1, TS1_INV, TS2, LinkConfig
 from usb3_pipe.training import TSChecker
 
@@ -32,7 +34,8 @@ class TestTSChecker(unittest.TestCase):
                 yield
                 if (yield dut.detected):
                     if dut.config is None:
-                        dut.config = ((yield dut.reset), (yield dut.loopback), (yield dut.scrambling))
+                        dut.config = ((yield dut.reset), (yield dut.loopback),
+                            (yield dut.scrambling))
                     dut.detections += 1
             yield dut.sink.valid.eq(0)
 
@@ -60,7 +63,8 @@ class TestTSChecker(unittest.TestCase):
                     self.assertEqual(config, expected)
 
     def test_link_functionality_reset_and_loopback_ignored(self):
-        # Bit 0 and bit 2 set simultaneously: all training control bits shall be ignored (6.4.1.1.2).
+        # Bit 0 and bit 2 set simultaneously: all training control bits shall be ignored
+        # (6.4.1.1.2).
         link_config = LinkConfig(reset=1, loopback=1, scrambling=0)
         detections, config = self.check(TS2, link_config)
         self.assertEqual(detections, 2)

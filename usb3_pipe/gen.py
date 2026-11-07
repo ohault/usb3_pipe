@@ -9,13 +9,13 @@
 """
 USB3-PIPE standalone core generator.
 
-Generates a standalone USB3.0 SuperSpeed PHY (FPGA transceiver + USB3PIPE + LTSSM) as a Verilog
-module with an AXI-Stream symbol interface, its timing constraints, an instantiation template and
-an interface documentation, from a YAML configuration file:
+Generates a standalone USB 3.2 Gen 1x1 (SuperSpeed, 5Gbps) PHY (FPGA transceiver + USB3PIPE +
+LTSSM) as a Verilog module with an AXI-Stream symbol interface, its timing constraints, an
+instantiation template and an interface documentation, from a YAML configuration file:
 
     usb3_pipe_gen examples/a7_device.yml
 
-Current support: Xilinx 7-Series (Artix7 GTP / Kintex7 GTX), Ultrascale+ (GTY).
+Current support: Xilinx 7-Series (Artix7 GTP / Kintex7 GTX), UltraScale+ (GTY).
 """
 
 import os
@@ -37,6 +37,7 @@ from litex.soc.cores.clock import S7PLL, USPMMCM
 from litex.soc.integration.soc_core import *
 from litex.soc.integration.builder import *
 
+from usb3_pipe.common import FirstFromLast
 from usb3_pipe.serdes import A7USB3SerDes, K7USB3SerDes, USPUSB3SerDes
 from usb3_pipe.ltssm  import USB3LTSSM
 from usb3_pipe.phy    import USB3PHY, USB3PHY_STATUS, USB3PHY_LINK_CTRL
@@ -111,11 +112,13 @@ def get_config(core_config):
         if config["role"] != "device":
             raise ConfigError("usb_core requires role: device.")
         if config["with_link_ctrl"]:
-            raise ConfigError("usb_core and with_link_ctrl are exclusive (the core drives the Link-Layer control).")
+            raise ConfigError("usb_core and with_link_ctrl are exclusive (the core drives the "
+                "Link-Layer control).")
         if not config["with_endianness_swap"]:
             raise ConfigError("usb_core requires with_endianness_swap: True.")
         if config["usb_max_burst"] not in [2, 4, 8, 16]:
-            raise ConfigError(f"Unsupported usb_max_burst: {config['usb_max_burst']} (supported: 2, 4, 8, 16).")
+            raise ConfigError(f"Unsupported usb_max_burst: {config['usb_max_burst']} "
+                "(supported: 2, 4, 8, 16).")
     return config
 
 # LTSSM States -------------------------------------------------------------------------------------
@@ -127,7 +130,8 @@ def get_ltssm_states():
     return ltssm.fsm.encoding
 
 def get_ltssm_state_localparam(name, state):
-    """Return the Verilog localparam name of an LTSSM state (ex: USB3_PIPE_CORE_LTSSM_POLLING_LFPS)."""
+    """Return the Verilog localparam name of an LTSSM state
+    (ex: USB3_PIPE_CORE_LTSSM_POLLING_LFPS)."""
     return re.sub(r"[^A-Z0-9]+", "_", f"{name}_LTSSM_{state}".upper())
 
 # Ports --------------------------------------------------------------------------------------------
@@ -149,6 +153,7 @@ _STATUS_DESCRIPTIONS = {
     "hot_reset"    : "LTSSM in Hot Reset.",
     "ess_inactive" : "LTSSM in eSS.Inactive.",
     "polling_idle" : "LTSSM in Polling.Idle.",
+    "rx_keep"      : "RX symbols kept for the Link Layer until U0 (Recovery.Idle).",
 }
 
 _LINK_CTRL_DESCRIPTIONS = {
@@ -174,6 +179,9 @@ _LINK_CTRL_DESCRIPTIONS = {
     "exit_u1_req"       : "Request U1 exit.",
     "exit_u2_req"       : "Request U2 exit.",
     "wakeup_u3_req"     : "Request U3 wakeup (host only).",
+    "compliance_enable" : "Compliance mode migration path enable (host only, 7.5.4.3).",
+    "directed_loopback" : "Direct the LTSSM to Loopback as master (with loopback_capable).",
+    "loopback_capable"  : "Loopback master capability.",
 }
 
 def get_ports(config):
@@ -213,7 +221,7 @@ def get_ports(config):
         # AXI-Stream Sink (TX symbols).
         add("sink_tvalid", "i",  1, "sys", "TX symbols valid.")
         add("sink_tready", "o",  1, "sys", "TX symbols accepted.")
-        add("sink_tlast",  "i",  1, "sys", "Unused (ignored).")
+        add("sink_tlast",  "i",  1, "sys", "TX end of packet (required: SKP Ordered Sets are only inserted between the packets).")
         add("sink_tdata",  "i", 32, "sys", "TX symbols (4 x 8-bit).")
         add("sink_tuser",  "i",  4, "sys", "TX K-symbol flags (1 bit per symbol).")
 
@@ -280,6 +288,15 @@ class _CRG(LiteXModule):
 # Core ---------------------------------------------------------------------------------------------
 
 class USB3PIPECore(SoCMini):
+    """Standalone core (SoCMini, no CPU) on a bare platform whose IOs are the core ports.
+
+    CRG (sys from the clk port, OOB clock PLL), SerDes (PHYS[config["phy"]]) and USB3PHY, with the
+    Device Core when config["usb_core"] (add_usb_core).
+
+    ports (get_ports(config)) lists the top-level ports: AXI-Stream symbol streams or Bulk IN/OUT
+    AXI-Stream endpoints, LTSSM status, optional Link-Layer control, documented in the generated
+    <name>.md (doc/standalone-core.md).
+    """
     def __init__(self, platform, config):
         self.ports = ports = get_ports(config)
         platform.add_extension(get_ios(ports))
@@ -287,7 +304,8 @@ class USB3PIPECore(SoCMini):
         sys_clk_freq = config["sys_clk_freq"]
 
         # CRG --------------------------------------------------------------------------------------
-        self.crg = _CRG(platform, sys_clk_freq, config["speedgrade"], pll_cls=PHYS[config["phy"]][3])
+        self.crg = _CRG(platform, sys_clk_freq, config["speedgrade"],
+            pll_cls = PHYS[config["phy"]][3])
 
         # SoCMini ----------------------------------------------------------------------------------
         SoCMini.__init__(self, platform, clk_freq=sys_clk_freq,
@@ -322,12 +340,16 @@ class USB3PIPECore(SoCMini):
             self.add_usb_core(platform, config, phy, sys_clk_freq)
         else:
             # AXI-Stream Sink (TX) -----------------------------------------------------------------
+            # Packets first flag from tlast: the PHY only inserts SKP Ordered Sets between the
+            # packets (first/last delimiters).
+            self.tx_first = tx_first = FirstFromLast([("data", 32), ("ctrl", 4)])
             self.comb += [
-                phy.sink.valid.eq(platform.request("sink_tvalid")),
-                platform.request("sink_tready").eq(phy.sink.ready),
-                phy.sink.last.eq(platform.request("sink_tlast")),
-                phy.sink.data.eq(platform.request("sink_tdata")),
-                phy.sink.ctrl.eq(platform.request("sink_tuser")),
+                tx_first.sink.valid.eq(platform.request("sink_tvalid")),
+                platform.request("sink_tready").eq(tx_first.sink.ready),
+                tx_first.sink.last.eq(platform.request("sink_tlast")),
+                tx_first.sink.data.eq(platform.request("sink_tdata")),
+                tx_first.sink.ctrl.eq(platform.request("sink_tuser")),
+                tx_first.source.connect(phy.sink),
             ]
 
             # AXI-Stream Source (RX) ---------------------------------------------------------------
@@ -433,12 +455,12 @@ def generate_documentation(name, config, ports):
     d = []
     d.append(f"# {name}")
     d.append("")
-    d.append("USB3.0 SuperSpeed (5Gbps) PHY generated by `usb3_pipe_gen`: FPGA transceiver, USB3 PIPE")
-    d.append("(LFPS, Training Sequences, scrambling, clock compensation) and LTSSM. It provides a")
-    d.append("link-trained 32-bit symbol stream for a USB3.0 Link Layer.")
+    d.append("USB 3.2 Gen 1x1 (SuperSpeed, 5Gbps) PHY generated by `usb3_pipe_gen`: FPGA transceiver,")
+    d.append("USB3 PIPE (LFPS, Training Sequences, scrambling, clock compensation) and LTSSM. It provides a")
+    d.append("link-trained 32-bit symbol stream for a USB3 Link Layer.")
     if config["usb_core"]:
         d.append("")
-        d.append("With `usb_core`, the core also includes the USB3 Device Core: a complete USB3.0 device")
+        d.append("With `usb_core`, the core also includes the USB3 Device Core: a complete USB3 device")
         d.append("with Bulk IN/OUT AXI-Stream endpoints (see USB3 Device Core).")
     d.append("")
     d.append("## Configuration")

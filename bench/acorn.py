@@ -6,6 +6,21 @@
 # Copyright (c) 2019-2026 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+"""USB3-PIPE on the SQRL Acorn CLE-215+ (Artix7 GTP) in a LiteX Acorn Baseboard.
+
+Baseboard Mini by default (--variant standard), SFP2USB adapter in the SFP cage: Gen 1x1 (5Gbps),
+main validation target (doc/targets.md).
+
+Clocking: GTP reference clock from the 200MHz oscillator (GTGREFCLK0, no PCIe host clock:
+doc/debugging-guide.md), sys at 125MHz.
+
+Bridge: UARTBone by default, JTAGBone with --with-jtagbone (baseboard FT4232H). Optional DDR3
+(--with-dram, msc_dram example) with a VexRiscv CPU.
+
+Build and load (JTAG, volatile): ./bench/acorn.py --build --load [--example <name>]. Shared
+options: bench/usb3_soc.py.
+"""
+
 import argparse
 
 import common # Repository root on the path.
@@ -19,7 +34,7 @@ from litex_boards.platforms import sqrl_acorn
 from litex.build.generic_platform import *
 
 from litex.soc.cores.clock import *
-from litex.soc.cores.xadc import S7SystemMonitor
+from litex.soc.cores.xadc  import S7SystemMonitor
 
 from litedram.modules import MT41K512M16
 from litedram.phy     import s7ddrphy
@@ -208,7 +223,8 @@ class USB3SoC(USB3BaseSoC):
 # Build --------------------------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="USB3-PIPE on the SQRL Acorn CLE-215+ (Artix7 GTP), LiteX Acorn Baseboard (Mini).")
+    parser = argparse.ArgumentParser(
+        description="USB3-PIPE on the SQRL Acorn CLE-215+ (Artix7 GTP), LiteX Acorn Baseboard (Mini).")
     parser.add_argument("--variant",   default="mini",      help="LiteX Acorn Baseboard variant.", choices=["mini", "standard"])
     parser.add_argument("--with-dram", action="store_true", help="Enable the DDR3 SDRAM (requires a CPU, default with the msc_dram example).")
     usb3_soc_args(parser, output_dir="build/sqrl_acorn")
@@ -223,7 +239,7 @@ def main():
     x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2 instead of the PRBS stand-ins: Device: USB3 Device Core (--example; Gen 1x2 (SuperSpeedPlus) with loopback/wishbone/bench, Gen 1x1 otherwise); Host: scripted USB host (enumeration + Bulk loopback with data checks, for a Device running --example loopback).")
     args = parser.parse_args()
 
-    # Gen 1x2: two SFPs (Mini), PHY + PRBS Link-Layer stand-ins only (no SuperSpeedPlus Link Layer).
+    # Gen 1x2: two SFPs (Mini), PRBS Link-Layer stand-ins, or the Device Core (--lanes-core).
     if args.lanes == 2:
         assert args.variant == "mini", "--lanes 2 requires the Mini (SFP-0/SFP-1)."
         assert not args.with_serdes_debug, "--lanes 2: --with-serdes-debug not supported."
@@ -234,7 +250,8 @@ def main():
         assert not args.no_x2, "--no-x2 requires --lanes 2."
         assert not args.lanes_core, "--lanes-core requires --lanes 2."
 
-    # DRAM disk: DDR3 SDRAM, initialized by the BIOS (VexRiscv CPU by default, console on a stub UART).
+    # DRAM disk: DDR3 SDRAM, initialized by the BIOS (VexRiscv CPU by default, console on a stub
+    # UART).
     with_dram = args.with_dram or (args.example == "msc_dram")
     if with_dram and args.cpu_type is None:
         args.cpu_type = "vexriscv"

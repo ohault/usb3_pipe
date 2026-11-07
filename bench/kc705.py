@@ -6,6 +6,19 @@
 # Copyright (c) 2019-2026 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+"""USB3-PIPE on the Xilinx KC705 (Kintex7 GTX, Quad 117).
+
+Gen 1x1 (5Gbps) through the SFP cage (SFP2USB adapter, --connector sfp) or the SMA connectors
+(--connector sma). Build-tested, hardware validation in progress (doc/targets.md).
+
+Clocking: GTX reference clock from the 125MHz SGMII oscillator, sys at 125MHz.
+
+Bridge: UARTBone by default, JTAGBone with --with-jtagbone.
+
+Build and load: ./bench/kc705.py --build --load [--example <name>]. Shared options:
+bench/usb3_soc.py.
+"""
+
 import argparse
 
 import common # Repository root on the path.
@@ -109,7 +122,7 @@ def main():
     platform = xilinx_kc705.Platform()
     platform.add_extension(_usb3_io)
     soc = USB3SoC(platform,
-        connector   = args.connector,
+        connector = args.connector,
         **usb3_soc_argdict(args))
     usb3_soc_build(parser, args, soc)
 

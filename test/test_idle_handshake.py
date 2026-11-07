@@ -9,12 +9,14 @@ import unittest
 
 from migen import *
 
+from litex.gen import *
+
 from usb3_pipe.common import TS2
 from usb3_pipe.core import USB3PIPE
 from usb3_pipe.ltssm import USB3LTSSM
 from usb3_pipe.phy import USB3PHY
 
-from test.common import ScramblerModel, ordered_set_words, words_to_symbols, symbols_to_words
+from test.common      import ScramblerModel, ordered_set_words, words_to_symbols, symbols_to_words
 from test.model.gt    import GTModel, wire_monitor
 from test.model.ltssm import wait_for
 
@@ -100,8 +102,8 @@ class TestIdleHandshake(unittest.TestCase):
             yield dut.lfps_tx_count.eq(24)
             yield
             self.assertTrue((yield from wait_for(dut, dut.ts_tx_tseq)))
-            for pulse in [dut.ts_tx_done, dut.ts_rx_ts1, dut.ts_tx_done, dut.ts_rx_ts2, dut.ts_tx_done,
-                dut.ts_tx_done]:
+            for pulse in [dut.ts_tx_done, dut.ts_rx_ts1, dut.ts_tx_done, dut.ts_rx_ts2,
+                dut.ts_tx_done, dut.ts_tx_done]:
                 yield pulse.eq(1)
                 yield
                 yield pulse.eq(0)
@@ -134,6 +136,16 @@ class TestIdleHandshake(unittest.TestCase):
         for name, direction in USB3PHY_LINK_CTRL:
             self.assertIs(getattr(dut, name), getattr(dut.ltssm, name))
         self.assertEqual(dut.link_activity.reset.value, 1)
+        # Capabilities/flow control attributes always defined (constants without the feature),
+        # also on the Link Layer tests stand-in.
+        from usb3_pipe.phy import USB3PHY_LINK_INTERFACE
+        from usb3_core.host_model import PHYStandIn
+        stand_in = PHYStandIn()
+        for name, _ in USB3PHY_LINK_INTERFACE:
+            self.assertTrue(hasattr(dut,      name), name)
+            self.assertTrue(hasattr(stand_in, name), name)
+        self.assertFalse(dut.ssp_capable)
+        self.assertEqual(dut.rx_t2_credits, 4)
 
 if __name__ == "__main__":
     unittest.main()

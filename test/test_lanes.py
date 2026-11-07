@@ -79,7 +79,7 @@ class TestLanes(unittest.TestCase):
         # Marker on both lanes (as duplicated Ordered Sets): striped from a link word.
         marker_word = (0xbcbcbcbcbcbcbcbc, 0xff)
         striper = LaneStriper()
-        lanes = [[], []]
+        lanes   = [[], []]
         def strip_gen(dut):
             for lane in range(2):
                 yield dut.sources[lane].ready.eq(1)
@@ -89,7 +89,8 @@ class TestLanes(unittest.TestCase):
                 yield dut.sink.ctrl.eq(ctrl)
                 yield
                 for lane in range(2):
-                    lanes[lane].append(((yield dut.sources[lane].data), (yield dut.sources[lane].ctrl)))
+                    lanes[lane].append(((yield dut.sources[lane].data),
+                        (yield dut.sources[lane].ctrl)))
         run_simulation(striper, strip_gen(striper))
         lanes[0] = [(rng.getrandbits(32), 0) for _ in range(17)] + lanes[0]
         lanes[1] = [(rng.getrandbits(32), 0) for _ in range(20)] + lanes[1]
@@ -109,7 +110,8 @@ class TestLanes(unittest.TestCase):
             yield dut.destriper.source.ready.eq(1)
             for _ in range(300):
                 if (yield dut.destriper.source.valid):
-                    out.append(((yield dut.destriper.source.data), (yield dut.destriper.source.ctrl)))
+                    out.append(((yield dut.destriper.source.data),
+                        (yield dut.destriper.source.ctrl)))
                 yield
         run_simulation(dut, [lane_gen(dut, 0), lane_gen(dut, 1), checker(dut)])
         self.assertEqual(out, [marker_word] + words)

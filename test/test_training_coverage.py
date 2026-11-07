@@ -15,6 +15,8 @@ import unittest
 
 from migen import *
 
+from litex.gen import *
+
 from litex.soc.interconnect import stream
 
 from usb3_pipe.common import COM, SKP, TSEQ, TS1, TS1_INV, TS2, LinkConfig
@@ -23,7 +25,7 @@ from usb3_pipe.training import TSUnit
 
 from test.common import ordered_set_words, stream_driver, symbols_to_words, words_to_symbols
 
-# Spec reference Ordered Sets (Table 6-4 TSEQ, Table 6-5 TS1/TS2), written independently ----------
+# Spec reference Ordered Sets (Table 6-4 TSEQ, Table 6-5 TS1/TS2), written independently -----------
 
 def D(x, y):
     return (y << 5) | x
@@ -44,10 +46,13 @@ def spec_words(name, link_functionality=0):
 
 # Helpers ------------------------------------------------------------------------------------------
 
-class SerDesStub(Module):
+class SerDesStub(LiteXModule):
     def __init__(self, loopback=False):
         self.sink   = stream.Endpoint([("data", 32), ("ctrl", 4)])
         self.source = stream.Endpoint([("data", 32), ("ctrl", 4)])
+
+        # # #
+
         if loopback:
             self.comb += [
                 self.sink.ready.eq(1),
@@ -62,6 +67,8 @@ def ts_unit(loopback=False):
     serdes = SerDesStub(loopback)
     dut    = TSUnit(serdes)
     dut.submodules += serdes
+    # Ordered Sets on the SerDes sink while transmitted (as the USB3PIPE TX selection).
+    dut.comb += If(dut.tx_active, dut.source.connect(serdes.sink))
     return dut, serdes
 
 def tx_record(dut, serdes, steps, ready_rate=1.0, seed=0):
@@ -160,8 +167,8 @@ class TestTSUnitTX(unittest.TestCase):
                 self.assertLess(remaining, 64)
             dut.result["remaining"] = remaining
             dut.result["sent"]      = len(words) + skipped + remaining
-            dut.result["first"] = (yield serdes.sink.first)
-            dut.result["last"]  = (yield serdes.sink.last)
+            dut.result["first"]     = (yield serdes.sink.first)
+            dut.result["last"]      = (yield serdes.sink.last)
             yield
             # Request held: a new TSEQ sequence starts with a COM.
             dut.result["next"] = ((yield serdes.sink.data), (yield serdes.sink.ctrl),
@@ -287,8 +294,9 @@ class TestTSUnitRX(unittest.TestCase):
     def test_detection_on_last_word_of_8th_ordered_set(self):
         result = rx_detections(spec_words("TS1")*8)
         self.assertEqual(len(result["ts1"]), 1)
-        # Pulse on the 32th word (driver/monitor offset of 1 cycle) + TSChecker latency (2 cycles).
-        self.assertEqual(result["ts1"][0], 8*4 + 2)
+        # Pulse on the 32th word (driver/monitor offset of 1 cycle) + TSChecker latency (3 cycles:
+        # registered word comparisons).
+        self.assertEqual(result["ts1"][0], 8*4 + 3)
 
     def test_8_consecutive_required(self):
         # Sequences broken before 8 consecutive Ordered Sets are not detected.

@@ -10,16 +10,17 @@ Polling substates (SSPPolling, 7.5.4.3-7.5.4.6, see doc/gen2-x2-roadmap.md).
 """
 
 from migen import *
-from migen.genlib.misc import WaitTimer
 
 from litex.gen import *
+from litex.gen.genlib.misc import WaitTimer
 
 from usb3_pipe.common import LTSSM_PIPE_INTERFACE
-from usb3_pipe.lfps import (U1ExitLFPSBurst, U2ExitLFPSBurst, U3WakeupLFPSBurst,
-    exit_burst_cycles,
-    exit_u1_min_cycles, exit_u2_min_cycles, exit_u3_min_cycles)
-from usb3_pipe.lfps import (LFPSRXFrontEnd, SCDGenerator, SCDChecker, LBPMGenerator, LBPMChecker,
-    LBPM_PHY_CAPABILITY, LBPM_PHY_READY, lbpm_phy_capability, rounded_cycles)
+from usb3_pipe.lfps   import U1ExitLFPSBurst, U2ExitLFPSBurst, U3WakeupLFPSBurst
+from usb3_pipe.lfps   import exit_burst_cycles, exit_u1_min_cycles, exit_u2_min_cycles
+from usb3_pipe.lfps   import exit_u3_min_cycles
+from usb3_pipe.lfps   import LFPSRXFrontEnd, SCDGenerator, SCDChecker, LBPMGenerator, LBPMChecker
+from usb3_pipe.lfps   import LBPM_PHY_CAPABILITY, LBPM_PHY_READY, lbpm_phy_capability
+from usb3_pipe.lfps   import rounded_cycles
 
 # Link Training and Status State Machine -----------------------------------------------------------
 
@@ -39,6 +40,8 @@ from usb3_pipe.lfps import (LFPSRXFrontEnd, SCDGenerator, SCDChecker, LBPMGenera
 # - 20ns gap rule / electrical parameters are not modelled. Concurrent U1 exit is modelled
 #   (both partners send a full 900ns burst).
 # - U3 DS failure retry limited to 2 retries then eSS.Inactive.
+# - eSS.Inactive exits to Polling after teSSInactiveQuietTimeout (12ms): automatic re-training,
+#   without waiting for a Warm Reset (benign: an xHCI host issues one on an inactive port).
 
 @ResetInserter()
 class USB3LTSSM(LiteXModule):
@@ -64,6 +67,9 @@ class USB3LTSSM(LiteXModule):
         self.hot_reset          = Signal()
         self.ess_inactive       = Signal()
         self.polling_idle       = Signal()
+        # RX words kept for the Link Layer until U0 (Recovery.Idle: the partner can be in U0 and
+        # send its Advertisement before the Idle handshake ends on this side).
+        self.rx_keep            = Signal()
 
         # PIPE interface (LTSSM_PIPE_INTERFACE, connected by USB3PHY) ------------------------------
         # idle_handshake_done reset=1: short path for a standalone LTSSM.
@@ -327,10 +333,10 @@ class USB3LTSSM(LiteXModule):
         self.pm_sent_lgo = pm_sent_lgo = Signal()  # LGO sent, LAU/LXU pending (PM_LC_TIMER armed)
         pm_acc_kind      = Signal(2) # partner request accepted (LAU sent)
         pm_conc_kind     = Signal(2) # UFP: DS request received while own LGO pending (7.2.4.2.5)
-        pm_lgo_fire  = Signal()
-        pm_lau_fire  = Signal()
-        pm_lxu_fire  = Signal()
-        pm_lpma_fire = Signal()
+        pm_lgo_fire      = Signal()
+        pm_lau_fire      = Signal()
+        pm_lxu_fire      = Signal()
+        pm_lpma_fire     = Signal()
 
         # Ux_EXIT_TIMER arming (armed on U1/U2/Loopback exit LFPS, disarmed on U0 entry) -----------
         ux_armed = Signal()
@@ -965,6 +971,7 @@ class USB3LTSSM(LiteXModule):
 
         # Recovery Idle State (7.5.10.3) -----------------------------------------------------------
         fsm.act("Recovery.Idle",
+            self.rx_keep.eq(1),
             self.ts2_decode.eq(1), # Disable Scrambling bit of the received TS2 (7.5.10.5.1).
             self.idle_handshake.eq(1), # Idle Symbols + handshake (7.5.4.10).
             t_ux_exit.wait.eq(ux_armed),
@@ -1162,28 +1169,28 @@ class USB3LTSSM(LiteXModule):
                     (in_polling_config | in_polling_idle))),
         ]
 
-
 # SuperSpeedPlus Polling (7.5.4.3-7.5.4.6) ---------------------------------------------------------
 
 class SSPPolling(LiteXModule):
     """SuperSpeedPlus Polling substates (7.5.4.3-7.5.4.6) on the Configuration Lane.
 
-    start (level, LTSSM in Polling.LFPS) runs: Polling.LFPS (SCD1 transmitted, 2 SCD1 sent after a SCD1/
-    SCD2 is received) -> Polling.LFPSPlus (SCD2, 2 SCD2 sent after a SCD2 is received, end of SCD) ->
-    Polling.PortMatch (PHY Capability LBPMs, the port with the higher capability adjusts to the
-    partner's, 4 matched LBPMs sent after 2 consecutive matched received) -> Polling.PortConfig (PHY
-    Ready LBPMs, 4 sent after 2 consecutive identical received, the DFP PHY Ready bit 7 de-asserted)
-    -> done (level until start is released), x2/gen2 = negotiated lanes/speed (Table 7-14): Gen 1x1
-    (x2=0, gen2=0), Gen 1x2 (x2=1), Gen 2x1 (gen2=1), Gen 2x2 (x2=1, gen2=1).
+    start (level, LTSSM in Polling.LFPS) runs: Polling.LFPS (SCD1 transmitted, 2 SCD1 sent after a
+    SCD1/SCD2 is received) -> Polling.LFPSPlus (SCD2, 2 SCD2 sent after a SCD2 is received, end of
+    SCD) -> Polling.PortMatch (PHY Capability LBPMs, the port with the higher capability adjusts to
+    the partner's, 4 matched LBPMs sent after 2 consecutive matched received) -> Polling.PortConfig
+    (PHY Ready LBPMs, 4 sent after 2 consecutive identical received, the DFP PHY Ready bit 7
+    de-asserted) -> done (level until start is released), x2/gen2 = negotiated lanes/speed (Table
+    7-14): Gen 1x1 (x2=0, gen2=0), Gen 1x2 (x2=1), Gen 2x1 (gen2=1), Gen 2x2 (x2=1, gen2=1).
 
     The PHY Capability LBPM advertises x2_capable (bit 5) and gen2_capable (bit 2, Table 7-13), the
     common capability is the AND of both ports capabilities. On done with gen2, the PHY has to
     switch to 10Gbps (Gen 2 transceiver rate/datapath, Gen2TXDatapath/Gen2RXDatapath) before
     Polling.RxEQ (Gen 2 TSEQ/TS1/TS2 with SYNC/SDS, not yet in USB3LTSSM).
 
-    16 consecutive Polling.LFPS bursts received without SCD (SuperSpeed partner, 7.5.4.3.1) after
-    4 SCD1 sent: ss_fallback (level until start is released), the LTSSM sends 4 Polling.LFPS bursts
-    and exits to Polling.RxEQ (SuperSpeed Polling.LFPS handshake). tPollingLBPMLFPSTimeout (12ms) in PortMatch/PortConfig: fail.
+    16 consecutive Polling.LFPS bursts received without SCD (SuperSpeed partner, 7.5.4.3.1) after 4
+    SCD1 sent: ss_fallback (level until start is released), the LTSSM sends 4 Polling.LFPS bursts
+    and exits to Polling.RxEQ (SuperSpeed Polling.LFPS handshake). tPollingLBPMLFPSTimeout (12ms) in
+    PortMatch/PortConfig: fail.
 
     Not implemented: tPollingSCDLFPSTimeout, re-timers presence announcement/RT Config, PortMatch
     re-entry/capability fallback after a training failure (Table 7-15).
@@ -1378,3 +1385,6 @@ class SSPPolling(LiteXModule):
             self.fail.eq(1),
             If(~self.start, NextState("IDLE"))
         )
+        states = ["IDLE", "POLLING-LFPS", "POLLING-LFPSPLUS", "SCD-END", "POLLING-PORTMATCH",
+            "POLLING-PORTCONFIG", "DONE", "SS-FALLBACK", "FAIL"]
+        self.comb += [If(fsm.ongoing(s), self.state.eq(i)) for i, s in enumerate(states)]

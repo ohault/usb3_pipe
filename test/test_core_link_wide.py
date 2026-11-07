@@ -4,11 +4,14 @@
 # Copyright (c) 2026 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
-"""USB3 Link Layer on PHY words pairs (64-bit, USB3PHY link_words=2) vs words (32-bit): Data
-Packet Payloads received/transmitted 8 bytes per cycle, same Link Layer words on the PHY."""
+"""USB3 Link Layer on PHY words pairs (64-bit, USB3PHY link_words=2) or quads (128-bit,
+link_words=4) vs words (32-bit): Data Packet Payloads received 8 or 16 bytes per cycle, transmitted
+8 bytes per cycle, same Link Layer words on the PHY."""
 
 import random
 import unittest
+
+import pytest
 
 from migen import *
 
@@ -27,10 +30,11 @@ LENGTHS = [0, 1, 3, 4, 5, 7, 8, 9, 12, 13, 64, 1023, 1024]
 class LinkDUT(LiteXModule):
     def __init__(self, link_words):
         self.phy = phy = PHYStandIn()
+        phy.ssp_capable = True
         phy.gen2_active = Signal(reset=1)
-        if link_words == 2:
-            phy.sink   = stream.Endpoint(link_pairs_layout())
-            phy.source = stream.Endpoint(link_pairs_layout())
+        if link_words > 1:
+            phy.sink   = stream.Endpoint(link_pairs_layout(link_words))
+            phy.source = stream.Endpoint(link_pairs_layout(link_words))
         self.link = USB3LinkLayer(phy, sys_clk_freq=125e6, ssp_tt={2: TT_BULK})
 
 def advertisement():
@@ -47,14 +51,16 @@ def start(phy):
     yield phy.sink.ready.eq(1)
 
 def send_words(phy, words, link_words, rng):
-    """PHY source: words, or words pairs (1 or 2 words per entry)."""
+    """PHY source: words, or words entries (1 to link_words words per entry)."""
     i = 0
     while i < len(words):
-        n = 2 if (link_words == 2 and (i + 1) < len(words) and rng.random() < 0.8) else 1
+        n = 1
+        if (link_words > 1) and (rng.random() < 0.8):
+            n = min(rng.choice([link_words, rng.randrange(1, link_words + 1)]), len(words) - i)
         yield phy.source.valid.eq(1)
         yield phy.source.data.eq(sum(d << (32*j) for j, (d, c) in enumerate(words[i:i+n])))
         yield phy.source.ctrl.eq(sum(c << (4*j) for j, (d, c) in enumerate(words[i:i+n])))
-        if link_words == 2:
+        if link_words > 1:
             yield phy.source.words.eq(n)
         yield
         while not (yield phy.source.ready):
@@ -152,12 +158,14 @@ class TestCoreLinkWide(unittest.TestCase):
 
         @passive
         def dpps():
-            # DPP words in the DPHs order, random gaps before each DPP (prefetched by the endpoints).
+            # DPP words in the DPHs order, random gaps before each DPP (prefetched by the
+            # endpoints).
             for payload in payloads:
                 words = [payload[i:i+dw//8] for i in range(0, len(payload), dw//8)] or [[]]
                 for i, w in enumerate(words):
                     yield link.tx_dpp.valid.eq(1)
-                    yield link.tx_dpp.data.eq(int.from_bytes(bytes(w + [0]*(dw//8 - len(w))), "little"))
+                    yield link.tx_dpp.data.eq(int.from_bytes(bytes(w + [0]*(dw//8 - len(w))),
+                        "little"))
                     yield link.tx_dpp.bytes.eq(len(w))
                     yield link.tx_dpp.first.eq(i == 0)
                     yield link.tx_dpp.last.eq(i == len(words) - 1)
@@ -173,7 +181,7 @@ class TestCoreLinkWide(unittest.TestCase):
                 if (yield phy.sink.valid) & (yield phy.sink.ready):
                     data = (yield phy.sink.data)
                     ctrl = (yield phy.sink.ctrl)
-                    n    = (yield phy.sink.words) if link_words == 2 else 1
+                    n    = (yield phy.sink.words) if link_words > 1 else 1
                     for j in range(n):
                         sent.append(((data >> (32*j)) & 0xffffffff, (ctrl >> (4*j)) & 0xf))
                 yield
@@ -184,8 +192,8 @@ class TestCoreLinkWide(unittest.TestCase):
         self.assertEqual([p[2] for p in dpps_rx], [True]*len(payloads))
 
     def test_rx_throttle(self):
-        # PHY rx_throttle: LGOOD_n still sent for the received DPHs, their LCRD_x held while throttled
-        # and sent once released (the host stops on its credits: RX flow control).
+        # PHY rx_throttle: LGOOD_n still sent for the received DPHs, their LCRD_x held while
+        # throttled and sent once released (the host stops on its credits: RX flow control).
         rng  = random.Random(0)
         dut  = LinkDUT(link_words=2)
         dut.phy.rx_throttle = rx_throttle = Signal()
@@ -226,14 +234,54 @@ class TestCoreLinkWide(unittest.TestCase):
             return [p for p in packets if p[0] == "LC" and (p[1] & 0x780) == cmd]
         throttled, released = counts["throttled"], counts["released"]
         self.assertEqual(len(lcs(throttled, 0x000)), 1 + 2) # LGOOD_n: advertisement + 2 DPHs.
-        self.assertEqual(len(lcs(throttled, 0x080)), 0)     # No LCRD_x while throttled.
+        # LCRD_x/LCRD2_x: the Advertisement (4 + 4, not throttled), none for the 2 DPHs while
+        # throttled.
+        self.assertEqual(len(lcs(throttled, 0x080)), 4 + 4)
         self.assertGreaterEqual(len(lcs(released, 0x080)), 2)
+
+    def test_rx_link_command_copies(self):
+        # Link Command words: accepted with a bit error in one copy, rejected with one correct copy
+        # and the other one far from it (corrupted/misframed word passing a single CRC-5).
+        rng  = random.Random(5)
+        dut  = LinkDUT(link_words=1)
+        link = dut.link
+        phy  = dut.phy
+        def lc(info, flip):
+            words = link_command(info)
+            d, c  = words[1]
+            return [words[0], (d ^ flip, c)]
+        words  = advertisement()
+        words += lc(LCRD(0), 0x00000001) # 1 bit in a copy: accepted.
+        words += lc(LCRD(1), 0x00010000) # 1 bit in the other copy: accepted.
+        words += lc(LCRD(2), 0x0000ffff) # Copy far from the correct one: rejected.
+        words += lc(LCRD(3), 0x00000700) # 3 bits: accepted.
+        received = []
+        def host():
+            yield from start(phy)
+            yield from send_words(phy, words, 1, rng)
+            for _ in range(64):
+                yield
+        @passive
+        def monitor():
+            while True:
+                if (yield link.dbg_rx_lc):
+                    received.append((yield link.dbg_rx_lc_info))
+                yield
+        run_simulation(dut, [host(), monitor()])
+        self.assertEqual(received[-3:], [LCRD(0), LCRD(1), LCRD(3)])
 
     def test_rx_words(self):
         self.rx_test(link_words=1)
 
     def test_rx_pairs(self):
         self.rx_test(link_words=2)
+
+    def test_rx_quads(self):
+        self.rx_test(link_words=4)
+
+    @pytest.mark.slow
+    def test_tx_quads(self):
+        self.tx_test(link_words=4)
 
     def test_tx_words(self):
         self.tx_test(link_words=1)

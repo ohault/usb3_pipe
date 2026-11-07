@@ -29,11 +29,22 @@ TSEQ_COUNT = 65536
 
 class OrderedSetROM:
     """Ordered Set words ROM (adr/dat_r, asynchronous read) as constants lookup: no Memory with
-    init contents and asynchronous read (not kept by some toolchains, ex: GowinSynthesis)."""
-    def __init__(self, module, init):
+    init contents and asynchronous read (not kept by some toolchains, ex: GowinSynthesis).
+
+    registered: dat_r registered from the next address (adr_next, adr = adr_next registered by the
+    user): dat_r is still the word at adr, from a register (timings)."""
+    def __init__(self, module, init, registered=False):
         self.adr   = Signal(max=max(len(init), 2))
-        self.dat_r = Signal(32)
-        module.comb += self.dat_r.eq(Array(Constant(v, 32) for v in init)[self.adr])
+        self.dat_r = Signal(32, reset=init[0] if registered else 0)
+        rom = Array(Constant(v, 32) for v in init)
+        if registered:
+            self.adr_next = Signal(max=max(len(init), 2))
+            module.sync += [
+                self.adr.eq(self.adr_next),
+                self.dat_r.eq(rom[self.adr_next]),
+            ]
+        else:
+            module.comb += self.dat_r.eq(rom[self.adr])
 
 class TSChecker(LiteXModule):
     """Training Sequence Checker
@@ -43,8 +54,8 @@ class TSChecker(LiteXModule):
     This module detects a specific Training Sequence Ordered Set by analyzing the RX stream. When N
     consecutive Ordered Sets have been detected without errors (N configured by n_ordered_sets), a
     detection is reported on detected signals for one cycle. Training config is also reported for
-    TS1/TS2 Ordered Sets. The input words and the detection are registered (timings, 2 cycles of
-    latency).
+    TS1/TS2 Ordered Sets. The input words, the words comparisons and the detection are registered
+    (timings, 3 cycles of latency).
     """
     def __init__(self, ordered_set, n_ordered_sets=1):
         self.sink     = stream.Endpoint([("data", 32), ("ctrl", 4)])
@@ -87,15 +98,24 @@ class TSChecker(LiteXModule):
         mask_init = [0xffffffff]*mem_depth
         if has_link_config:
             mask_init[1] = 0xffff00ff
-        # Received word compared to each Ordered Set word (constants) and the comparison of the
-        # expected word selected (shorter than comparing to the selected word: timings).
-        matches = Signal(mem_depth)
+        # Received word compared to each Ordered Set word (constants), registered (timings: the
+        # compares off the address/count logic, +1 cycle of latency), the comparison of the expected
+        # word selected (shorter than comparing to the selected word: timings).
+        matches   = Signal(mem_depth)
+        matches_r = Signal(mem_depth, reset_less=True)
         for i in range(mem_depth):
             self.comb += matches[i].eq((sink.ctrl == ctrl_init[i]) &
                 ((sink.data & mask_init[i]) == (mem_init[i] & mask_init[i])))
+        sink_r = stream.Endpoint([("data", 32), ("ctrl", 4)])
+        self.sync += [
+            sink_r.valid.eq(sink.valid),
+            sink_r.data[8:16].eq(sink.data[8:16]), # Link Functionality (Symbol 5).
+            matches_r.eq(matches),
+        ]
+        sink  = sink_r
         error = Signal()
         self.comb += [
-            error.eq(sink.valid & ~Array(matches)[port.adr]),
+            error.eq(sink.valid & ~Array(matches_r)[port.adr]),
             self.error.eq(error)
         ]
 
@@ -189,24 +209,27 @@ class TSGenerator(LiteXModule):
         # Memory -----------------------------------------------------------------------------------
         mem_init  = ordered_set_words(ordered_set)
         mem_depth = len(mem_init)
-        port      = OrderedSetROM(self, mem_init)
+        # Words from a register (timings).
+        port      = OrderedSetROM(self, mem_init, registered=True)
 
         # Memory address generation ----------------------------------------------------------------
-        self.sync += [
+        self.comb += [
+            port.adr_next.eq(port.adr),
             If(self.source.valid,
                 If(self.source.ready,
                     If(port.adr == (mem_depth - 1),
-                        port.adr.eq(0)
+                        port.adr_next.eq(0)
                     ).Else(
-                        port.adr.eq(port.adr + 1)
+                        port.adr_next.eq(port.adr + 1)
                     )
                 )
             ).Else(
-                port.adr.eq(0)
+                port.adr_next.eq(0)
             )
         ]
 
-        self.comb += self.busy.eq(port.adr != 0)
+        # Registered (from adr_next: same value as adr != 0), the TX selection behind (timings).
+        self.sync += self.busy.eq(port.adr_next != 0)
 
         # Link Config ------------------------------------------------------------------------------
         link_config = Signal(8)
@@ -272,7 +295,7 @@ class TSGenerator(LiteXModule):
 class TSUnit(LiteXModule):
     """Training Sequence Unit
 
-    Detect/generate the Training Sequence Ordered Sets required for a USB3.0 link with simple
+    Detect/generate the Training Sequence Ordered Sets required for a USB3 link with simple
     control/status signals.
 
     The detection is always enabled: TS1 must also be detected in U0 (partner entering Recovery,
@@ -283,6 +306,7 @@ class TSUnit(LiteXModule):
     from a LTSSM in another clock domain and change after the end of a burst (tx_done).
     """
     def __init__(self, serdes):
+        self.source            = stream.Endpoint([("data", 32), ("ctrl", 4)]) # o: Ordered Sets.
         self.rx_ts1            = Signal()        # o (Pulse)
         self.rx_ts1_inv        = Signal()        # o (Pulse)
         self.rx_ts2            = Signal()        # o (Pulse)
@@ -298,7 +322,7 @@ class TSUnit(LiteXModule):
         self.tx_ts2_loopback   = Signal()        # i (Level)
         self.tx_ts2_scrambling = Signal(reset=1) # i (Level)
         self.tx_done           = Signal()        # o (Pulse)
-        self.tx_active         = Signal()        # o (Level): Ordered Sets transmitted on serdes.sink.
+        self.tx_active         = Signal()        # o (Level): Ordered Sets transmitted.
 
         # # #
 
@@ -321,7 +345,7 @@ class TSUnit(LiteXModule):
 
         # Ordered Set Generators -------------------------------------------------------------------
         # Note: No arbitration between generators. Only one of tx_tseq/tx_ts1/tx_ts2 must be
-        # asserted at a time, otherwise multiple sources will connect to serdes.sink simultaneously.
+        # asserted at a time (one-hot selection of the source).
         self.tseq_generator = tseq_generator = TSGenerator(TSEQ, n_ordered_sets=TSEQ_COUNT)
         self.ts1_generator  = ts1_generator  = TSGenerator(TS1,  n_ordered_sets=16)
         self.ts2_generator  = ts2_generator  = TSGenerator(TS2,  n_ordered_sets=16)
@@ -344,14 +368,25 @@ class TSUnit(LiteXModule):
         # Generations are aborted when no longer requested (tx_enable deasserted or other TS
         # requested by the LTSSM): an interrupted burst restarts on an Ordered Set boundary (with
         # COM, 6.4.1.1) and with a full burst.
+        # Ordered Sets on source (one-hot selection: timings), selected by the PIPE with its
+        # scrambled stream.
+        source = self.source
         for i, g in enumerate(generators):
             self.comb += [
                 g.abort.eq(~sel[i]),
-                If(sel[i],
-                    g.start.eq(1),
-                    g.source.connect(serdes.sink),
-                ),
+                g.start.eq(sel[i]),
+                g.source.ready.eq(sel[i] & source.ready),
             ]
+        def selected(name, width=1):
+            return Reduce("OR", [Replicate(sel[i], width) & getattr(g.source, name)
+                for i, g in enumerate(generators)])
+        self.comb += [
+            source.valid.eq(selected("valid")),
+            source.first.eq(selected("first")),
+            source.last.eq(selected("last")),
+            source.data.eq(selected("data", 32)),
+            source.ctrl.eq(selected("ctrl", 4)),
+        ]
         self.comb += [
             self.tx_done.eq(tseq_generator.done | ts1_generator.done | ts2_generator.done),
             # Link Functionality of the transmitted TS2 (Hot Reset/Loopback, 7.5.4.9.1).

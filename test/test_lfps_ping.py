@@ -8,7 +8,9 @@ import unittest
 
 from migen import *
 
-from usb3_pipe.lfps   import LFPSUnit
+from litex.gen import *
+
+from usb3_pipe.lfps import LFPSUnit
 
 from test.model.gt import LFPSSerDesStub
 

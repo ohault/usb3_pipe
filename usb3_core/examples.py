@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 """USB3 Device Core example designs, shared by the targets (bench/acorn.py, bench/kc705.py,
-bench/alibaba_xcku3p.py).
+bench/alibaba_xcku3p.py, bench/sipeed_tang_mega_138k_pro.py), see doc/examples.md.
 
 - loopback     : Vendor Bulk OUT (EP2) -> FIFO -> Bulk IN (EP1) (bench/usb3_bulk.py).
 - wishbone     : loopback + EP0 Wishbone bridge (litex_server --usb --usb-vid 0x1d50
@@ -15,8 +15,8 @@ bench/alibaba_xcku3p.py).
                  /dev/ttyACMx).
 - console      : CDC-ACM SoC console, BIOS (litex_term /dev/ttyACMx), requires a CPU.
 - uvc          : UVC camera, YUY2 test pattern (ffplay/VLC /dev/videoX).
-- uvc_iso      : UVC camera, YUY2 test pattern, Isochronous streaming (not yet validated on
-                 hardware).
+- uvc_iso      : UVC camera, YUY2 test pattern, Isochronous streaming (480p60/720p30/720p60/
+                 1080p30).
 - msc          : Mass Storage 512KB FAT RAM disk (/dev/sdX).
 - msc_dram     : Mass Storage DRAM disk (upper half of the DRAM, /dev/sdX, mkfs.vfat needed),
                  requires a DRAM controller (soc.sdram) initialized by the BIOS (CPU).
@@ -25,8 +25,10 @@ bench/alibaba_xcku3p.py).
 
 from migen import *
 
-from litex.soc.cores.uart import UART, Stream2Wishbone
+from litex.gen import *
+
 from litex.soc.interconnect import stream
+from litex.soc.cores.uart   import UART, Stream2Wishbone
 
 from usb3_core.common      import endpoint_layout
 from usb3_core.device      import USB3DeviceCore
@@ -67,7 +69,8 @@ def add_usb3_console(soc, usb3_acm):
 def add_usb3_example(soc, usb3_phy, sys_clk_freq, example="loopback", with_lpm=False, max_burst=8,
     with_trace=True):
     """Add a USB3 Device Core example design to soc (on usb3_phy), with_lpm: U1/U2 Link Power
-    Management, max_burst: Bulk endpoints Max Burst (vendor Bulk examples), with_trace: core traces."""
+    Management, max_burst: Bulk endpoints Max Burst (vendor Bulk examples), with_trace: core
+    traces."""
     assert example in USB3_EXAMPLES
     # Link Layer words (USB3PHY link_words): 64-bit Bulk endpoints in the vendor Bulk examples.
     dw = 32*getattr(usb3_phy, "link_words", 1)

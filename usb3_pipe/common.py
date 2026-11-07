@@ -10,8 +10,11 @@ Configuration and Gen 2 Block Headers (6.3.2.2), Symbols/Ordered Sets identifier
 """
 
 from migen import *
+from migen.genlib.cdc import MultiReg, GrayCounter
 
 from litex.gen import *
+
+from litex.soc.interconnect import stream
 
 # Helpers ------------------------------------------------------------------------------------------
 
@@ -123,15 +126,14 @@ TS2 = OrderedSet("TS2",
 # [2] : 0x45454545
 # [3] : 0x45454545
 
-# Asynchronous FIFO -------------------------------------------------------------------------------
+# Asynchronous FIFO --------------------------------------------------------------------------------
 
-class _AsyncFIFORegisteredRead(Module):
+class _AsyncFIFORegisteredRead(LiteXModule):
     """Asynchronous FIFO (migen AsyncFIFOBuffered interface/latency) with the read output register
     loaded from an asynchronous read of the memory at the registered read pointer: the read pointer
     update and the memory read are not chained (timings, FPGAs implementing the small memories as
     registers/LUTs: Gowin GW5A)."""
     def __init__(self, width, depth):
-        from migen.genlib.cdc import MultiReg, GrayCounter
         self.width    = width
         self.depth    = depth
         self.din      = Signal(width)
@@ -155,6 +157,8 @@ class _AsyncFIFORegisteredRead(Module):
         ]
         writable = Signal()
         readable = Signal()
+        # Writable combinatorial (a registered, conservative writable would refuse a write of a
+        # writer without back-pressure one cycle longer: RX words at the line rate).
         self.comb += [
             writable.eq((produce.q[-1] == consume_wdomain[-1]) |
                         (produce.q[-2] == consume_wdomain[-2]) |
@@ -188,18 +192,153 @@ class _AsyncFIFORegisteredRead(Module):
             self.readable.eq(readable),
         )
 
+class _AsyncFIFOPipelinedRead(LiteXModule):
+    """Asynchronous FIFO (migen AsyncFIFOBuffered interface) with the memory read at the registered
+    read pointer (block RAM address from a register: the pointers compare/increment not on the
+    memory address path, timings on fabrics with slow block RAM address routing) into a 3-entry
+    output buffer loaded by the memory reads (full read rate). Latency: as AsyncFIFOBuffered."""
+    def __init__(self, width, depth):
+        self.width    = width
+        self.depth    = depth
+        self.din      = Signal(width)
+        self.we       = Signal()
+        self.writable = Signal()
+        self.dout     = Signal(width)
+        self.re       = Signal()
+        self.readable = Signal()
+
+        # # #
+
+        depth_bits = log2_int(depth, True)
+        assert depth_bits > 1
+        produce = ClockDomainsRenamer("write")(GrayCounter(depth_bits + 1))
+        consume = ClockDomainsRenamer("read")(GrayCounter(depth_bits + 1))
+        self.submodules += produce, consume
+        produce_rdomain = Signal(depth_bits + 1)
+        consume_wdomain = Signal(depth_bits + 1)
+        produce.q.attr.add("no_retiming")
+        consume.q.attr.add("no_retiming")
+        self.specials += [
+            MultiReg(produce.q, produce_rdomain, "read"),
+            MultiReg(consume.q, consume_wdomain, "write"),
+        ]
+        # Writable registered from the next write pointer and the resynchronized read pointer
+        # (conservative by one cycle: the read pointer only advances; the block RAM write enables
+        # from registers): compares of the held/incremented pointers (from registers) selected by
+        # the write. Writers without back-pressure (RX words at the line rate) rely on the depth
+        # (64+ entries) as for the resynchronization latency.
+        def not_full(q):
+            return ((q[-1] == consume_wdomain[-1]) | (q[-2] == consume_wdomain[-2]) |
+                    (q[:-2] != consume_wdomain[:-2]))
+        q_inc  = Signal(depth_bits + 1)
+        q_incg = Signal(depth_bits + 1)
+        self.comb += [
+            q_inc.eq(produce.q_binary + 1),
+            q_incg.eq(q_inc ^ (q_inc >> 1)),
+            produce.ce.eq(self.writable & self.we),
+        ]
+        self.sync.write += self.writable.eq(Mux(produce.ce, not_full(q_incg), not_full(produce.q)))
+
+        storage = Memory(width, depth)
+        wrport  = storage.get_port(write_capable=True, clock_domain="write")
+        rdport  = storage.get_port(clock_domain="read")
+        self.specials += storage, wrport, rdport
+        self.comb += [
+            wrport.adr.eq(produce.q_binary[:-1]),
+            wrport.dat_w.eq(self.din),
+            wrport.we.eq(produce.ce),
+            # Registered read pointer (read on the next cycle).
+            rdport.adr.eq(consume.q_binary[:-1]),
+        ]
+
+        # Memory reads (fetch: data on the next cycle) into the output buffer (3 entries: an entry
+        # fetched every cycle while the output is read every cycle).
+        stored  = Signal() # Entries in the memory not fetched.
+        fetch   = Signal()
+        fetch_d = Signal()
+        level   = Signal(2)
+        entries = [Signal(width, reset_less=True) for _ in range(3)]
+        pop     = Signal()
+        wpos    = Signal(2)
+        self.comb += [
+            stored.eq(consume.q != produce_rdomain),
+            fetch.eq(stored & ((level + fetch_d) < 3)),
+            consume.ce.eq(fetch),
+            self.readable.eq(level != 0),
+            self.dout.eq(entries[0]),
+            pop.eq(self.re & self.readable),
+            wpos.eq(level - pop),
+        ]
+        self.sync.read += [
+            fetch_d.eq(fetch),
+            If(pop,
+                entries[0].eq(entries[1]),
+                entries[1].eq(entries[2]),
+            ),
+            If(fetch_d,
+                Case(wpos, {i: entries[i].eq(rdport.dat_r) for i in range(3)}),
+            ),
+            level.eq(level + fetch_d - pop),
+        ]
+
+class AsyncFIFOPipelinedRead(LiteXModule):
+    """stream.AsyncFIFO(layout, depth, buffered=True) equivalent with _AsyncFIFOPipelinedRead."""
+    def __init__(self, layout, depth):
+        self.wrapper = stream._FIFOWrapper(_AsyncFIFOPipelinedRead, layout, depth)
+        self.sink    = self.wrapper.sink
+        self.source  = self.wrapper.source
+
 class AsyncFIFO(LiteXModule):
     """stream.AsyncFIFO(layout, depth, buffered=True) equivalent with _AsyncFIFORegisteredRead."""
     def __init__(self, layout, depth=8):
-        from litex.soc.interconnect.stream import _FIFOWrapper
-        self.wrapper = _FIFOWrapper(_AsyncFIFORegisteredRead, layout, depth)
+        self.wrapper = stream._FIFOWrapper(_AsyncFIFORegisteredRead, layout, depth)
         self.sink    = self.wrapper.sink
         self.source  = self.wrapper.source
+
+# Stream Buffer ------------------------------------------------------------------------------------
+
+class Buffer(LiteXModule):
+    """stream.Buffer equivalent with stream.PipeReady (pipe_ready: payload registers enable not from
+    the source ready). ready_first: PipeReady then PipeValid (registered source payload/valid)."""
+    def __init__(self, layout, pipe_valid=True, pipe_ready=False, ready_first=False):
+        self.sink   = sink   = stream.Endpoint(layout)
+        self.source = source = stream.Endpoint(layout)
+
+        # # #
+
+        pipeline = []
+        if pipe_valid:
+            self.pipe_valid = stream.PipeValid(layout)
+            pipeline.append(self.pipe_valid)
+        if pipe_ready:
+            self.pipe_ready = stream.PipeReady(layout)
+            pipeline.append(self.pipe_ready)
+        if ready_first:
+            pipeline.reverse()
+        self.pipeline = stream.Pipeline(sink, *pipeline, source)
+
+class FirstFromLast(LiteXModule):
+    """Stream first flag derived from the last flag (first: the first word, then the word after a
+    last): for sources with only an end of packet flag (ex: AXI-Stream tlast), to a sink using the
+    packets delimiters (ex: TXSKPInserter, SKP Ordered Sets only between the packets)."""
+    def __init__(self, layout):
+        self.sink   = sink   = stream.Endpoint(layout)
+        self.source = source = stream.Endpoint(layout)
+
+        # # #
+
+        in_packet = Signal()
+        self.comb += [
+            sink.connect(source, omit={"first"}),
+            source.first.eq(~in_packet),
+        ]
+        self.sync += If(sink.valid & sink.ready, in_packet.eq(~sink.last))
 
 # Endianness Swap ----------------------------------------------------------------------------------
 
 class EndiannessSwap(LiteXModule):
-    """Swap the data bytes/ctrl bits of stream (per word of word_bytes bytes, whole data when None)."""
+    """Swap the data bytes/ctrl bits of stream (per word of word_bytes bytes, whole data when
+    None)."""
     def __init__(self, sink, source, word_bytes=None):
         assert len(sink.data) == len(source.data)
         assert len(sink.ctrl) == len(source.ctrl)

@@ -6,31 +6,50 @@
 # Copyright (c) 2019-2026 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
+"""USB3-PIPE Verilator simulation (doc/usb3-pipe.md "Simulation", ./sim.py --help).
+
+Two USB3PHYs connected through SerDes models (USB3SerDesModel: 8b/10b, LFPS, polarity, RX word
+shift, ppm offset/SSC, SKP insertion):
+- Host: scripted Link/Protocol Layer model (usb3_core.host_model: link initialization,
+  enumeration, Bulk transfers).
+- Device: USB3 Device Core with a Bulk loopback (--no-core: PRBS Link-Layer stand-ins on both
+  sides).
+
+Options: Gen 1x1 (default), Gen 2x1 (--gen2-capable/--gen2, --link-words 2|4, raw words width),
+Gen 1x2 (--lanes 2), Device LTSSM/Link Layer/Core at half the PIPE frequency (--dev-pipe-cd), Link
+Power Management, Recovery and bursts scenarios of the Host model, VCD trace (--trace).
+
+Build in build/sim; run by test/test_phy.py and test/test_sim_host.py (pytest marker sim).
+"""
+
+import os
 import argparse
 
 from migen import *
-from migen.genlib.misc import WaitTimer
-from migen.genlib.cdc  import MultiReg
+from migen.genlib.cdc import MultiReg
 
 from litex.gen import *
+from litex.gen.genlib.misc import WaitTimer
 
 from litex.build.generic_platform import *
 from litex.build.io import CRG
 from litex.build.sim import SimPlatform
 from litex.build.sim.config import SimConfig
 
-from litex.soc.interconnect import stream
+from litex.soc.interconnect         import stream
 from litex.soc.integration.soc_core import *
-from litex.soc.integration.builder import *
+from litex.soc.integration.builder  import *
 
 from litex.soc.cores.code_8b10b import Encoder, Decoder
 
 from usb3_pipe.common   import SKP
 from usb3_pipe.datapath import TXDatapath, RXDatapath, RXErrorMonitor
 from usb3_pipe.phy      import USB3PHY, USB3PHYX2Link
+from usb3_pipe.serdes   import USB3SerDes
 from usb3_pipe.framing  import WordsToPairs, PairsToWords
 from usb3_pipe.prbs     import PRBSPacketGenerator, PRBSPacketChecker
-from usb3_core.host_model import USB3HostModel, enumeration_script
+from usb3_core.host_model import USB3HostModel, enumeration_script, pm_flag
+from usb3_core.host_model import PM_REQ_U1, PM_REQ_U2, PM_LAU, PM_EXIT_U1, PM_EXIT_U2, PM_RECOVERY
 from usb3_core.common      import endpoint_layout
 from usb3_core.device      import USB3DeviceCore
 from usb3_core.bulk        import USB3BulkIN, USB3BulkOUT
@@ -53,48 +72,33 @@ class Platform(SimPlatform):
 
 # Simulation Serializer/Deserializer Model ---------------------------------------------------------
 
-class USB3SerDesModel(LiteXModule):
-    """SerDes model: 8b/10b, TX pattern/LFPS, polarity and RX word shift emulation.
+class USB3SerDesModel(USB3SerDes):
+    """SerDes model (USB3SerDes interface): 8b/10b, TX pattern/LFPS, polarity and RX word shift
+    emulation.
 
     The RX side (decoders, word aligner, SKP remover) runs in `rx_clock_domain`: the partner's TX
     clock, as recovered by the CDR of a real transceiver. The RX datapath's CDC then moves the data
     to the local sys clock domain.
     """
-    def __init__(self, phy_dw=20, rx_word_shift=0, rx_clock_domain="sys", gen2_capable=False):
+    def __init__(self, phy_dw=20, rx_word_shift=0, rx_clock_domain="sys", gen2_capable=False,
+        gen2_dw=None):
         assert phy_dw in [20, 40]
         assert (not gen2_capable) or (phy_dw == 40)
-        self.sink   = stream.Endpoint([("data", 32), ("ctrl", 4)])
-        self.source = stream.Endpoint([("data", 32), ("ctrl", 4)])
-        self.tx     = stream.Endpoint([("data", phy_dw)])
-        self.rx     = stream.Endpoint([("data", phy_dw)])
-
-        self.enable = Signal(reset=1) # i
-        self.ready  = Signal()        # o
-
-        self.tx_polarity = Signal()       # i
-        self.tx_idle     = Signal()       # i
-        self.tx_pattern  = Signal(phy_dw) # i
-        self.tx_lfps     = Signal()       # i
-
-        self.rx_polarity = Signal() # i
-        self.rx_idle     = Signal() # o
-        self.rx_errors   = Signal() # o
-
-        self.tx_skp_enable = Signal(reset=1) # i
-        self.rx_align      = Signal()        # i
-        self.rx_reset      = Signal()        # i: (Not modelled).
-        self.tx_skp        = Signal()        # i: Insert a SKP Ordered Set (2 symbols) on TX.
-
-        self.rx_idle_stretch = 0
-        self.xcvr_name       = None
+        gen2_dw = phy_dw if gen2_dw is None else gen2_dw
+        line_dw = max(phy_dw, gen2_dw) # Line words (Gen 1 symbols on the phy_dw LSBs).
+        USB3SerDes.__init__(self)
+        # Model specific: line words, pattern width, SKP insertion (rx_reset not modelled).
+        self.tx         = stream.Endpoint([("data", line_dw)])
+        self.rx         = stream.Endpoint([("data", line_dw)])
+        self.tx_pattern = Signal(phy_dw) # i
+        self.tx_skp     = Signal()       # i: Insert a SKP Ordered Set (2 symbols) on TX.
 
         # Gen 2 (raw words, same word rate as Gen 1 in the model: the 10Gbps line rate is not
         # modelled, the words carry 128b/132b blocks instead of 8b/10b symbols).
-        self.gen2_capable   = gen2_capable
-        self.rate_10g       = Signal()       # i
-        self.gen2_tx_enable = Signal()       # i
-        self.gen2_tx_data   = Signal(phy_dw) # i
-        self.gen2_rx_data   = Signal(phy_dw) # o (rx clock domain).
+        self.gen2_capable    = gen2_capable
+        self.gen2_data_width = gen2_dw         # Raw words width (USB3PHY Gen2PIPE).
+        self.gen2_tx_data    = Signal(gen2_dw) # i
+        self.gen2_rx_data    = Signal(gen2_dw) # o (rx clock domain).
 
         # # #
 
@@ -153,7 +157,8 @@ class USB3SerDesModel(LiteXModule):
                 If(~shifted,
                     src.ready.eq(1),
                     If(skp_insert,
-                        tx_d.eq(Cat(skp_d, src.data[:16])), tx_k.eq(Cat(Constant(0b11, 2), src.ctrl[:2]))
+                        tx_d.eq(Cat(skp_d, src.data[:16])),
+                        tx_k.eq(Cat(Constant(0b11, 2), src.ctrl[:2]))
                     ).Else(
                         tx_d.eq(src.data), tx_k.eq(src.ctrl)
                     )
@@ -180,8 +185,8 @@ class USB3SerDesModel(LiteXModule):
             ]
 
         # Pattern/Polarity/Shift emulation.
-        tx_data    = Signal(phy_dw)
-        rx_data     = Signal(phy_dw)
+        tx_data     = Signal(line_dw)
+        rx_data     = Signal(line_dw)
         rx_data_sr  = Signal(2*phy_dw)
         rx_polarity = Signal()
         self.specials += MultiReg(self.rx_polarity, rx_polarity, rx_clock_domain)
@@ -206,15 +211,16 @@ class USB3SerDesModel(LiteXModule):
                 rx_data.eq(self.rx.data)
             )
         ]
-        self.comb += self.gen2_rx_data.eq(rx_data)
+        self.comb += self.gen2_rx_data.eq(rx_data[:gen2_dw])
         sync_rx = getattr(self.sync, rx_clock_domain)
-        sync_rx += rx_data_sr.eq(Cat(rx_data_sr[phy_dw:], rx_data)) # Previous word in LSBs.
+        # Previous word in LSBs.
+        sync_rx += rx_data_sr.eq(Cat(rx_data_sr[phy_dw:], rx_data[:phy_dw]))
         for i in range(nwords):
             self.comb += decoders[i].input.eq(rx_data_sr[10*(rx_word_shift+i):10*(rx_word_shift+i+1)])
 
         # RX decode errors.
         self.rx_error_monitor = RXErrorMonitor(decoders, clock_domain=rx_clock_domain)
-        self.gen2_rx_errors = Signal() # i
+        self.gen2_rx_errors   = Signal() # i
         self.comb += self.rx_errors.eq(Mux(self.rate_10g, self.gen2_rx_errors,
             self.rx_error_monitor.errors))
 
@@ -232,8 +238,8 @@ class NCOClockGenerator(LiteXModule):
     """Clock domain generated from the sys clock by a 32-bit phase accumulator (sim only).
 
     The generated clock runs at ratio x the sys clock frequency (with 1 sys clock cycle of jitter).
-    `ppm` offsets its frequency and `ssc` adds a 0/-5000ppm triangular down-spread at 31.5kHz (USB 3.2
-    6.5.4) relative to `nominal_freq`.
+    `ppm` offsets its frequency and `ssc` adds a 0/-5000ppm triangular down-spread at 31.5kHz
+    (USB 3.2 6.5.4) relative to `nominal_freq`.
     """
     def __init__(self, cd, ratio=0.25, ppm=0, ssc=False, nominal_freq=133e6):
         phase  = Signal(32)
@@ -274,10 +280,11 @@ class USB3PIPESim(SoCMini):
     - host_latency:  Host latency (cycles) between the SETUP ACK and the Data stage request.
     - host_status_gap: Host gap (cycles) between the Data stage ACK TP and the STATUS TP.
     - host_pm:       Host LGO_U1/LGO_U2 requests after the enumeration (with_core).
-    - host_lpm:      Device Core with LPM, Host U1/U2 entries/exits after the enumeration (with_core).
+    - host_lpm:      Device Core with LPM, Host U1/U2 entries/exits after the enumeration
+                     (with_core).
     - rx_word_shift: RX shift (in 10-bit symbols) of the SerDes models.
-    - ppm/ssc:       Host/Device in separate clock domains, the Device clock offset by ppm and/or with
-                     SSC. Each SerDes model receives in the partner's (recovered) clock domain.
+    - ppm/ssc:       Host/Device in separate clock domains, the Device clock offset by ppm and/or
+                     with SSC. Each SerDes model receives in the partner's (recovered) clock domain.
     - prbs_words:    Words to check on both sides before ending the simulation (without core).
     - prbs_gap_bits: Gaps of 0 to 2**prbs_gap_bits - 1 cycles (Logical Idle) between the PRBS packets.
 
@@ -304,20 +311,25 @@ class USB3PIPESim(SoCMini):
 
     dev_u1u2=False (lanes=1): Device USB3PHY without U1/U2 (LGO_U1/LGO_U2 rejected).
 
-    dev_pipe_cd (lanes=1, Gen 1): Device USB3PHY with its USB3PIPE/SerDes model in the sys clock domain
-    and its LTSSM/Link interface/Core at half the frequency (USB3PHY pipe_cd, as on FPGAs where the
-    Core can't run at 125MHz), with 64-bit Link Layer words (link_words=2).
+    dev_pipe_cd (lanes=1, Gen 1/Gen 2): Device USB3PHY with its USB3PIPE/SerDes model in the sys
+    clock domain and its LTSSM/Link interface/Core at half the frequency (USB3PHY pipe_cd, as on
+    FPGAs where the Core can't run at 125MHz), with 64-bit Link Layer words (link_words=2, or
+    128-bit: link_words=4 at Gen 2 with wide raw words).
 
-    gen2 (lanes=1, gen2_capable): SerDes models with Gen 2 raw words, the training continues at Gen 2
-    (Gen2PIPE: TSEQ/TS1/TS2 128b/132b blocks, SDS/Logical Idle) to U0, Link Layer packets with the
-    Gen 2 framing in the Data Blocks, SuperSpeedPlus Link Layer (Host script and Device Core: 4-bit
-    Header Sequence Numbers, Type 1/Type 2 credits, Transfer Types).
+    gen2 (lanes=1, gen2_capable): SerDes models with Gen 2 raw words, the training continues at
+    Gen 2 (Gen2PIPE: TSEQ/TS1/TS2 128b/132b blocks, SDS/Logical Idle) to U0, Link Layer packets
+    with the Gen 2 framing in the Data Blocks, SuperSpeedPlus Link Layer (Host script and Device
+    Core: 4-bit Header Sequence Numbers, Type 1/Type 2 credits, Transfer Types).
     """
-    def __init__(self, phy_dw=None, timer_scale=1, with_core=True, rx_word_shift=0, ppm=0, ssc=False,
-        prbs_words=2**16, max_cycles=2**24, host_skp=True, host_latency=256, host_status_gap=64, host_pm=False,
-        host_lpm=False, host_itp=False, lanes=1, lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096,
-        prbs_gap_bits=4, dev_mode="x2", lanes_crossed=False,
-        gen2_capable=False, gen2=False, link_words=1, dev_pipe_cd=False, dev_u1u2=True):
+    def __init__(self, phy_dw=None, timer_scale=1, with_core=True, rx_word_shift=0, ppm=0,
+        ssc=False, prbs_words=2**16, max_cycles=2**24, host_skp=True, host_latency=256,
+        host_status_gap=64, host_pm=False, host_lpm=False, host_itp=False, lanes=1,
+        lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096, prbs_gap_bits=4, dev_mode="x2",
+        lanes_crossed=False, gen2_capable=False, gen2=False,
+        link_words=1, dev_pipe_cd=False, dev_u1u2=True, gen2_data_width=None, host_recovery=False,
+        host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
+        host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
+        host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None):
         assert lanes in [1, 2]
         assert (link_words == 1) or (lanes == 1)
         assert (not gen2) or ((lanes == 1) and gen2_capable)
@@ -330,7 +342,7 @@ class USB3PIPESim(SoCMini):
             lane_skp = 0
         ssp_x2 = with_core and (lanes == 2) and (dev_mode == "x2") # SuperSpeedPlus at Gen 1x2.
         x1 = (lanes == 2) and (dev_mode != "x2") # Gen 1x1 negotiated by the Gen 1x2 Host.
-        assert (not dev_pipe_cd) or ((lanes == 1) and (not gen2_capable))
+        assert (not dev_pipe_cd) or (lanes == 1)
         sys_clk_freq = int(133e6)
         # SerDes models data width: 4 symbols per clock with the core (full PIPE rate, as on
         # hardware) and with 2 lanes, 2 with the PRBS stand-ins.
@@ -356,16 +368,25 @@ class USB3PIPESim(SoCMini):
             cds = {"host": "sys", "dev": "sys"}
         ltssm_cds = dict(cds) # LTSSM/Link clock domains.
         if dev_pipe_cd:
-            # Device LTSSM/Link Layer/Core at the Device frequency/2.
+            # Device LTSSM/Link Layer/Core at the Device frequency/2 (dev_link_ppm: from its own
+            # phase accumulator with a frequency offset, asynchronous to the Device clock as on
+            # hardware: clock domain crossings phases drifting).
             self.cd_dev_link = ClockDomain()
-            dev_link_clk = Signal()
-            getattr(self.sync, cds["dev"]).__iadd__(dev_link_clk.eq(~dev_link_clk))
-            self.comb += [
-                self.cd_dev_link.clk.eq(dev_link_clk),
-                self.cd_dev_link.rst.eq(ResetSignal("sys")),
-            ]
+            if dev_link_ppm is not None:
+                ratio = 0.5 if cds["dev"] == "sys" else 0.125
+                self.dev_link_crg = NCOClockGenerator(self.cd_dev_link,
+                    ratio = ratio,
+                    ppm   = dev_link_ppm)
+            else:
+                dev_link_clk = Signal()
+                getattr(self.sync, cds["dev"]).__iadd__(dev_link_clk.eq(~dev_link_clk))
+                self.comb += [
+                    self.cd_dev_link.clk.eq(dev_link_clk),
+                    self.cd_dev_link.rst.eq(ResetSignal("sys")),
+                ]
             ltssm_cds["dev"] = "dev_link"
-            link_words = 2
+            # Words pairs (or quads: --link-words 4, Gen 2 wide words).
+            link_words = max(link_words, 2)
 
         # USB3 Host (Host = Downstream Port) / Device (Device = Upstream Port).
         phys     = {}
@@ -380,7 +401,8 @@ class USB3PIPESim(SoCMini):
                 phy_dw          = phy_dw,
                 rx_word_shift   = lane1_word_shift if (name, lane) == ("dev", 1) else rx_word_shift,
                 rx_clock_domain = "rx",
-                gen2_capable    = gen2)) for lane in range(lanes_n)]
+                gen2_capable    = gen2,
+                gen2_dw         = gen2_data_width)) for lane in range(lanes_n)]
             pipe_cd = "usb3" if (dev_pipe_cd and name == "dev") else None
             if pipe_cd is not None:
                 renamer = ClockDomainsRenamer({"sys": ltssm_cds[name], "usb3": cds[name],
@@ -423,9 +445,23 @@ class USB3PIPESim(SoCMini):
                 # Gen 2: no Gen 1 SKP Ordered Sets/packets offsets in the script (Gen 2 SKP Ordered
                 # Sets by the Gen2TX, packets re-aligned by the Gen 2 framing).
                 # Gen 1x2: Bulk IN data also checked by the script (as the hardware scripted host).
-                host_model = renamer(USB3HostModel(enumeration_script(skp=host_skp and not (gen2 or ssp_x2),
-                    latency=host_latency, status_gap=host_status_gap, pm=host_pm, lpm=host_lpm,
-                    ssp=gen2 or ssp_x2, itp=host_itp, check_data=ssp_x2).steps))
+                host_model = renamer(USB3HostModel(enumeration_script(
+                    skp              = host_skp and not (gen2 or ssp_x2),
+                    latency          = host_latency,
+                    status_gap       = host_status_gap,
+                    pm               = host_pm,
+                    lpm              = host_lpm,
+                    ssp              = gen2 or ssp_x2,
+                    itp              = host_itp,
+                    burst_out        = host_burst_out,
+                    burst_len        = host_burst_len,
+                    burst_stream     = host_burst_stream,
+                    lbad_test        = host_lbad_test,
+                    burst_duplex     = host_burst_duplex,
+                    burst_duplex_skp = host_burst_duplex_skp,
+                    recovery_mid     = host_recovery_mid,
+                    recovery_cut     = host_recovery_cut,
+                    check_data       = ssp_x2).steps))
                 self.add_module(name="host_model", module=host_model)
                 host_sink, host_source = link_phy.sink, link_phy.source
                 if getattr(link_phy, "link_words", 1) == 2:
@@ -439,20 +475,37 @@ class USB3PIPESim(SoCMini):
                         link_phy.source.connect(host_words.sink),
                     ]
                     host_sink, host_source = host_pairs.sink, host_words.source
-                # Script running in U0, kept running through U1/U2 and the Recovery to U0 that follows.
+                # Script running in U0, kept running through U1/U2 and the Recovery to U0 that
+                # follows.
                 host_ux = Signal()
                 sync    = getattr(self.sync, cds[name])
                 sync   += If(ltssm.u1 | ltssm.u2, host_ux.eq(1)).Elif(ltssm.u0, host_ux.eq(0))
+                # Script directed Recovery (PM_RECOVERY): kept running until back in U0.
+                host_rec      = Signal()
+                host_rec_left = Signal()
+                sync += [
+                    If(pm_flag(host_model.pm, PM_RECOVERY),
+                        host_rec.eq(1),
+                        host_rec_left.eq(0),
+                    ).Elif(host_rec & ~ltssm.u0,
+                        host_rec_left.eq(1),
+                    ).Elif(host_rec & host_rec_left & ltssm.u0,
+                        host_rec.eq(0),
+                    ),
+                ]
+                self.host_pm_recovery = pm_flag(host_model.pm, PM_RECOVERY)
                 self.comb += [
                     host_source.connect(host_model.sink),
                     host_model.source.connect(host_sink),
-                    host_model.enable.eq(ltssm.u0 | ltssm.u1 | ltssm.u2 | host_ux),
+                    host_model.enable.eq(ltssm.u0 | ltssm.u1 | ltssm.u2 | host_ux | host_rec |
+                        # Script done: not restarted by the Recovery.
+                        (host_model.done & host_recovery)),
                     host_model.u0.eq(ltssm.u0),
-                    ltssm.req_u1.eq(host_model.pm[0]),
-                    ltssm.req_u2.eq(host_model.pm[1]),
-                    ltssm.lau.eq(host_model.pm[2]),
-                    ltssm.exit_u1_req.eq(host_model.pm[3]),
-                    ltssm.exit_u2_req.eq(host_model.pm[4]),
+                    ltssm.req_u1.eq(pm_flag(host_model.pm, PM_REQ_U1)),
+                    ltssm.req_u2.eq(pm_flag(host_model.pm, PM_REQ_U2)),
+                    ltssm.lau.eq(pm_flag(host_model.pm, PM_LAU)),
+                    ltssm.exit_u1_req.eq(pm_flag(host_model.pm, PM_EXIT_U1)),
+                    ltssm.exit_u2_req.eq(pm_flag(host_model.pm, PM_EXIT_U2)),
                     serdes[0].tx_skp.eq(host_model.skp),
                 ]
             elif with_core:
@@ -465,7 +518,8 @@ class USB3PIPESim(SoCMini):
                         USB3BulkOUT(ept=2, max_burst=8, data_width=dw)],
                     with_lpm    = host_lpm))
                 self.add_module(name=f"{name}_usb3_core", module=core)
-                loopback = renamer(stream.SyncFIFO(endpoint_layout(dw), 2*256, buffered=True))
+                loopback = renamer(stream.SyncFIFO(endpoint_layout(dw), dev_loopback_depth,
+                    buffered=True))
                 self.add_module(name=f"{name}_loopback", module=loopback)
                 self.comb += [
                     core.endpoints[1].source.connect(loopback.sink),
@@ -532,9 +586,91 @@ class USB3PIPESim(SoCMini):
             # Host script done (or error), then 2^10 cycles.
             end_timer = WaitTimer(2**10)
             self.submodules += end_timer
+            script_end = Signal()
             self.comb += [
-                end_timer.wait.eq(host_model.done | host_model.error),
+                script_end.eq(host_model.done | host_model.error),
+                end_timer.wait.eq(script_end),
                 done.eq(end_timer.done),
+            ]
+            if (not host_recovery) and hasattr(self, "host_pm_recovery"):
+                # Script directed Recovery (PM_RECOVERY).
+                self.sync += phys["host"].ltssm.directed_recovery.eq(self.host_pm_recovery)
+            if host_recovery:
+                # Host directed to Recovery from U0 once the script is done, end once both sides are
+                # back in U0.
+                host_ltssm = phys["host"].ltssm
+                dev_u0     = Signal()
+                recovered  = Signal()
+                requested  = Signal()
+                self.specials += MultiReg(phys["dev"].ltssm.u0, dev_u0)
+                self.sync += [
+                    host_ltssm.directed_recovery.eq(self.host_pm_recovery),
+                    If(host_model.done & ~requested & host_ltssm.u0,
+                        Display("HOST directed to Recovery"),
+                        host_ltssm.directed_recovery.eq(1),
+                        requested.eq(1),
+                    ),
+                    If(requested & host_ltssm.recovery, recovered.eq(1)),
+                ]
+                self.comb += end_timer.wait.eq(host_model.error |
+                    (recovered & host_ltssm.u0 & dev_u0))
+            # Device Recovery triggers in U0: TS1 received (LTSSM), Link Layer request (cause).
+            dev_ltssm = phys["dev"].ltssm
+            dev_link  = self.dev_usb3_core.link
+            dev_sync  = getattr(self.sync, ltssm_cds["dev"])
+            dev_cause = Signal(len(dev_link.dbg_recovery_cause))
+            self.comb += dev_cause.eq(dev_link.dbg_recovery_cause)
+            dev_sync += [
+                If(dev_ltssm.u0 & dev_ltssm.ts_rx_ts1,
+                    Display("[%08d] DEV  TS1 received in U0", timer)),
+                If(dev_link.dbg_recovery,
+                    Display("[%08d] DEV  Link Layer Recovery request (cause %x)", timer,
+                        dev_cause)),
+            ]
+            # Device Header Packets received by the Link Layer (type, Header Sequence Number,
+            # checks).
+            dev_rx_hp_info = Signal(len(dev_link.dbg_rx_hp_info))
+            rx_hp_type, rx_hp_seq = Signal(5), Signal(4)
+            rx_hp_ok, rx_hp_accept, rx_hp_seqer = Signal(), Signal(), Signal()
+            self.comb += [
+                dev_rx_hp_info.eq(dev_link.dbg_rx_hp_info),
+                rx_hp_type.eq(dev_rx_hp_info[0:5]),
+                rx_hp_seq.eq(dev_rx_hp_info[9:13]),
+                rx_hp_ok.eq(dev_rx_hp_info[13]),
+                rx_hp_accept.eq(dev_rx_hp_info[14]),
+                rx_hp_seqer.eq(dev_rx_hp_info[15]),
+            ]
+            dev_sync += If(dev_link.dbg_rx_hp,
+                Display("[%08d] DEV_HPRX type %x seq %d ok %d accept %d seqer %d", timer,
+                    rx_hp_type, rx_hp_seq, rx_hp_ok, rx_hp_accept, rx_hp_seqer))
+            tx_hp_seq, tx_hp_type, tx_hp_retry = Signal(4), Signal(5), Signal()
+            self.comb += [
+                tx_hp_seq.eq(dev_link.dbg_tx_hp_info[0:4]),
+                tx_hp_type.eq(dev_link.dbg_tx_hp_info[4:9]),
+                tx_hp_retry.eq(dev_link.dbg_tx_hp_info[9]),
+            ]
+            dev_sync += If(dev_link.dbg_tx_hp,
+                Display("[%08d] DEV_HPTXS type %x seq %d retry %d", timer, tx_hp_type, tx_hp_seq,
+                    tx_hp_retry))
+            rx_lc_info, ack_seq_dbg = Signal(11), Signal(4)
+            self.comb += [
+                rx_lc_info.eq(dev_link.dbg_rx_lc_info),
+                ack_seq_dbg.eq(dev_link.dbg_state[4:8]),
+            ]
+            dev_sync += If(dev_link.dbg_rx_lc,
+                Display("[%08d] DEV_LCRX info %x ack_seq %d", timer, rx_lc_info, ack_seq_dbg))
+            # Device Header Packets sent by the Link Layer (host model clock cycles, as HOST_*
+            # logs).
+            dev_tx_hp_t = Signal()
+            dev_sync += If(dev_link.dbg_tx_hp, dev_tx_hp_t.eq(~dev_tx_hp_t))
+            dev_tx_hp_s = Signal()
+            dev_tx_hp_d = Signal()
+            host_cycles = Signal(32)
+            self.specials += MultiReg(dev_tx_hp_t, dev_tx_hp_s)
+            self.sync += [
+                host_cycles.eq(host_cycles + 1),
+                dev_tx_hp_d.eq(dev_tx_hp_s),
+                If(dev_tx_hp_s != dev_tx_hp_d, Display("DEV_HPTX %d", host_cycles)),
             ]
             self.sync += If(done & ~report,
                 If(host_model.error,
@@ -592,11 +728,11 @@ class USB3PIPESim(SoCMini):
             self.specials += MultiReg(d.tx_idle, h.rx_idle)
 
         # Extra SKP Ordered Sets on a single Host lane at a time -----------------------------------
-        # Each lane receives SKP Ordered Sets not present on the other lane (lane-to-lane skew varying
-        # by 2 Symbols, per lane SKP removal). The SerDes model holds its TX datapath for the inserted
-        # SKP Ordered Sets (1 word every 2 insertions, absorbed by the TX CDC FIFO): they are inserted
-        # alternately on Lane 1 and Lane 0 and rarely enough for the TX CDC FIFOs not to fill (the
-        # lanes TX must stay in lockstep).
+        # Each lane receives SKP Ordered Sets not present on the other lane (lane-to-lane skew
+        # varying by 2 Symbols, per lane SKP removal). The SerDes model holds its TX datapath for
+        # the inserted SKP Ordered Sets (1 word every 2 insertions, absorbed by the TX CDC FIFO):
+        # they are inserted alternately on Lane 1 and Lane 0 and rarely enough for the TX CDC FIFOs
+        # not to fill (the lanes TX must stay in lockstep).
         if lane_skp:
             skp_timer = Signal(32)
             sync = getattr(self.sync, cds["host"])
@@ -670,9 +806,21 @@ def main():
     parser.add_argument("--lane-skp",      default=4096,        help="Extra Host Lane 1/Lane 0 SKP Ordered Sets period (cycles, 0: disabled, --lanes 2).")
     parser.add_argument("--gen2-capable",  action="store_true", help="Gen 2x1 capability advertised/negotiated in the SuperSpeedPlus Polling (--lanes 1).")
     parser.add_argument("--gen2",          action="store_true", help="Gen 2 training to U0 on raw words (implies --gen2-capable).")
-    parser.add_argument("--link-words",    default=1,           help="Device Link Layer words: 1 (32-bit), 2 (64-bit words pairs).", choices=["1", "2"])
+    parser.add_argument("--link-words",    default=1,           help="Device Link Layer words: 1 (32-bit), 2 (64-bit word pairs), 4 (128-bit word quads: --dev-pipe-cd --gen2 --gen2-data-width 80).", choices=["1", "2", "4"])
+    parser.add_argument("--host-burst-out", default=0, help="Host model rounds of 4 Bulk OUT DPs sent back to back after the script bulk transfers.")
+    parser.add_argument("--host-burst-len", default=64, help="Host model burst DPs payload length (bytes).")
+    parser.add_argument("--dev-link-ppm",   default=None, type=float, help="Device Link clock (--dev-pipe-cd) from its own phase accumulator with this frequency offset (asynchronous clock domain crossings).")
+    parser.add_argument("--host-recovery-mid",  action="store_true", help="Host model directed Recovery between Bulk OUT DPs (Advertisements on the U0 re-entry), then Bulk OUT/IN.")
+    parser.add_argument("--host-recovery-cut",  action="store_true", help="With --host-recovery-mid: the Recovery cuts a Bulk OUT DP (DPP incomplete), sent again after the U0 re-entry.")
+    parser.add_argument("--host-burst-duplex", default=0, help="Host model rounds of 4 Bulk OUT DPs streamed during 4 Bulk IN DPs (full duplex).")
+    parser.add_argument("--host-burst-duplex-skp", action="store_true", help="With --host-burst-duplex: ACK TP behind each OUT DP, SKP Ordered Sets at the packets boundaries (next packets shifted by 2 symbols).")
+    parser.add_argument("--host-burst-stream", default=0, help="Host model Bulk OUT DPs streamed as the device Type 2 credits allow (after the bursts).")
+    parser.add_argument("--dev-loopback-depth", default=512, help="Device Bulk loopback FIFO depth (endpoint words).")
+    parser.add_argument("--host-lbad-test", action="store_true", help="Host model Bulk OUT burst with a DPH CRC error: device LBAD, LRTY and retransmission.")
+    parser.add_argument("--host-recovery", action="store_true", help="Host directed to Recovery from U0 after the script (back to U0 on both sides).")
     parser.add_argument("--host-itp",      action="store_true", help="Host model Isochronous Timestamp Packets between the transfers.")
     parser.add_argument("--dev-pipe-cd",   action="store_true", help="Device LTSSM/Link Layer/Core at half the PIPE frequency (USB3PHY pipe_cd, 64-bit Link Layer words).")
+    parser.add_argument("--gen2-data-width", default=None, type=int, help="Gen 2 raw words width of the SerDes models (default: 40, ex: 80 as GW5 GTR12 1:4 at 125MHz).")
     parser.add_argument("--dev-no-u1u2",   action="store_true", help="Device USB3PHY without U1/U2 Link Power Management.")
     parser.add_argument("--output-dir",    default="build/sim", help="Build directory.")
     args = parser.parse_args()
@@ -684,33 +832,47 @@ def main():
     prbs_words = args.prbs_words or {1: 2**16, 2: 2**14}[lanes]
 
     soc = USB3PIPESim(
-        timer_scale   = int(args.timer_scale),
-        with_core     = with_core,
-        rx_word_shift = int(args.rx_word_shift),
-        ppm           = float(args.ppm),
-        ssc           = args.ssc,
-        prbs_words    = int(prbs_words),
-        max_cycles    = int(args.max_cycles),
-        host_skp      = not args.no_host_skp,
-        host_latency  = int(args.host_latency),
-        host_status_gap = int(args.host_status_gap),
-        host_pm       = args.host_pm,
-        host_itp      = args.host_itp,
-        host_lpm      = args.host_lpm,
-        lanes            = lanes,
-        lane_delays      = (int(args.lane0_delay), int(args.lane1_delay)),
-        lane1_word_shift = int(args.lane1_word_shift),
-        lane_skp         = int(args.lane_skp),
-        dev_mode         = args.dev_mode,
-        lanes_crossed    = args.lanes_crossed,
-        prbs_gap_bits    = int(args.prbs_gap_bits),
-        gen2_capable     = args.gen2_capable or args.gen2,
-        gen2             = args.gen2,
-        link_words       = int(args.link_words),
-        dev_pipe_cd      = args.dev_pipe_cd,
-        dev_u1u2         = not args.dev_no_u1u2)
+        timer_scale           = int(args.timer_scale),
+        with_core             = with_core,
+        rx_word_shift         = int(args.rx_word_shift),
+        ppm                   = float(args.ppm),
+        ssc                   = args.ssc,
+        prbs_words            = int(prbs_words),
+        max_cycles            = int(args.max_cycles),
+        host_skp              = not args.no_host_skp,
+        host_latency          = int(args.host_latency),
+        host_status_gap       = int(args.host_status_gap),
+        host_pm               = args.host_pm,
+        host_itp              = args.host_itp,
+        host_lpm              = args.host_lpm,
+        lanes                 = lanes,
+        lane_delays           = (int(args.lane0_delay), int(args.lane1_delay)),
+        lane1_word_shift      = int(args.lane1_word_shift),
+        lane_skp              = int(args.lane_skp),
+        dev_mode              = args.dev_mode,
+        lanes_crossed         = args.lanes_crossed,
+        prbs_gap_bits         = int(args.prbs_gap_bits),
+        gen2_capable          = args.gen2_capable or args.gen2,
+        gen2                  = args.gen2,
+        link_words            = int(args.link_words),
+        dev_pipe_cd           = args.dev_pipe_cd,
+        dev_u1u2              = not args.dev_no_u1u2,
+        gen2_data_width       = args.gen2_data_width,
+        host_recovery         = args.host_recovery,
+        host_burst_out        = int(args.host_burst_out),
+        host_burst_len        = int(args.host_burst_len),
+        host_burst_stream     = int(args.host_burst_stream),
+        host_burst_duplex     = int(args.host_burst_duplex),
+        host_burst_duplex_skp = args.host_burst_duplex_skp,
+        host_recovery_mid     = args.host_recovery_mid,
+        host_recovery_cut     = args.host_recovery_cut,
+        dev_link_ppm          = args.dev_link_ppm,
+        dev_loopback_depth    = int(args.dev_loopback_depth),
+        host_lbad_test        = args.host_lbad_test)
     builder = Builder(soc, output_dir=args.output_dir)
     builder.build(sim_config=sim_config,
+        # Compiler jobs limited to the CPUs (else one per generated file).
+        jobs        = len(os.sched_getaffinity(0)),
         opt_level   = "O0",
         interactive = False,
         trace       = args.trace,

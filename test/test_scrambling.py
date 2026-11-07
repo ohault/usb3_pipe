@@ -9,6 +9,8 @@ import unittest
 
 from migen import *
 
+from litex.gen import *
+
 from usb3_pipe.common import COM, SKP, gen2_skp_lfsr_symbols
 from usb3_pipe.scrambling import Scrambler, Descrambler
 from usb3_pipe.scrambling import GEN2_LFSR_SEED, gen2_lfsr_advance, Gen2Scrambler
@@ -48,7 +50,7 @@ class TestScrambling(unittest.TestCase):
                     data = (data & ~(0xff << 8*i)) | (COM.value << 8*i)
                     ctrl |= 1 << i
             words.append((data, ctrl, random.random() < 0.8))
-        class DUT(Module):
+        class DUT(LiteXModule):
             def __init__(self):
                 self.submodules.ref    = Scrambler(reset=0xffff)
                 self.submodules.direct = Scrambler(reset=0xffff, with_skp=False, with_com=with_com)
@@ -190,7 +192,6 @@ class TestScrambling(unittest.TestCase):
         dut.run = True
         run_simulation(dut, [generator(dut), checker(dut)])
 
-
     def test_descrambler_data(self):
         def generator(dut):
             for i in range(16):
@@ -265,7 +266,7 @@ class TestScrambling(unittest.TestCase):
             run_simulation(dut, [generator(dut, lane), checker(dut)])
 
     def test_scrambler_descrambler_roundtrip(self):
-        class DUT(Module):
+        class DUT(LiteXModule):
             def __init__(self):
                 self.submodules.scr = Scrambler(reset=0xffff)
                 self.submodules.des = Descrambler(reset=0xffff)
@@ -299,7 +300,6 @@ class TestScrambling(unittest.TestCase):
         dut = DUT()
         dut.run = True
         run_simulation(dut, [generator(dut), checker(dut)])
-
 
     def test_scrambler_enable_passthrough(self):
         def generator(dut):
