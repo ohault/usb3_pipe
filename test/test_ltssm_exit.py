@@ -8,6 +8,8 @@ import unittest
 
 from migen import *
 
+from litex.gen import *
+
 from usb3_pipe.ltssm import USB3LTSSM
 
 from test.model.ltssm import LTSSMTestCase
@@ -54,7 +56,8 @@ class TestLTSSMExitHandshake(LTSSMTestCase):
         def generator(dut):
             yield from self.enter_u1(dut)
             yield dut.exit_u1_req.eq(1)
-            self.assertTrue((yield from self.wait_for(dut, dut.lfps_tx_exit_u1, timeout=us_to_cycles(2))))
+            self.assertTrue((yield from self.wait_for(dut, dut.lfps_tx_exit_u1,
+                timeout=us_to_cycles(2))))
             yield dut.exit_u1_req.eq(0)
             for _ in range(us_to_cycles(16)):
                 yield

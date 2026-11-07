@@ -30,10 +30,18 @@ MAX_PACKET_WORDS = MAX_PACKET_SIZE//4
 # USB3 Endpoint Base -------------------------------------------------------------------------------
 
 class USB3Endpoint(LiteXModule):
+    """Endpoint base with the Protocol Layer interface (see the module docstring).
+
+    - ept: Endpoint Number; direction: 0 (OUT) or 1 (IN).
+    - data_width: DPP words (32/64/128-bit), equal to the Link Layer data_width, or 32 (adapted by
+      the Protocol Layer).
+    The subclasses implement the transfer type (USB3BulkIN/USB3BulkOUT, USB3IsoIN,
+    USB3EndpointControl).
+    """
     def __init__(self, ept, direction, data_width=32):
         self.ept        = ept
         self.direction  = direction  # 0: OUT, 1: IN.
-        self.data_width = data_width # DPP words (32/64-bit, see USB3LinkLayer data_width).
+        self.data_width = data_width # DPP words (32/64/128-bit, see USB3LinkLayer data_width).
 
         # Protocol Layer interface.
         self.hdr_dw0      = Signal(32) # i
@@ -47,11 +55,11 @@ class USB3Endpoint(LiteXModule):
         self.tx_hp        = stream.Endpoint(tx_header_layout()) # o
         self.tx_dpp       = stream.Endpoint(dpp_layout(data_width)) # o
         self.rx_dpp       = stream.Endpoint(dpp_layout(data_width)) # i
-        self.rx_dpp_done  = Signal() # i
-        self.rx_dpp_ok    = Signal() # i
-        self.rx_dpp_setup = Signal() # i: Received DPP is a SETUP DP (Control Endpoint).
-        self.landed       = Signal() # o: rx DPP landed in a slot (with rx_dpp_done).
-        self.pm_busy      = Signal() # o: U1/U2 entry rejected (ex: ACK TP expected, 7.2.4.2.2).
+        self.rx_dpp_done  = Signal()   # i
+        self.rx_dpp_ok    = Signal()   # i
+        self.rx_dpp_setup = Signal()   # i: Received DPP is a SETUP DP (Control Endpoint).
+        self.landed       = Signal()   # o: rx DPP landed in a slot (with rx_dpp_done).
+        self.pm_busy      = Signal()   # o: U1/U2 entry rejected (ex: ACK TP expected, 7.2.4.2.2).
 
         # Control.
         self.reset_seq = Signal() # i: Seq Numbers reset (SET_CONFIGURATION, CLEAR_FEATURE(HALT)).

@@ -8,8 +8,9 @@
 
 Python models of the Host Link Layer to test a USB3 Device Core directly connected to a PHYStandIn:
 a script player (usb3_core.host_model HostScript steps) and a reactive host (PyHost: acknowledges
-the device Header Packets like an xHCI host, test scenarios as generators). Packets builders/decoders
-and the gateware host model (USB3HostModel, used by sim.py) are in usb3_core/host_model.py.
+the device Header Packets like an xHCI host, test scenarios as generators). Packets
+builders/decoders and the gateware host model (USB3HostModel, used by sim.py) are in
+usb3_core/host_model.py.
 """
 
 import random
@@ -25,7 +26,8 @@ from usb3_core.msc        import CBW_SIGNATURE
 # Script Player ------------------------------------------------------------------------------------
 
 def play_script(dut, script, max_cycles=200000, tx_ready_rate=1.0, seed=0):
-    """Play a HostScript against the DUT, returns the simulation output (HOST_MARK/HOST_RX lines)."""
+    """Play a HostScript against the DUT, returns the simulation output (HOST_MARK/HOST_RX
+    lines)."""
     phy    = dut.phy
     log    = []
     rx     = []
@@ -93,9 +95,10 @@ FRAMING = {0xfbfbfbf7: "HP", 0xfefefef7: "LC", 0x5c5c5cf7: "DPP"}
 
 class PyHost:
     """Host Link Layer: sends packets (atomic), acknowledges the device Header Packets (LGOOD_n +
-    LCRD_x), records the received packets."""
-    def __init__(self, phy, corrupt_lgood=False):
+    LCRD_x, ack=False: no acknowledgement), records the received packets."""
+    def __init__(self, phy, corrupt_lgood=False, ack=True):
         self.phy     = phy
+        self.ack     = ack
         self.queue   = deque() # Packets (lists of words) to send.
         self.urgent  = deque() # Link Commands (sent first, between packets).
         self.tx_seq  = 0
@@ -161,7 +164,7 @@ class PyHost:
             elif state == "HP" and len(words) == 5:
                 packet = decode_packets(words)[0]
                 self.hps.append(packet[1:])
-                if packet[-1]:
+                if packet[-1] and self.ack:
                     self.urgent.append(link_command(LGOOD(packet[4])))
                     self.urgent.append(link_command(LCRD(self.lcrd)))
                     self.lcrd = (self.lcrd + 1) % 4
@@ -180,15 +183,17 @@ class PyHost:
             yield
         raise TimeoutError("PyHost wait timeout")
 
-# Received Packets Helpers ------------------------------------------------------------------------
+# Received Packets Helpers -------------------------------------------------------------------------
 
 def tps(packets):
     """Transaction Packets: (subtype, nump, seq)."""
     return [(dw1 & 0xf, (dw1 >> 16) & 0x1f, (dw1 >> 21) & 0x1f)
-        for kind, *p in packets if kind == "HP" for dw0, dw1, dw2, seq, crc in [p] if (dw0 & 0x1f) == 0x04]
+        for kind, *p in packets if kind == "HP" for dw0, dw1, dw2, seq, crc in [p]
+        if (dw0 & 0x1f) == 0x04]
 
 def lmps(packets):
-    return [(dw0 >> 5) & 0xf for kind, *p in packets if kind == "HP" for dw0, dw1, dw2, seq, crc in [p]
+    return [(dw0 >> 5) & 0xf
+        for kind, *p in packets if kind == "HP" for dw0, dw1, dw2, seq, crc in [p]
         if (dw0 & 0x1f) == 0x00]
 
 def dpps(packets):
@@ -239,7 +244,8 @@ def pyhost_control_in(host, setup):
     n1 = len(host.hps)
     host.send_hp(tp, TP_SUB_ACK, nump=1, tp_seq=0, pp=1)
     yield from host.wait(lambda: (len(host.dpps) > d0) or
-        any(tp_fields(hp)["subtype"] == TP_SUB_STALL for hp in host.hps[n1:] if (hp[0] & 0x1f) == 0x04))
+        any(tp_fields(hp)["subtype"] == TP_SUB_STALL for hp in host.hps[n1:]
+            if (hp[0] & 0x1f) == 0x04))
     if len(host.dpps) == d0:
         return None
     host.send_hp(tp, TP_SUB_ACK, nump=0, tp_seq=1)
@@ -289,7 +295,8 @@ def pyhost_bulk_in(host, ept, count, seq=0, nump=8):
 # Isochronous transfers (reactive host).
 
 def pyhost_dps(host):
-    """Received Data Packets: (DPH fields, payload, crc_ok), DPHs paired in order with their DPPs."""
+    """Received Data Packets: (DPH fields, payload, crc_ok), DPHs paired in order with their
+    DPPs."""
     dphs = [dph_fields(hp) for hp in host.hps if (hp[0] & 0x1f) == 0x08]
     return [(d, *p) for d, p in zip(dphs, host.dpps)]
 
@@ -324,4 +331,5 @@ def pyhost_iso_in(host, ept, bursts=[1], ping=True):
 def cbw(tag, length, din, cb):
     """Command Block Wrapper (31 bytes)."""
     cb = bytes(cb).ljust(16, b"\x00")
-    return list(struct.pack("<IIIBBB16s", CBW_SIGNATURE, tag, length, 0x80 if din else 0, 0, len(cb), cb))
+    return list(struct.pack("<IIIBBB16s", CBW_SIGNATURE, tag, length, 0x80 if din else 0, 0,
+        len(cb), cb))

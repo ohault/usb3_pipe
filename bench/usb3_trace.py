@@ -30,10 +30,12 @@ def decode(entry):
     kind      = TYPES.get(typ, f"0x{typ:02x}")
     if typ == 0x04:
         sub  = TP_SUBTYPES.get(dw1 & 0xf, str(dw1 & 0xf))
-        info = (f"{sub:9s} ept {(dw1 >> 8) & 0xf} dir {(dw1 >> 7) & 1} nump {(dw1 >> 16) & 0x1f:2d} "
-            f"seq {(dw1 >> 21) & 0x1f:2d}" + (" rty" if (dw1 >> 6) & 1 else ""))
+        info = (f"{sub:9s} ept {(dw1 >> 8) & 0xf} dir {(dw1 >> 7) & 1} "
+            f"nump {(dw1 >> 16) & 0x1f:2d} seq {(dw1 >> 21) & 0x1f:2d}" +
+            (" rty" if (dw1 >> 6) & 1 else ""))
     elif typ == 0x08:
-        info = (f"ept {(dw1 >> 8) & 0xf} dir {(dw1 >> 7) & 1} seq {dw1 & 0x1f:2d} len {dw1 >> 16:5d}" +
+        info = (f"ept {(dw1 >> 8) & 0xf} dir {(dw1 >> 7) & 1} seq {dw1 & 0x1f:2d} "
+            f"len {dw1 >> 16:5d}" +
             (" setup" if (dw1 >> 15) & 1 else "") + (" eob" if (dw1 >> 6) & 1 else ""))
     else:
         info = f"dw1 0x{dw1:08x}"
@@ -73,7 +75,8 @@ def decode_link(entry):
         typ, sub, seq = rx_hp & 0x1f, (rx_hp >> 5) & 0xf, (rx_hp >> 9) & 0xf
         ok, acc, seqer = (rx_hp >> 13) & 1, (rx_hp >> 14) & 1, (rx_hp >> 15) & 1
         r.append(f"RX HP {TYPES.get(typ, hex(typ))}" + (f"/{sub}" if typ == 0 else "") +
-            f" seq {seq}" + ("" if ok else " CRC-ERR") + (" accepted" if acc else "") + (" SEQ-ERR" if seqer else ""))
+            f" seq {seq}" + ("" if ok else " CRC-ERR") + (" accepted" if acc else "") +
+            (" SEQ-ERR" if seqer else ""))
     if events & 0x08:
         seq, typ, rty = tx_hp & 0xf, (tx_hp >> 4) & 0x1f, (tx_hp >> 9) & 1
         r.append(f"TX HP {TYPES.get(typ, hex(typ))} seq {seq}" + (" retry" if rty else ""))
@@ -83,13 +86,15 @@ def decode_link(entry):
     return f"{t/125:12.3f}us " + " | ".join(r)
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     add_remote_args(parser)
     parser.add_argument("--prefix",  default=None,                       help="Trace CSRs prefix (default: autodetect).")
     parser.add_argument("command",   choices=["clear", "dump", "link", "link-clear", "clear-ept", "stop"])
     parser.add_argument("--ept",      default=1, type=int, help="Core trace: endpoint (clear-ept/stop).")
     parser.add_argument("--circular", action="store_true", help="Link trace: circular, stops on a U0 exit.")
     parser.add_argument("--filter",   action="store_true", help="Link trace: drop keep-alives (LUP/LDN/ITPs).")
+    parser.add_argument("--skip",     default=0, type=int, help="Link trace (circular): U0 exits/Recovery requests ignored before stopping.")
     args = parser.parse_args()
 
     bus = open_remote(args)
@@ -98,8 +103,9 @@ def main():
         (n.endswith("link_trace_count") == args.command.startswith("link"))][0]
     reg    = lambda name: getattr(bus.regs, f"{prefix}_{name}")
     if args.command == "link-clear":
-        # enable, clear, circular (stops on a U0 exit), filter (keep-alives).
-        reg("control").write(0b1 | 0b10 | (int(args.circular) << 2) | (int(args.filter) << 3))
+        # enable, clear, circular (stops on a U0 exit), filter (keep-alives), skip (stops ignored).
+        reg("control").write(0b1 | 0b10 | (int(args.circular) << 2) | (int(args.filter) << 3) |
+            (args.skip << 4))
     elif args.command == "link":
         count   = reg("count").read()
         pointer = reg("pointer").read()

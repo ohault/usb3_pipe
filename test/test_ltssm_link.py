@@ -8,8 +8,9 @@ import unittest
 
 from migen import *
 
-from test.model.ltssm import LTSSMLinkHarness
+from litex.gen import *
 
+from test.model.ltssm import LTSSMLinkHarness
 
 class TestLTSSMLink(unittest.TestCase):
     def wait_for(self, signal, timeout=256):

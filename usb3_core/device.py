@@ -4,11 +4,13 @@
 # Copyright (c) 2026 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
-"""USB3 Device Core (SuperSpeed Gen1 Link and Protocol Layers, Control Endpoint, Bulk/Isochronous
-Endpoints).
+"""USB3 Device Core (USB 3.2 Gen 1x1/Gen 2x1: Link and Protocol Layers, Control Endpoint,
+Bulk/Isochronous Endpoints).
 
 Connects to a USB3 PHY through its Link interface (see usb3_pipe.phy.USB3PHY): any PHY providing the
-same interface can be used.
+same interface can be used. With a Gen 2 capable PHY (phy.ssp_capable), the Link Layer runs the
+SuperSpeedPlus operation when the link is at Gen 2 (phy.gen2_active) and the BOS advertises the
+SuperSpeedPlus USB Device Capability.
 
 Example:
     descriptors = bulk_descriptors(max_burst=8)
@@ -23,6 +25,9 @@ with_lpm: U1/U2 Link Power Management (USB 3.2 7.2.4.2): non-zero U1/U2 exit lat
 the BOS, LGO_U1/LGO_U2 accepted by the Link Layer when idle (else rejected with LXU), U1/U2 exited
 when packets are to be transmitted. Device initiated U1/U2 entry is not supported (U1/U2 Enable only
 tracked/reported). Without, LGO_U1/LGO_U2 are rejected (U1/U2 not used by the host).
+
+crc32_cascade: Link Layer CRC-32s with the 1 to 4 bytes results from chained 1-byte stages (less
+logic, deeper paths, see usb3_pipe.crc.CRC32): for small FPGAs.
 """
 
 from migen import *
@@ -41,8 +46,29 @@ from usb3_core.trace     import USB3CoreTrace, USB3LinkTrace
 # USB3 Device Core ---------------------------------------------------------------------------------
 
 class USB3DeviceCore(LiteXModule):
+    """USB3 Device Core: Link Layer + Protocol Layer + Control Endpoint + endpoints on a USB3 PHY.
+
+    Parameters:
+    - phy: USB3PHY (or any module with its Link interface).
+    - sys_clk_freq: Link interface clock frequency (timers).
+    - descriptors: USB3Descriptors (bulk_descriptors(), iso_in_descriptors(), or built from
+      interfaces).
+    - endpoints: USB3BulkIN/USB3BulkOUT/USB3IsoIN list (EP0 is built in); data_width equal to the
+      Link Layer words width (32*link_words), or 32 (adapted by the Protocol Layer).
+    - timer_scale: Link Layer timers scaling (simulation).
+    - with_ep0_handler: class/vendor requests delegated to user logic on ep0 (req_*,
+      doc/usb3-core.md).
+    - with_lpm, crc32_cascade: see the module docstring.
+
+    Interface:
+    - endpoints[i].sink/source: user streams (endpoint_layout(data_width): data, be, last).
+    - ep0: dev_addr, set_interface/interface/alt_setting, requests handler.
+    - ready (U0, link initialized), configured (SET_CONFIGURATION), u1_enable/u2_enable (U1/U2
+      Enable features).
+    - add_csr(): status/statistics CSRs and the optional Header Packets/Link Layer traces.
+    """
     def __init__(self, phy, sys_clk_freq, descriptors, endpoints=None, timer_scale=1,
-        with_ep0_handler=False, with_lpm=False):
+        with_ep0_handler=False, with_lpm=False, crc32_cascade=False):
         endpoints      = [] if endpoints is None else endpoints
         self.endpoints = endpoints
 
@@ -51,17 +77,17 @@ class USB3DeviceCore(LiteXModule):
         # Link Power Management: U1/U2 exit latencies in the BOS.
         if with_lpm:
             descriptors.enable_lpm()
-        # SuperSpeedPlus (Gen 2 or Gen 1x2 capable PHY): SuperSpeedPlus USB Device Capability in the
-        # BOS (lane speed: 10Gbps Gen 2, 5Gbps Gen 1x2).
-        if hasattr(phy, "gen2_active") or hasattr(phy, "ssp_active"):
-            descriptors.enable_ssp(lane_speed=getattr(phy, "ssp_lane_speed", 10))
+        # SuperSpeedPlus capable PHY (Gen 2, or Gen 1x2 Link interface): SuperSpeedPlus USB Device
+        # Capability in the BOS (lane speed: 10Gbps Gen 2, 5Gbps Gen 1x2).
+        if phy.ssp_capable:
+            descriptors.enable_ssp(lane_speed=phy.ssp_lane_speed)
 
         # Link Layer (Transfer Types of the endpoints for SuperSpeedPlus operation).
         ssp_tt = {0: TT_CONTROL}
         for ep in endpoints:
             ssp_tt[ep.ept] = TT_ISOCHRONOUS if isinstance(ep, USB3IsoIN) else TT_BULK
         self.link = link = USB3LinkLayer(phy, sys_clk_freq=sys_clk_freq, timer_scale=timer_scale,
-            ssp_tt=ssp_tt)
+            ssp_tt=ssp_tt, crc32_cascade=crc32_cascade)
         self.comb += link.lpm_enable.eq(with_lpm)
 
         # Control Endpoint.
@@ -102,22 +128,59 @@ class USB3DeviceCore(LiteXModule):
         self._rx_lbad      = CSRStatus(16, description="LBAD sent (Header Packets RX errors).")
         self._tx_retry     = CSRStatus(16, description="LBAD received (Header Packets resent).")
         self._recovery_req = CSRStatus(16, description="Recovery requests (timeouts, errors).")
-        self._link_state   = CSRStatus(32, description="Link Layer state (debug): tx_seq, ack_seq, "
-            "send_seq, remote credits (Type 1/2), adv_received, pm_block, pm_accepted, tx_hp valid/ready, "
-            "lrty_pending, lbad_wait, ssp, tx_full, rx_seq.")
-        # Recovery causes (link dbg_recovery_cause): last cause and 8-bit saturating counts per cause.
+        # Link Layer state (debug, link dbg_state order).
+        link_state_fields = [
+            ("tx_seq",          4, "Next Header Sequence Number to send."),
+            ("ack_seq",         4, "Header Sequence Number expected in the next LGOOD_n."),
+            ("send_seq",        4, "Header Sequence Number of the next Header Packet to retransmit."),
+            ("remote_credits",  3, "Remote Type 1 Rx Header Buffer credits."),
+            ("remote_credits2", 3, "Remote Type 2 Rx Header Buffer credits (SuperSpeedPlus)."),
+            ("adv_received",    1, "Header Sequence Number Advertisement received."),
+            ("pm_block",        1, "LAU sent: no transmission until the next U0 entry."),
+            ("pm_accepted",     1, "LGO_U1/LGO_U2 accepted: no new Header Packets until the next U0."),
+            ("tx_hp_valid",     1, "Header Packet to send."),
+            ("tx_hp_ready",     1, "Header Packet accepted."),
+            ("lrty_pending",    1, "LRTY to send."),
+            ("lbad_wait",       1, "LBAD sent, waiting for LRTY."),
+            ("ssp",             1, "SuperSpeedPlus operation."),
+            ("tx_full",         1, "Tx Header Buffers full."),
+            ("rx_seq",          4, "Next Header Sequence Number expected."),
+        ]
+        self._link_state   = CSRStatus(fields=[CSRField(name, size=size, description=description)
+            for name, size, description in link_state_fields])
+        # Recovery causes (link dbg_recovery_cause, sampled on the dbg_recovery pulse): last cause
+        # and 8-bit saturating counts per cause.
         causes = ["hp_seq", "lgood", "lcrd", "pending_hp", "credit_hp"]
         self._recovery_cause = CSRStatus(fields=
-            [CSRField("last", size=len(causes), description="Last Recovery cause: " + ", ".join(causes))] +
-            [CSRField(c, size=8, offset=8*(i + 1), description=f"{c} Recovery requests (saturating).")
+            [CSRField("last", size=len(causes),
+                description="Last Recovery cause: " + ", ".join(causes))] +
+            [CSRField(c, size=8, offset=8*(i + 1),
+                description=f"{c} Recovery requests (saturating).")
                 for i, c in enumerate(causes)])
         cause = self.link.dbg_recovery_cause
         self.sync += If(self.link.dbg_recovery,
             self._recovery_cause.fields.last.eq(cause),
             *[If(cause[i] & (getattr(self._recovery_cause.fields, c) != 255),
-                getattr(self._recovery_cause.fields, c).eq(getattr(self._recovery_cause.fields, c) + 1))
+                getattr(self._recovery_cause.fields, c).eq(
+                    getattr(self._recovery_cause.fields, c) + 1))
                 for i, c in enumerate(causes)]
         )
+        # Directed Recovery request (bring-up: Recovery without a link error).
+        self._recovery_request = CSR() # Write: directed Recovery request.
+        self.comb += self.link.dbg_recovery_request.eq(self._recovery_request.re)
+        # RX errors (16-bit saturating counts): Link Command words rejected (CRC-5/copies), DPPs
+        # with a CRC-32 error.
+        self._rx_errors = CSRStatus(fields=[
+            CSRField("lc_bad",  size=16, offset=0,  description="Link Command words rejected (CRC-5/copies)."),
+            CSRField("dpp_bad", size=16, offset=16, description="DPPs received with a CRC-32 error."),
+        ])
+        for field, event in [(self._rx_errors.fields.lc_bad,  self.link.dbg_rx_lc_bad),
+                             (self._rx_errors.fields.dpp_bad, self.link.dbg_rx_dpp_bad)]:
+            event_r = Signal() # Registered event (timings: CRC comparisons).
+            self.sync += [
+                event_r.eq(event),
+                If(event_r & (field != 0xffff), field.eq(field + 1)),
+            ]
         self.comb += [
             self._status.fields.ready.eq(self.link.ready),
             self._status.fields.configured.eq(self.ep0.configured),
@@ -125,5 +188,10 @@ class USB3DeviceCore(LiteXModule):
             self._rx_lbad.status.eq(self.link.rx_lbad),
             self._tx_retry.status.eq(self.link.tx_retry),
             self._recovery_req.status.eq(self.link.recovery_req),
-            self._link_state.status.eq(self.link.dbg_state),
+            *[getattr(self._link_state.fields, name).eq(
+                self.link.dbg_state[offset:offset + size])
+                for name, size, offset in zip(
+                    [f[0] for f in link_state_fields],
+                    [f[1] for f in link_state_fields],
+                    [sum(f[1] for f in link_state_fields[:i]) for i in range(len(link_state_fields))])],
         ]

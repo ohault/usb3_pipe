@@ -8,7 +8,9 @@ import unittest
 
 from migen import *
 
-from usb3_pipe.lfps   import LFPSUnit
+from litex.gen import *
+
+from usb3_pipe.lfps     import LFPSUnit
 from usb3_pipe.datapath import RXErrorMonitor
 
 from test.model.gt import LFPSSerDesStub
@@ -27,7 +29,8 @@ class DecoderStub:
 
 class TestWarmResetDetection(unittest.TestCase):
     def run_line(self, segments, with_rx_errors=True):
-        """Drive the RX line with (duration_ms, idle, errors) segments, return the rx_reset trace."""
+        """Drive the RX line with (duration_ms, idle, errors) segments, return the rx_reset
+        trace."""
         serdes = LFPSSerDesStub(with_rx_errors=with_rx_errors)
         dut    = LFPSUnit(serdes=serdes, sys_clk_freq=SYS_CLK_FREQ, timer_scale=TIMER_SCALE)
         dut.submodules += serdes

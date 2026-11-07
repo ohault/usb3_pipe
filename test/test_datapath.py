@@ -22,16 +22,17 @@ from litex.gen import *
 from usb3_pipe.common   import *
 from usb3_pipe.datapath import RXWordAligner, RXSKPRemover, TXSKPInserter, RXDatapath, TXDatapath
 from usb3_pipe.datapath import Gen2TXDatapath, Gen2RXDatapath, GEN2_DATA_WIDTH, GEN2_RX_COUNTERS
-from usb3_pipe.datapath import GEN2_IDLE_BLOCK
+from usb3_pipe.datapath import GEN2_IDLE_BLOCK, Gen2TXDCBalance
+from usb3_pipe.coding   import GEN2_DC_REDUCE_ONES, GEN2_DC_REDUCE_ZEROS
 
 from test.common import ordered_set_words, words_to_symbols, symbols_to_words, stream_monitor
 from test.model.gen2 import Gen2ReferenceDecoder, int_to_bits, bits_from_words, words_from_bits
 from test.model.gen2 import popcount, gen2_channel
 
-
 class TestDatapath(unittest.TestCase):
     def test_rx_word_aligner(self):
-        # On a re-alignment, the word before the COM run only contains the symbols preceding it.
+        # On a re-alignment, the word output before the COM run is complete (run later in its word:
+        # the symbols of the run word before the run are skipped).
         datas_input = [
             0x030201bc, 0x07060504, 0x0b0a0908, 0x0f0e0d0c,
             0x0201bc07, 0x0605040b, 0x0a09080f, 0x0e0d0c13,
@@ -53,13 +54,13 @@ class TestDatapath(unittest.TestCase):
             0x8, 0x7, 0x0, 0x0,
         ]
         datas_reference = [
-            0x030201bc, 0x07060504, 0x0b0a0908, 0x070f0e0d,
-            0x0b0201bc, 0x0f060504, 0x130a0908, 0x1f010e0d,
-            0x202f9cbc, 0xa5000300, 0x53528d03, 0x87868500,
+            0x030201bc, 0x07060504, 0x0b0a0908, 0x0f0e0d0c,
+            0x0b0201bc, 0x0f060504, 0x130a0908, 0x010e0d0c,
+            0x202f9cbc, 0xa5000300, 0x53528d03, 0x86850000,
             0x8b8a89bc, 0x8f8e8d84, 0x92919088, 0x8c929190,
-            0xbcbcbcbc, 0x07060504, 0x0b0a0908, 0x000f0e0d,
-            0xbcbcbcbc, 0x08070605, 0x0c0b0a09, 0x00000f0e,
-            0xbcbcbcbc, 0x09080706, 0x0d0c0b0a, 0x0000000f,
+            0xbcbcbcbc, 0x07060504, 0x0b0a0908, 0x0f0e0d0c,
+            0xbcbcbcbc, 0x08070605, 0x0c0b0a09, 0x000f0e0d,
+            0xbcbcbcbc, 0x09080706, 0x0d0c0b0a, 0x00000f0e,
             0xbcbcbcbc, 0x0a090807, 0x0e0d0c0b, 0x0e0d0c0f,
         ]
         ctrls_reference = [
@@ -99,6 +100,34 @@ class TestDatapath(unittest.TestCase):
         self.assertEqual(dut.datas_errors, 0)
         self.assertEqual(dut.ctrls_errors, 0)
 
+    def test_rx_word_aligner_framing_shift_keeps_packet_end(self):
+        # A packet followed by a packet shifted by SKP Ordered Sets (removed before the aligner, the
+        # shift filled with Logical Idle before the framing): all the symbols of the first packet
+        # and the second packet aligned, for all the shifts.
+        shp, slc, epf = (SHP.value, 1), (SLC.value, 1), (K(23, 7), 1)
+        idle  = (0x00, 0)
+        first = [slc, slc, slc, epf] + [(0x81, 0), (0x58, 0), (0x81, 0), (0x58, 0)]
+        for shift in range(1, 4):
+            with self.subTest(shift=shift):
+                second   = [shp, shp, shp, epf] + [(0x10 + i, 0) for i in range(16)]
+                symbols  = first + [idle]*shift + second + [idle]*(8 - shift)
+                expected = first + second
+
+                def generator(dut):
+                    for d, c in symbols_to_words(symbols):
+                        yield dut.sink.valid.eq(1)
+                        yield dut.sink.data.eq(d)
+                        yield dut.sink.ctrl.eq(c)
+                        yield
+                    yield dut.sink.valid.eq(0)
+
+                def checker(dut):
+                    dut.words = yield from stream_monitor(dut.source, len(expected)//4, timeout=64)
+
+                dut = RXWordAligner(markers=[SHP, SDP, SLC])
+                run_simulation(dut, [generator(dut), checker(dut)])
+                self.assertEqual(dut.words, symbols_to_words(expected))
+
     def test_rx_word_aligner_keeps_alignment_on_k_after_data(self):
         # Symbol alignment is acquired on COM (TS1/TS2, USB 3.2 6.4.1.1) and must be kept in U0,
         # where Link Layer framing K-symbols (SHP/END/EPF...) follow data words but no COM is sent.
@@ -122,7 +151,8 @@ class TestDatapath(unittest.TestCase):
                     yield dut.sink.valid.eq(0)
 
                 def checker(dut):
-                    dut.words = yield from stream_monitor(dut.source, len(wire) - 1, timeout=4*len(wire))
+                    dut.words = yield from stream_monitor(dut.source, len(wire) - 1,
+                        timeout=4*len(wire))
 
                 dut = RXWordAligner()
                 run_simulation(dut, [generator(dut), checker(dut)])
@@ -335,7 +365,7 @@ class TestDatapath(unittest.TestCase):
 
         datas, ctrls = remove_skp(datas, ctrls)
 
-        class DUT(Module):
+        class DUT(LiteXModule):
             def __init__(self):
                 self.submodules.tx = TXDatapath("serdes")
                 self.submodules.rx = RXDatapath("serdes")
@@ -452,12 +482,71 @@ class TestDatapath(unittest.TestCase):
         dut.run = True
         run_simulation(dut, [generator(dut), checker(dut)])
 
+    def test_tx_skip_inserter_first_from_last(self):
+        # TX stream with only an end of packet flag (ex: the standalone core AXI-Stream tlast): first
+        # derived from last (FirstFromLast), no SKP Ordered Set inside the packets and SKP Ordered
+        # Sets still inserted between them.
+        class DUT(LiteXModule):
+            def __init__(self):
+                self.first    = first    = FirstFromLast([("data", 32), ("ctrl", 4)])
+                self.inserter = inserter = TXSKPInserter()
+                self.sink     = first.sink
+                self.source   = inserter.source
+                self.comb += first.source.connect(inserter.sink)
+
+        def generator(dut):
+            yield dut.source.ready.eq(1)
+            yield
+            # 8 packets of 200 words (longer than the SKP interval), last on their last word only.
+            for p in range(8):
+                for i in range(200):
+                    yield dut.sink.valid.eq(1)
+                    yield dut.sink.data.eq(0x11220000 + (p << 8) + i)
+                    yield dut.sink.ctrl.eq(0)
+                    yield dut.sink.last.eq(1 if i == 199 else 0)
+                    yield
+                    while not (yield dut.sink.ready):
+                        yield
+                yield dut.sink.valid.eq(0)
+                for _ in range(8):
+                    yield
+            for _ in range(256):
+                yield
+            dut.run = False
+
+        def checker(dut):
+            dut.skp_in_packet = 0
+            dut.skp_total     = 0
+            dut.firsts        = 0
+            in_packet = 0
+            yield
+            while dut.run:
+                if (yield dut.source.valid) and (yield dut.source.ready):
+                    data, ctrl = (yield dut.source.data), (yield dut.source.ctrl)
+                    if (ctrl == 0b1111) and (data == 0x3c3c3c3c):
+                        dut.skp_total     += 1
+                        dut.skp_in_packet += in_packet
+                    else:
+                        if (yield dut.source.first):
+                            dut.firsts += 1
+                            in_packet = 1
+                        if (yield dut.source.last):
+                            in_packet = 0
+                yield
+
+        dut = DUT()
+        dut.run = True
+        run_simulation(dut, [generator(dut), checker(dut)])
+        self.assertEqual(dut.firsts, 8)
+        self.assertEqual(dut.skp_in_packet, 0)
+        self.assertGreater(dut.skp_total, 0)
+
     def test_datapath_loopback_with_skps(self, nwords=128):
         prng  = random.Random(42)
         datas = [prng.randrange(2**32) for _ in range(nwords)]
         ctrls = [0 for _ in range(nwords)]  # Payload only.
 
-        class DUT(Module):
+        class DUT(LiteXModule):
             def __init__(self):
                 self.submodules.tx = TXDatapath("serdes")
                 self.submodules.rx = RXDatapath("serdes")
@@ -563,8 +652,8 @@ RUN_TX_SHORT = dict(n_ts1=48, n_ts2=16, n_packets=8)
 
 class TestGen2Datapath(unittest.TestCase):
     def tx_vs_reference_test(self, data_width=32, **kwargs):
-        # Gen2TX output decoded with the bit-serial reference model: Ordered Sets content, DC Balance
-        # Symbols, SKP LFSR Symbols, SYNC/SKP scheduling and Data Blocks.
+        # Gen2TX output decoded with the bit-serial reference model: Ordered Sets content, DC
+        # Balance Symbols, SKP LFSR Symbols, SYNC/SKP scheduling and Data Blocks.
         words, packets = run_tx(link_config=0x08, data_width=data_width, **kwargs)
         blocks = Gen2ReferenceDecoder(self).decode(bits_from_words(words, data_width))
         kinds  = [b[0] for b in blocks]
@@ -621,15 +710,34 @@ class TestGen2Datapath(unittest.TestCase):
         # Hardware width (40-bit words at 250MHz).
         self.tx_vs_reference_test(data_width=GEN2_DATA_WIDTH, **RUN_TX_SHORT)
 
+    def test_tx_sync_on_tseq_end(self):
+        # SYNC Ordered Set before the first TS1 when the TSEQ SYNC period is not reached
+        # (Polling.RxEQ -> Polling.Active: the partner descrambler is seeded by the SYNC), single
+        # SYNC at start.
+        words, _ = run_tx(n_tseq=20, n_ts1=8, n_ts2=8, n_packets=1, sync_interval_tseq=64)
+        kinds = [b[0] for b in Gen2ReferenceDecoder(self).decode(bits_from_words(words, 32))]
+        first_ts1 = kinds.index("TS1")
+        self.assertEqual(kinds[first_ts1 - 1], "SYNC")
+        self.assertEqual(kinds[:2], ["SYNC", "TSEQ"])
+
+    def test_tx_vs_reference_80(self):
+        # 80-bit words (Gowin GTR12 1:4 gear at 125MHz): DC balance at one block per cycle.
+        self.tx_vs_reference_test(data_width=80, **RUN_TX_SHORT)
+
     @pytest.mark.slow
     def test_tx_vs_reference_long(self):
         self.tx_vs_reference_test()
         self.tx_vs_reference_test(data_width=GEN2_DATA_WIDTH)
 
     def test_dc_balance(self):
+        for data_width in [32, 80]: # 3 cycles/block, one block per cycle.
+            with self.subTest(data_width=data_width):
+                self.dc_balance_test(data_width)
+
+    def dc_balance_test(self, data_width):
         # Long TS1 run: the running DC Balance stays bounded (DC Balance Symbols, 6.4.1.2.2).
-        words, _ = run_tx(n_tseq=1, n_ts1=120, n_ts2=1, n_packets=1)
-        bits    = bits_from_words(words)
+        words, _ = run_tx(n_tseq=1, n_ts1=120, n_ts2=1, n_packets=1, data_width=data_width)
+        bits    = bits_from_words(words, data_width)
         decoder = Gen2ReferenceDecoder(self)
         decoder.decode(bits)
         dc, worst = 0, 0
@@ -639,14 +747,75 @@ class TestGen2Datapath(unittest.TestCase):
                 worst = max(worst, abs(dc))
         self.assertLess(worst, 64)
 
+    def test_dc_balance_saturation(self):
+        for one_per_cycle in [False, True]:
+            with self.subTest(one_per_cycle=one_per_cycle):
+                self.dc_balance_saturation_test(one_per_cycle)
+
+    def dc_balance_saturation_test(self, one_per_cycle, n=40):
+        # Biased blocks (all 1s then all 0s) saturate the running DC Balance at +511 (6.4.1.2.2):
+        # the DC Balance Symbols follow the saturated balance: on the 0s, the Symbols to reduce the
+        # 1s stop when a reference model with the same saturation says so. The one block per cycle
+        # variant applies its saturation one or two blocks late: tolerance of 2 blocks.
+        blocks = [(1 << 128) - 1]*n + [0]*n
+        header = BLOCK_HEADER_CONTROL
+        def reference():
+            dc, out = 0, []
+            for data in blocks:
+                syms    = data.to_bytes(16, "little")
+                ones_11 = bin(header).count("1") + sum(bin(s).count("1") for s in syms[:12])
+                balance = dc + 2*ones_11 - 100
+                sym14, sym15 = syms[14], syms[15]
+                reduce = GEN2_DC_REDUCE_ONES if balance > 0 else GEN2_DC_REDUCE_ZEROS
+                if abs(balance) > 15:
+                    sym15 = reduce[1]
+                if abs(balance) > 31:
+                    sym14 = reduce[0]
+                tail = [syms[12], syms[13], sym14, sym15]
+                dc   = balance + 2*sum(bin(s).count("1") for s in tail) - 32
+                dc = max(-511, min(511, dc))
+                out.append(sym15)
+            return out
+        dut    = Gen2TXDCBalance(one_per_cycle=one_per_cycle)
+        out    = []
+        worst  = [0]
+        def driver(dut):
+            for data in blocks:
+                yield dut.sink.valid.eq(1)
+                yield dut.sink.header.eq(header)
+                yield dut.sink.data.eq(data)
+                yield dut.sink.ts.eq(1)
+                yield
+                while not (yield dut.sink.ready):
+                    yield
+            yield dut.sink.valid.eq(0)
+        def monitor(dut):
+            yield dut.source.ready.eq(1)
+            for _ in range(8*len(blocks)):
+                if (yield dut.source.valid):
+                    out.append(((yield dut.source.data) >> 120) & 0xff)
+                worst[0] = max(worst[0], abs((yield dut.dc_balance)))
+                yield
+        run_simulation(dut, [driver(dut), monitor(dut)])
+        self.assertEqual(len(out), len(blocks))
+        def flip(symbols):
+            # First block of the 0s with the Symbol reducing the 0s (balance negative).
+            return next(i for i, s in enumerate(symbols)
+                if (i >= n) and (s == GEN2_DC_REDUCE_ZEROS[1]))
+        self.assertLessEqual(abs(flip(out) - flip(reference())), 2)
+        # Once negative, the balance stays negative on the 0s (no wrap of the running balance).
+        self.assertEqual(set(out[flip(out):]), {GEN2_DC_REDUCE_ZEROS[1]})
+        self.assertLessEqual(worst[0], 511 + 2*132)
+
     def loopback_test(self, edits={0: -4, 1: +4, 2: +16, 3: -20}, data_width=32, tseq_slip=False,
         **kwargs):
         # Gen2TXDatapath -> channel -> Gen2RXDatapath (continuous words, one per cycle):
         # - channel: bit offset, polarity inversion, a bit removed during TS1 (and with tseq_slip a
         #   bit removed during TSEQ and a Block Header bit error in TS2), SKP Ordered Sets
         #   shortened/lengthened (re-timer clock compensation). Realignment on the next SYNC.
-        # - RX: polarity detected on SYNC, TSEQ/TS1/TS2 detected, SDS, Data Blocks recovered,
-        #   received SKP LFSR state equal to the RX descrambler state, counters.
+        # - RX: polarity detected on the first SYNC (aligned on the next one), TSEQ/TS1/TS2
+        #   detected, SDS, Data Blocks recovered, received SKP LFSR state equal to the RX
+        #   descrambler state, counters.
         words, packets = run_tx(link_config=0x08, data_width=data_width, **kwargs)
         bits   = bits_from_words(words, data_width)
         blocks = Gen2ReferenceDecoder(self).decode(bits)
@@ -661,7 +830,7 @@ class TestGen2Datapath(unittest.TestCase):
         slips = [(ts1[3][1] + 50, -1)]
         flips = []
         if tseq_slip:
-            slips.append((tseq[2][1] + 70, -1))
+            slips.append((tseq[9][1] + 70, -1)) # After the second SYNC (aligned).
             flips.append(ts2[4][1] + 2)
         self.assertLess(ts1[3][1], skp_blocks[0][1])
         bits, expected_skp = gen2_channel(bits, blocks, skp_edits=edits, slips=slips, flips=flips,
@@ -709,10 +878,12 @@ class TestGen2Datapath(unittest.TestCase):
             # Bit error + misaligned TSEQ Block Headers (seen as corrected) until the next SYNC.
             self.assertGreaterEqual(events["header_errors_count"], 1)
         # Counters.
-        self.assertEqual(events["sync_count"], kinds.count("SYNC"))
+        self.assertEqual(events["sync_count"], kinds.count("SYNC") - 1) # First SYNC: polarity.
         self.assertEqual(events["align_errors_count"], len(slips))
         self.assertEqual(events["sds_count"], 1)
-        self.assertLessEqual(kinds.count("TSEQ") - events["tseq_count"], 8 if tseq_slip else 0)
+        # TSEQ before the second SYNC (polarity), until the SYNC after the slip.
+        self.assertLessEqual(kinds.count("TSEQ") - events["tseq_count"],
+            8 + (8 if tseq_slip else 0))
         self.assertLessEqual(kinds.count("TS1")  - events["ts1_count"], 32) # Until the next SYNC.
         self.assertEqual(events["ts2_count"], kinds.count("TS2"))
         self.assertEqual(events["skp_count"], len(events["skp"]))
@@ -724,7 +895,8 @@ class TestGen2Datapath(unittest.TestCase):
             self.assertEqual(skp_lfsr, rx_lfsr)
         self.assertEqual(events["data"], sent_data[:len(events["data"])])
         self.assertGreaterEqual(len(events["data"]), len(sent_data) - 2)
-        self.assertEqual([d for d in events["data"] if d != GEN2_IDLE_BLOCK][:10], [d for p in packets for d in p][:10])
+        self.assertEqual([d for d in events["data"] if d != GEN2_IDLE_BLOCK][:10],
+            [d for p in packets for d in p][:10])
 
     def test_loopback(self):
         # Short: less TS1/TS2/packets, one SKP Ordered Set edit.
@@ -734,12 +906,20 @@ class TestGen2Datapath(unittest.TestCase):
         # Hardware width (40-bit words at 250MHz): bit slips in TSEQ/TS1, Block Header bit error,
         # SKP Ordered Sets edits.
         self.loopback_test(edits={0: -4, 1: +8}, data_width=GEN2_DATA_WIDTH, tseq_slip=True,
-            **RUN_TX_SHORT)
+            n_tseq=32, **RUN_TX_SHORT)
+
+    def test_loopback_80(self):
+        # 80-bit words (Gowin GTR12 1:4 gear at 125MHz): bit slips in TSEQ/TS1, Block Header bit
+        # error, SKP Ordered Sets edits.
+        # 64 TS1: the TS1 SYNC period restarts on the TSEQ -> TS1 change (SYNC first), the
+        # realignment after the TS1 bit slip is on the SYNC 32 TS1 later.
+        self.loopback_test(edits={0: -4, 1: +8}, data_width=80, tseq_slip=True, n_tseq=32,
+            **dict(RUN_TX_SHORT, n_ts1=64))
 
     @pytest.mark.slow
     def test_loopback_long(self):
         self.loopback_test()
-        self.loopback_test(data_width=GEN2_DATA_WIDTH, tseq_slip=True)
+        self.loopback_test(data_width=GEN2_DATA_WIDTH, tseq_slip=True, n_tseq=32)
 
 if __name__ == "__main__":
     unittest.main()

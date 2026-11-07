@@ -2,8 +2,8 @@
 
 # Project Memory (ohault/usb3_pipe fork)
 
-Context for Claude sessions working on this fork. The general rules (LiteX conventions, verification
-ladder, contributing back) are in [AGENTS.md](AGENTS.md), which follows LiteX's
+Context for Claude sessions working on this fork. The general rules are in [AGENTS.md](AGENTS.md) and
+[CONTRIBUTING.md](CONTRIBUTING.md) (tests, coding style, commits, hardware safety), which follow LiteX's
 [LiteX for AI Agents](https://github.com/enjoy-digital/litex/blob/master/doc/wiki/LiteX-for-AI-Agents.md):
 read that page first for LiteX itself (repository map, `--build --no-compile`, `litex_sim`,
 `litex_server`/`RemoteClient`, LiteScope, the `litex_mcp` server, the agent skills in LiteX

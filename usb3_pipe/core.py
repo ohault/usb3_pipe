@@ -15,13 +15,13 @@ from litex.gen import *
 
 from litex.soc.interconnect import stream
 
-from usb3_pipe.common import *
-from usb3_pipe.lfps import LFPSUnit
-from usb3_pipe.training import TSUnit
+from usb3_pipe.common     import *
+from usb3_pipe.lfps       import LFPSUnit
+from usb3_pipe.training   import TSUnit
 from usb3_pipe.scrambling import Scrambler, Descrambler, lfsr_after_ts, LFSR_SEED_LANE0
-from usb3_pipe.datapath import RXWordAligner, Gen2TXDatapath, Gen2RXDatapath, GEN2_DATA_WIDTH
-from usb3_pipe.datapath import GEN2_IDLE_BLOCK
-from usb3_pipe.framing  import Gen2LinkTX, Gen2LinkRX, gen2_link_layout
+from usb3_pipe.datapath   import RXWordAligner, Gen2TXDatapath, Gen2RXDatapath, GEN2_DATA_WIDTH
+from usb3_pipe.datapath   import GEN2_IDLE_BLOCK
+from usb3_pipe.framing    import Gen2LinkTX, Gen2LinkRX, gen2_link_layout
 
 # Idle Handshake -----------------------------------------------------------------------------------
 
@@ -72,9 +72,9 @@ class IdleHandshake(LiteXModule):
 
 @ResetInserter()
 class USB3PIPE(LiteXModule):
-    """USB3.0 PIPE Core
+    """USB3 PIPE Core (Gen 1, 8b/10b)
 
-    Wrap an FPGA transceiver exposing 2 TX and RX data/ctrl streams into a USB3.0 PIPE by adding:
+    Wrap an FPGA transceiver exposing 2 TX and RX data/ctrl streams into a USB3 PIPE by adding:
     - LFPS detection/generation.
     - Training Sequence Ordered Sets detection/generation.
     - Clock compensation Ordered Sets removing/insertion.
@@ -240,9 +240,15 @@ class USB3PIPE(LiteXModule):
                     scrambler.sink.ctrl.eq(0b0000),
                 ),
             ]
-        # Once the Training Sequences Ordered Set in progress is transmitted (Gen 1x2: the lanes'
-        # TSUnits are in lockstep, tx_active is the same on both lanes).
-        self.comb += If(tx_enable & ~ts.tx_active, scrambler.source.connect(serdes.sink))
+        self.comb += [
+            # Training Sequences, else the scrambled stream once the Ordered Set in progress is
+            # transmitted (Gen 1x2: the lanes TSUnits are in lockstep).
+            If(ts.tx_active,
+                ts.source.connect(serdes.sink)
+            ).Elif(tx_enable,
+                scrambler.source.connect(serdes.sink)
+            )
+        ]
 
         # Descrambling -----------------------------------------------------------------------------
         # The descrambler processes all received symbols, including the Training Sequences received
@@ -250,7 +256,8 @@ class USB3PIPE(LiteXModule):
         # symbol (6.3.1.3), so it is synchronized with the partner's scrambler when rx_ready is set.
         # Only the output to the Link Layer is gated by rx_ready.
         # No SKP in the received stream (SKP Ordered Sets removed by the SerDes RX datapath).
-        self.descrambler = descrambler = Descrambler(reset=lfsr_seed, seed=lfsr_seed, with_skp=False)
+        self.descrambler = descrambler = Descrambler(reset=lfsr_seed, seed=lfsr_seed,
+            with_skp=False)
         self.comb += descrambler.enable.eq(scrambling)
         # Registered descrambler input (timings: SerDes RX datapath output to the descrambler).
         self.descrambler_buffer = descrambler_buffer = stream.Buffer([("data", 32), ("ctrl", 4)])
@@ -271,9 +278,10 @@ class USB3PIPE(LiteXModule):
         if x2_lane:
             self.comb += descrambler.source.connect(source)
         else:
-            # Registered descrambler output and ready (timings).
-            self.framing_buffer  = framing_buffer  = stream.Buffer([("data", 32), ("ctrl", 4)],
-                pipe_ready=True)
+            # Registered descrambler output and ready (timings), registers to the aligner
+            # (ready_first).
+            self.framing_buffer  = framing_buffer  = Buffer([("data", 32), ("ctrl", 4)],
+                pipe_ready=True, ready_first=True)
             self.framing_aligner = framing_aligner = RXWordAligner(markers=[SHP, SDP, SLC])
             self.comb += [
                 descrambler.source.connect(framing_buffer.sink),
@@ -286,7 +294,8 @@ class USB3PIPE(LiteXModule):
         # Idle Handshake ---------------------------------------------------------------------------
         # Idle Symbols sent, registered (timings).
         tx_idle_sent = Signal()
-        self.sync += tx_idle_sent.eq(tx_enable & tx_idle & scrambler.sink.valid & scrambler.sink.ready)
+        self.sync += tx_idle_sent.eq(tx_enable & tx_idle & scrambler.sink.valid &
+            scrambler.sink.ready)
         # Received symbols from the registered descrambler output (timings).
         self.idle_handshake_unit = idle_handshake = IdleHandshake()
         rx_words = descrambler.source if x2_lane else framing_buffer.source
@@ -311,8 +320,8 @@ GEN2_TSEQ_COUNT = 524288
 # LFPS signals stay on the Gen 1 PIPE (LFPSUnit, electrical idle/patterns at both rates).
 GEN2_PIPE_INTERFACE = [
     "ts_tx_enable", "ts_tx_tseq", "ts_tx_ts1", "ts_tx_ts2", "ts_tx_ts2_reset", "ts_tx_ts2_loopback",
-    "ts_tx_done", "ts_rx_ts1", "ts_rx_ts1_inv", "ts_rx_ts2", "ts_rx_ts2_reset", "ts_rx_ts2_loopback",
-    "idle_handshake", "idle_handshake_done", "rx_ready", "tx_ready",
+    "ts_tx_done", "ts_rx_ts1", "ts_rx_ts1_inv", "ts_rx_ts2", "ts_rx_ts2_reset",
+    "ts_rx_ts2_loopback", "idle_handshake", "idle_handshake_done", "rx_ready", "tx_ready",
 ]
 
 class Gen2PIPE(LiteXModule):
@@ -339,24 +348,35 @@ class Gen2PIPE(LiteXModule):
     Link Layer side (sys clock domain, U0): sink/source 32-bit words with K Symbols (Symbol 0 on
     data[0:8], framing Ordered Sets at word boundaries, as in Gen 1 operation), Gen 2 packet framing
     in the Data Blocks (Gen2TXFramer/Gen2TXPacker, Gen2RXFraming): TX units (Header Packet, Link
-    Command, DPH with its DPP) stored and forwarded (tx_buffer_depth 8-byte entries), RX packets
-    buffered (rx_buffer_depth words pairs, ~1.2GB/s peak on the line vs 500MB/s on the Link Layer
-    words at 125MHz).
+    Command, DPH with its DPP) stored and forwarded (tx_buffer_depth entries), RX packets
+    buffered (rx_buffer_depth entries, ~1.2GB/s peak on the line vs 500MB/s on the Link Layer
+    words at 125MHz). The framing processes 8 bytes per cycle up to 40-bit raw words (a Data Block
+    every 3.3 cycles), 16 bytes per cycle on wider words (ex: 80-bit, a Data Block every 1.65
+    cycles).
 
     Not implemented yet: Disable Scrambling, Gen 2 elastic buffer.
     """
     def __init__(self, data_width=GEN2_DATA_WIDTH, tseq_count=GEN2_TSEQ_COUNT, ts_count=16,
-        tx_buffer_depth=512, rx_buffer_depth=1024, link_words=1):
-        link_layout = [("data", 32), ("ctrl", 4)] if link_words == 1 else gen2_link_layout()
+        tx_buffer_depth=512, rx_buffer_depth=1024, link_words=1, link_cd=None):
+        # link_cd: clock domain of the TX framing and sink (default: sys), ex: the Link Layer clock
+        # domain when this module runs at a higher PIPE frequency. Wider raw words (ex: 80-bit at
+        # 125MHz): framing/packing at 32 bytes per cycle in link_cd (TX sink, RX source/source_lc
+        # in link_cd).
+        framing_bytes = 8 if data_width <= 40 else 32
+        if (framing_bytes == 32) and (link_cd is None):
+            link_cd = "sys"
+        self.link_rx_cd = "sys" if framing_bytes == 8 else link_cd # RX source/source_lc domain.
+        link_layout = [("data", 32), ("ctrl", 4)] if link_words == 1 else gen2_link_layout(link_words)
         for name in GEN2_PIPE_INTERFACE:
             setattr(self, name, Signal(name=name))
         self.tx_data = Signal(data_width) # o: TX words (tx clock domain).
         self.rx_data = Signal(data_width) # i: RX words (rx clock domain).
-        self.sink    = stream.Endpoint(link_layout) # Link Layer TX words/words pairs (sys).
-        self.source  = stream.Endpoint(link_layout) # Link Layer RX words/words pairs (sys).
-        self.source_lc = stream.Endpoint([("data", 32), ("ctrl", 4)]) # Link Layer RX LGOOD_n/LCRD_x (sys).
+        self.sink    = stream.Endpoint(link_layout) # Link Layer TX words/word pairs (sys).
+        self.source  = stream.Endpoint(link_layout) # Link Layer RX words/word pairs (sys).
+        # Link Layer RX LGOOD_n/LCRD_x (sys).
+        self.source_lc        = stream.Endpoint([("data", 32), ("ctrl", 4)])
         self.source_lc_enable = Signal() # LGOOD_n/LCRD_x on source_lc (else in source).
-        self.rx_overflow = Signal() # o: RX buffer overflow (sticky, rx clock domain).
+        self.rx_overflow      = Signal() # o: RX buffer overflow (sticky, rx clock domain).
 
         # # #
 
@@ -398,17 +418,22 @@ class Gen2PIPE(LiteXModule):
         ]
 
         # TSEQ/TS1/TS2 bursts (tx_done every tseq_count TSEQ/ts_count TS1/TS2 transmitted, the count
-        # restarts when the command changes).
-        tx_count = Signal(max=max(tseq_count, ts_count))
-        tx_done  = Signal()
+        # restarts when the command changes, as seen by Gen2TX: one cycle later with its registered
+        # controls).
+        tx_count  = Signal(max=max(tseq_count, ts_count))
+        tx_done   = Signal()
         cmd_cur_d = Signal(7)
+        cmd_tx2   = Signal(7) # Command as applied by Gen2TX.
+        cmd_tx2_d = Signal(7)
+        self.comb += cmd_tx2.eq(cmd_cur_d if tx.tx_registered else cmd_cur)
         self.sync.tx += [
             cmd_cur_d.eq(cmd_cur),
+            cmd_tx2_d.eq(cmd_tx2),
             tx_done.eq(0),
-            If(cmd_cur != cmd_cur_d,
+            If(cmd_tx2 != cmd_tx2_d,
                 tx_count.eq(0)
             ).Elif(tx.tx.tx_os,
-                If(tx_count == Mux(cmd_cur[1], tseq_count - 1, ts_count - 1),
+                If(tx_count == Mux(cmd_tx2[1], tseq_count - 1, ts_count - 1),
                     tx_count.eq(0),
                     tx_done.eq(1)
                 ).Else(
@@ -446,40 +471,55 @@ class Gen2PIPE(LiteXModule):
         ]
 
         # Link Layer TX: framing (sys) -> units buffer (sys -> tx) -> blocks packer (tx) -----------
-        self.link_tx = link_tx = Gen2LinkTX(tx_buffer_depth, link_words=link_words)
+        link_tx  = Gen2LinkTX(tx_buffer_depth, link_words=link_words, nbytes=framing_bytes)
+        tx_ready = self.tx_ready
+        if link_cd is not None:
+            link_tx  = ClockDomainsRenamer({"sys": link_cd})(link_tx)
+            tx_ready = Signal()
+            self.specials += MultiReg(self.tx_ready, tx_ready, link_cd)
+        self.link_tx = link_tx
         self.comb += [
             self.sink.connect(link_tx.sink, omit={"valid", "ready"}),
-            link_tx.sink.valid.eq(self.sink.valid & self.tx_ready),
-            self.sink.ready.eq(link_tx.sink.ready & self.tx_ready),
+            link_tx.sink.valid.eq(self.sink.valid & tx_ready),
+            self.sink.ready.eq(link_tx.sink.ready & tx_ready),
             link_tx.source.connect(tx.sink),
-            link_tx.flush.eq(~self.tx_ready),
-            link_tx.packer.skp_pending.eq(tx.tx.skp_pending),
+            link_tx.flush.eq(~tx_ready),
+            link_tx.skp_pending.eq(tx.tx.skp_pending),
         ]
         self.tx_packer = link_tx.packer
+        self.tx_blocks = link_tx.source # Data Blocks payloads to Gen2TX (tx clock domain).
 
-        # Link Layer RX: blocks (rx) -> framing (rx) -> words buffer (rx -> sys) --------------------
-        self.link_rx = link_rx = Gen2LinkRX(rx_buffer_depth, link_words=link_words)
+        # Link Layer RX: blocks (rx) -> framing (rx or link_cd) -> words (sys or link_cd) ----------
+        link_rx  = Gen2LinkRX(rx_buffer_depth, link_words=link_words, nbytes=framing_bytes)
+        rx_ready = self.rx_ready
+        if framing_bytes == 32:
+            link_rx  = ClockDomainsRenamer({"sys": link_cd})(link_rx)
+            rx_ready = Signal()
+            self.specials += MultiReg(self.rx_ready, rx_ready, link_cd)
+        self.link_rx = link_rx
         self.comb += [
             # Data Blocks (after SDS), framing reset out of the Data Stream.
             link_rx.sink.valid.eq(rx.source.valid),
             link_rx.sink.data.eq(rx.source.data),
             link_rx.data_stream.eq(rx.data_stream),
-            link_rx.rx_ready.eq(self.rx_ready),
+            link_rx.rx_ready.eq(rx_ready),
             link_rx.source.connect(self.source),
             link_rx.source_lc.connect(self.source_lc),
             link_rx.lc_enable.eq(self.source_lc_enable),
             self.rx_overflow.eq(link_rx.overflow),
         ]
         self.rx_framing = link_rx.framing
+        if framing_bytes == 32:
+            self.rx_level = link_rx.level # RX words buffer level (link_cd, RX throttling).
 
         # Idle Symbol handshake (7.5.4.10.2) -------------------------------------------------------
         # RX: a Logical Idle Data Block (16 Idle Symbols) received while enabled. TX: a Logical Idle
         # Data Block (16 Idle Symbols) transmitted after the first one received.
-        enable_rx = Signal()
-        enable_tx = Signal()
-        rx_idle   = Signal()
-        rx_idle_tx = Signal()
-        tx_idle    = Signal()
+        enable_rx   = Signal()
+        enable_tx   = Signal()
+        rx_idle     = Signal()
+        rx_idle_tx  = Signal()
+        tx_idle     = Signal()
         rx_idle_sys = Signal()
         tx_idle_sys = Signal()
         self.specials += [
@@ -504,4 +544,3 @@ class Gen2PIPE(LiteXModule):
             )
         ]
         self.comb += self.idle_handshake_done.eq(self.idle_handshake & rx_idle_sys & tx_idle_sys)
-

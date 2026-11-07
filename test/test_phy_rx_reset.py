@@ -8,6 +8,8 @@ import unittest
 
 from migen import *
 
+from litex.gen import *
+
 from usb3_pipe.phy import USB3PHY
 
 from test.model.gt import GTModel
@@ -34,7 +36,8 @@ class TestPHYRXReset(unittest.TestCase):
         resets = [state for state, rx_reset in dut.samples if rx_reset]
         self.assertGreater(len(resets), 0)
         self.assertEqual(set(resets), {exit_to_rx_detect})
-        self.assertTrue(all(rx_reset for state, rx_reset in dut.samples if state == exit_to_rx_detect))
+        self.assertTrue(all(rx_reset for state, rx_reset in dut.samples
+            if state == exit_to_rx_detect))
 
 if __name__ == "__main__":
     unittest.main()

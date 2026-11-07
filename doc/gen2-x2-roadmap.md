@@ -2,8 +2,10 @@
 
 **Status**: **Gen 1x1** (SuperSpeed, 5Gbps) and **Gen 2x1** (SuperSpeedPlus, 10Gbps) work on hardware
 (Gen 2x1 on UltraScale+ GTY: enumeration, Bulk transfers up to ~880MB/s, full duplex, see the
-[hardware milestones](#gen-2x1-hardware-milestones)). **Gen 1x2** (2x5Gbps): PHY and SuperSpeedPlus Link
-Layer/Device Core in simulation only (enumeration and Bulk transfers at Gen 1x2, no hardware yet). **Gen 2x2** (2x10Gbps): not started.
+[hardware milestones](#gen-2x1-hardware-milestones); on Gowin GW5AST-138B GTR12: in bring-up, [next
+steps](#next-steps)). **Gen 1x2** (2x5Gbps): PHY and SuperSpeedPlus Link Layer/Device Core in
+simulation only (enumeration and Bulk transfers at Gen 1x2, no hardware yet). **Gen 2x2**
+(2x10Gbps): not started.
 
 This document lists what Gen 2x1 (SuperSpeedPlus 10Gbps, 128b/132b, one lane) and Gen 1x2
 (SuperSpeedPlus 2x5Gbps, 8b/10b, two lanes) require, layer by layer, what was done and found during
@@ -17,8 +19,8 @@ classes, 4-bit Header Sequence Numbers, Rx Buffer credits), the Protocol Layer i
 
 | Mode     | Line rate     | Transceivers                         | Connector                          |
 |----------|---------------|--------------------------------------|------------------------------------|
-| Gen 1x1  | 5Gbps         | Artix7 GTP (Acorn), Kintex7 GTX, Ultrascale+ GTY | Type-A/B, SFP2USB adapter |
-| Gen 2x1  | 10Gbps        | Kintex7 GTX (-2/-3), UltraScale GTH/GTY (GTP max 6.6Gbps: not possible on Artix7) | Type-A/B (10Gbps capable) or Type-C |
+| Gen 1x1  | 5Gbps         | Artix7 GTP (Acorn), Kintex7 GTX, UltraScale+ GTY, Gowin GW5AST/GW5AT GTR12 | Type-A/B, SFP2USB adapter |
+| Gen 2x1  | 10Gbps        | UltraScale+ GTY (validated), Gowin GW5AST-138B GTR12 (bring-up); Kintex7 GTX (-2/-3), UltraScale GTH possible (GTP max 6.6Gbps: not possible on Artix7) | Type-A/B (10Gbps capable) or Type-C |
 | Gen 1x2  | 2x5Gbps       | 2 GTP/GTX (Artix7 possible)          | **Type-C only** (two lanes, Configuration Lane from CC) |
 
 The SFP2USB adapter carries a single lane: Gen 1x2 needs a Type-C breakout with both SuperSpeed lane
@@ -154,8 +156,8 @@ milestones](#gen-2x1-hardware-milestones)); the Gen 1x2 ones are still simulatio
   Lane 1 in electrical idle, 32-bit link words on `sink_x1`/`source_x1` (framing aligned).
   **SuperSpeedPlus Link Layer at Gen 1x2** (`USB3PHYX2Link`, 7.1.1: Gen 1x2 is SuperSpeedPlus with
   the Gen 1 packets format): the `USB3DeviceCore` Link Layer in SuperSpeedPlus operation
-  (`ssp_active` = x2: 4-bit Header Sequence Numbers, Type 1/Type 2 credits, nullified DPPs, as Gen
-  2x1) on 64-bit words pairs. TX: `LanesTXPacker` (64-bit link words, a 64-bit word never holds two
+  (`gen2_active` = x2 on its Link interface: 4-bit Header Sequence Numbers, Type 1/Type 2
+  credits, nullified DPPs, as Gen 2x1) on 64-bit words pairs. TX: `LanesTXPacker` (64-bit link words, a 64-bit word never holds two
   packets, Logical Idle after the last word of a packet: both lanes end the packets together,
   6.4.3.2) and `PacketsBuffer` (packets stored and forwarded: the lanes take 8 symbols per cycle, no
   Logical Idle inside a packet), packets first/last through the striper (SKP Ordered Sets between the
@@ -213,9 +215,10 @@ after Polling.PortConfig, timing at 250MHz (`Gen2TX` DC Balance pipelined). Rema
 
 ### Hardware needed
 
-- Gen 2x1: done on UltraScale+ GTY (alibaba_xcku3p target, SFP2USB adapter, USB 3.2 Gen 2 host);
-  other 10Gbps transceivers (Kintex7 GTX -2/-3, UltraScale GTH) would need their Gen 2 SerDes
-  clocking (`gen2_capable`, only on `USPUSB3SerDes` today).
+- Gen 2x1: done on UltraScale+ GTY (alibaba_xcku3p target, SFP2USB adapter, USB 3.2 Gen 2 host), in
+  bring-up on Gowin GW5AST-138B GTR12 (Tang Mega 138K Pro, [next steps](#next-steps)); other 10Gbps
+  transceivers (Kintex7 GTX -2/-3, UltraScale GTH) would need their Gen 2 SerDes clocking
+  (`gen2_capable`, on `USPUSB3SerDes` and `GW5USB3SerDes` today).
 - Gen 1x2/Gen 2x2: two transceivers per port with a **dual-lane USB Type-C** breakout (both SuperSpeed
   pairs routed, CC handling for the Configuration Lane) and a **USB 3.2 Gen 1x2/Gen 2x2 capable host**
   (Gen 2x2 hosts are rare: ASMedia ASM3242 based cards).
@@ -275,7 +278,7 @@ XCKU3P, 64KB transfers: Bulk IN 426MB/s, Bulk OUT 466MB/s, full duplex 325MB/s I
 ~2.2us, ~470MB/s).
 
 **M4b: 64-bit Link Layer words at Gen 2** (done): `USB3PHY(link_words=2)` Link Layer interface in
-words pairs (Gen 2 framing 8 bytes per cycle in the DPPs, adapters to the Gen 1 PIPE words), Link Layer
+word pairs (Gen 2 framing 8 bytes per cycle in the DPPs, adapters to the Gen 1 PIPE words), Link Layer
 DPP words of 64-bit (RX words window, TX DPPSplitter, CRC-32 on 8 bytes), 64-bit Bulk endpoints/packet
 slots (`data_width=64`), 32-bit endpoints (Control Endpoint) through Protocol Layer adapters. Bench:
 `--link-words 2`. XCKU3P, 64KB transfers, 0 errors:
@@ -360,25 +363,40 @@ negotiated lanes in `/sys/bus/usb/devices/*/rx_lanes` and `tx_lanes`.
    (`--lanes-core`) in simulation; remaining: hardware validation (two boards, then a Gen 1x2 host),
    robust framing re-alignment for any host packet placement, Gen 1x2 throughput.
 3. Gen 2x2 (20Gbps) on UltraScale+ GTY: combination of both, 7 buffers.
-4. Gen 2x1 on Gowin GW5AST (Tang Mega 138K Pro, `bench/sipeed_tang_mega_138k_pro.py`): Gen 1 is
-   validated on hardware with the PIPE in its own clock domain (`pipe_cd`, GTR12 TX clock at 125MHz)
-   and the LTSSM/Link Layer/Core at 62.5MHz on 64-bit words. Remaining for 10Gbps:
+4. Gen 2x1 on Gowin GW5AST (Tang Mega 138K Pro, `bench/sipeed_tang_mega_138k_pro.py`, build flow
+   and options in [targets.md](targets.md)): Gen 1 is validated on hardware with the PIPE in its own
+   clock domain (`pipe_cd`, GTR12 TX clock at 125MHz) and the LTSSM/Link Layer/Core at 62.5MHz on
+   64-bit words. Remaining for 10Gbps:
    - GTR12 rate switch: 5Gbps -> 10Gbps is 6 register writes (CDR divider, QPLL1 output divider, TX
      lanes clock tree, TX/RX gear FIFOs: 1:2 -> 1:4) with the same 5GHz VCO and 125MHz fabric clock
-     (40-bit -> 80-bit raw words), back to 5Gbps for the next SuperSpeedPlus Polling. Needs the GTR12
-     runtime register access (UPAR), whose accesses do not complete yet, or another rate control
-     (fabric rate input, reconfiguration).
+     (40-bit -> 80-bit raw words), back to 5Gbps for the next SuperSpeedPlus Polling. Done:
+     `GW5RateSequencer` writes them through the GTR12 runtime register access (UPAR, LiteICLink
+     `GTR12UPAR`) with the lane held in reset (`GW5USB3SerDes(gen2_capable=True)`).
    - 80-bit raw words in LiteICLink's GTR12 (8b/10b on 40 bits at 5Gbps, raw 80 bits at 10Gbps) and
      `GW5USB3SerDes` as a Gen 2 capable SerDes (`gen2_data_width = 80`).
-   - Gen 2 with `pipe_cd` (follow-up branch `gw5/gen2`): done in simulation (`sim.py --gen2 --dev-pipe-cd`, Gen2PIPE in the PIPE
-     clock domain, RX credits throttling sized for Gen 2), including 80-bit raw words for the
-     gearbox/aligner and the TX DC balance (`Gen2TXDCBalance(one_per_cycle=True)`).
-   - Gen 2 framing at one Data Block per cycle: `Gen2LinkRX`/`Gen2RXFraming` and `Gen2TXPacker`
-     process 8 bytes per cycle (a Data Block every 2 cycles), enough with 40-bit words at 250MHz (a
-     block every 3.3 cycles) but not with 80-bit words at 125MHz (a block every 1.65 cycles): RX
-     blocks buffer overflow, Logical Idle Data Blocks inside the TX units (`sim.py --gen2
-     --dev-pipe-cd --gen2-data-width 80` reaches U0 then Recovery). Rework for 16 bytes per cycle.
+   - Gen 2 with `pipe_cd` (merged): done in simulation (`sim.py --gen2 --dev-pipe-cd`, Gen2PIPE in
+     the PIPE clock domain, RX credits throttling sized for Gen 2), including 80-bit raw words for
+     the gearbox/aligner and the TX DC balance (`Gen2TXDCBalance(one_per_cycle=True)`).
+   - Gen 2 framing at 16 bytes per cycle (done in simulation): with raw words wider than 40 bits
+     (`Gen2PIPE`), `Gen2RXFraming` processes 16 bytes per cycle (4 words entries, narrowed to words
+     pairs after the RX buffer), the framer entries are paired before the TX units buffer and
+     `Gen2TXPacker` reads 16 bytes per cycle (80-bit words at 125MHz: a Data Block every 1.65
+     cycles). The block aligner consumes up to 4 SKP Dwords per cycle on words wider than 64 bits
+     (else the pointer falls behind in long SKP Ordered Sets, alignment lost). `sim.py --gen2
+     --dev-pipe-cd --gen2-data-width 80` (also with `--host-itp`/`--ssc`): host script done, no
+     Recovery.
    - Throughput: the 64-bit Link Layer at 62.5MHz is ~500MB/s (credit throttled at Gen 2, about half
-     of the 10Gbps rate): 128-bit Link Layer words (or a faster Link Layer clock) for full rate.
-   - Timing: the 80-bit Gen 2 datapaths (aligner, gearbox, scrambler, framing) at 125MHz on the GW5A
-     fabric.
+     of the 10Gbps rate). 128-bit Link Layer words (done: `USB3PHY(link_words=4)`, `--link-words 4`,
+     Gen 2 DPP data 16 bytes per cycle, 128-bit Bulk endpoints, `sim.py --gen2 --dev-pipe-cd
+     --gen2-data-width 80 --link-words 4`) for the full rate; the hardware throughput with them
+     remains to be measured (timings below).
+   - Timing (in progress): the 80-bit Gen 2 datapaths at 125MHz on the GW5A fabric. Paths are
+     routing dominated (about 1.3ns per hop, 2/3 of the delays): restructured for few logic levels
+     and low fanout (one-hot block aligner pointer with per transition decodes registered and
+     shifted with the window, `Gen2TXPacker16`, gearbox and DC balance loops on registered values,
+     registered valid/ready buffers with `usb3_pipe.common.PipeReady`, data registers without
+     reset). Gen 2 capable Tang Mega 138K Pro build: tx/rx 41 -> 81-95MHz, sys 45 -> 55-57MHz
+     (125/62.5MHz needed, about +-15% between place and route runs, Gowin `route_option 0`: the
+     timing driven router leaves unrouted nets). Remaining: the loops of the 16 bytes framing (RX
+     framing byte pointer/window, packer fill level), gearbox and DC balance at 125MHz, and the
+     Link Layer at 62.5MHz; a framing at 32 bytes per cycle in the 62.5MHz domain could be needed.
