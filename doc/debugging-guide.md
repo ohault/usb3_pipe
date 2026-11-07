@@ -10,7 +10,8 @@ turn every finding into a simulation test.
 ## Setup
 
 - LiteX Acorn Baseboard (Mini) with the SFP2USB adapter in the SFP cage, USB3 cable to the host.
-- JTAG through the baseboard FT4232H (channel A). If other FTDI boards are connected, always select
+- JTAG through the baseboard FTDI (FT2232H or FT4232H depending on the revision, channel A;
+  `bench/acorn_ftdi.py list/load/server`). If other FTDI boards are connected, always select
   the Acorn explicitly (USB bus/device for openFPGALoader, USB location for OpenOCD): the platform
   programmer picks the first FTDI it finds. `bench/acorn_run.py` refuses to guess when several
   adapters match: set `USB3_PIPE_FTDI` to the Acorn sysfs USB location (ex: `5-4`).

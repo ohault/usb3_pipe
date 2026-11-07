@@ -133,6 +133,58 @@ def usb_find_device(product, location=None):
     location = Path(dev).name.replace("-", ":", 1) # OpenOCD ftdi_location (bus:ports).
     return busnum, devnum, location
 
+# LiteX Acorn Baseboard FTDI -----------------------------------------------------------------------
+
+# JTAG on channel A of the baseboard FTDI chip, FT2232H or FT4232H depending on the revision:
+# product string -> (chip, openFPGALoader cable, USB PID).
+ACORN_FTDI_CHIPS = {
+    "Dual RS232-HS": ("FT2232H", "ft2232", 0x6010),
+    "Quad RS232-HS": ("FT4232H", "ft4232", 0x6011),
+}
+
+def acorn_ftdi_list():
+    """FT2232H/FT4232H devices (Acorn baseboards candidates, other FTDI boards also listed)."""
+    r = []
+    for dev in sorted(glob.glob(f"{USB_SYSFS}/*")):
+        product = usb_attr(dev, "product")
+        if product in ACORN_FTDI_CHIPS:
+            chip, cable, pid = ACORN_FTDI_CHIPS[product]
+            r.append({"location": Path(dev).name, "chip": chip, "cable": cable, "pid": pid,
+                "busnum": int(usb_attr(dev, "busnum")), "devnum": int(usb_attr(dev, "devnum")),
+                "serial": usb_attr(dev, "serial")})
+    return r
+
+def acorn_ftdi_find(location=None):
+    """The Acorn baseboard FTDI (FT2232H or FT4232H), selected by its sysfs location (location or
+    $USB3_PIPE_FTDI, ex: 5-4) when several are connected (never guessed): acorn_ftdi_list entry with
+    the OpenOCD ftdi location (bus:ports)."""
+    location = location or os.environ.get("USB3_PIPE_FTDI")
+    devs = acorn_ftdi_list()
+    if location is not None:
+        devs = [d for d in devs if d["location"] == location]
+    if len(devs) != 1:
+        raise RuntimeError(f"Acorn FTDI (FT2232H/FT4232H): {len(devs)} match(es) "
+            f"{[d['location'] for d in devs]}, select one with --location/$USB3_PIPE_FTDI (sysfs "
+            "location, ex: 5-4).")
+    dev = dict(devs[0])
+    dev["ocd_location"] = dev["location"].replace("-", ":", 1) # OpenOCD ftdi location (bus:ports).
+    return dev
+
+def acorn_openocd_config(dev, filename):
+    """OpenOCD config for an Acorn baseboard FTDI (acorn_ftdi_find entry): channel A, USB location."""
+    with open(filename, "w") as f:
+        f.write(f"""interface ftdi
+adapter speed 25000
+transport select jtag
+ftdi_vid_pid 0x0403 {dev["pid"]:#06x}
+ftdi_channel 0
+ftdi_location {dev["ocd_location"]}
+ftdi_layout_init 0x00e8 0x60eb
+reset_config none
+source [find cpld/xilinx-xc7.cfg]
+""")
+
+
 def usb_ports_state():
     """USB hub ports link states ({port: state})."""
     states = {}
