@@ -310,7 +310,8 @@ SFP-1 with two SFP DAC cables (both SFP cages are in the same GTP quad), then a 
 breakout (two SFP cages, both SuperSpeed lane pairs routed to the USB-C connector) and a Gen 1x2
 capable host ([issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140)).
 
-**M0: two-lane link between two boards** (gateware ready, hardware validation to do): the same test
+**M0: two-lane link between two boards** (PHY validated on hardware, Device Core pair open, see
+[the results](gen1x2-hardware-validation.md#results-two-boards-2026-11-08)): the same test
 as `sim.py --lanes 2`, on hardware, without the SuperSpeedPlus Link Layer or a USB host. Step by step
 procedure: [gen1x2-hardware-validation.md](gen1x2-hardware-validation.md).
 `bench/acorn.py --lanes 2 --role host|device` builds `USB3PHY(lanes=2)` (Host or Device role) on

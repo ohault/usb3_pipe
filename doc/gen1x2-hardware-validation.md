@@ -448,28 +448,56 @@ branch), per test and per board:
 ## Results (Two Boards, 2026-11-08)
 
 Two LiteX Acorn Baseboard Minis (FT2232H) + SQRL Acorn CLE-215+, two passive SFP DAC cables,
-Vivado 2023.2 (all builds timing met), tests 1-10:
+Vivado 2023.2 (all builds timing met). The first results (tests 1-10 passed) were obtained on
+bitstream loads that happened to be good: about half of the loads were not, until the fixes below
+(found with `--analyzer-group lanes` captures and the `USB3LanesDebug` counters).
+
+PHY with the PRBS stand-ins (`acorn_x2_host`/`acorn_x2_device`, all the fixes):
 
 | Test | Result |
 |------|--------|
 | 1. Link up (straight) | U0, `x2: 1`, deskewed, `lane_swap: 0` on both boards. |
-| 2. PRBS | 60s, 0 errors/0 recoveries in both directions, 610-638MB/s per direction (straight and crossed). |
-| 3. Retrains | Deskewed on both boards after each double retrain (1-3 Recoveries); transient PRBS errors only during the convergence after a retrain (see below). |
+| 2. PRBS | 60s, 0 errors/0 recoveries in both directions, 610MB/s per direction (straight and crossed). |
+| 3. Retrains | 10 double retrains: deskewed on both boards, PRBS 5s after each without errors. |
 | 4. Lanes swap (crossed) | Device `lane_swap: 1`, Host `lane_swap: 0`, PRBS 0 errors. |
-| 5. Single lane fallback | `x2: 0` on both boards, U0 on the Configuration Lane (Device SFP-1 with crossed cables), PRBS 60s 0 errors, 305MB/s. |
+| 5. Single lane fallback | `x2: 0` on both boards, U0 on the Configuration Lane (Device SFP-1 with crossed cables), PRBS 0 errors, 305MB/s. |
 | 6. Unplug/replug | Link out of U0 on the unplug, Polling retries, U0 deskewed on the replug, PRBS 30s 0 errors. |
-| 7. Link up, core | U0 at Gen 1x2, deskewed; not stable out of the script runs (scripted host, see test 7). |
-| 8. Scripted host | 100/100 runs done, Device LBAD 0, retries 0, `rx_overflow` 0. |
-| 9. Crossed, core | 100/100 runs done, Device `lane_swap: 1`. |
-| 10. Soak | 20 x (double retrain + 10 runs) then 10000 runs: 10200 done, 0 errors/timeouts, LBAD 0, retries 0. |
+| Bitstream loads | 20/20 loads good (crossed cables), the Recovery on a lane realignment in U0 used on 11 of them. |
 
-Found on hardware (fixed): all the Acorn Mini SFP RX polarities are inverted (flipped at the end of
-Polling.Active on the 4 receivers) and the lanes deskew acquired on the first TS1 was lost before
-U0 on about half of the trainings (U0 without data): Recovery on a deskew lost in U0 at Gen 1x2
-(`sim.py --lanes-tx-inverted` for the polarities); a lane in electrical idle in U0 (cable
-unplugged) left the link in U0 with corrupted words after the replug: Recovery on a lane idle for
-10us. Open: after a retrain, the deskew is sometimes paired one Ordered Set off (PRBS errors in U0
-until a later Recovery, then clean).
+Device Core with the scripted host (`acorn_x2_host_script`/`acorn_x2_device_core`): **open**.
+
+| Test | Result |
+|------|--------|
+| 7. Link up, core | U0 at Gen 1x2, deskewed; not stable (Recoveries in and out of the script runs). |
+| 8/9. Scripted host | 100/100 runs on a first build, but 35-60% of the runs done on every load of later builds, including a rebuild of the same commit (`d32dd6f`): not a regression of the fixes, a build/load dependent behavior. ~3 Recoveries per run: mostly Host U0 entries without the lanes deskewed (`deskew_lost_u0`), Host lanes comma realignments (`lane0/1_rx_realign`, 10^5 per 20 runs), a few Device Link Layer Recoveries (`lgood`, `pending_hp`). Device LBAD 0-2, retries 0. |
+| 10. Soak | 10200 runs done on the first build only. |
+
+Found on hardware:
+- All the Acorn Mini SFP RX polarities are inverted (flipped at the end of Polling.Active on the 4
+  receivers, `sim.py --lanes-tx-inverted`).
+- Fixed: the lanes deskew acquired on the first TS1 lost before U0 (U0 without data): Recovery on a
+  deskew lost in U0 at Gen 1x2.
+- Fixed: a lane in electrical idle in U0 (cable unplugged): Recovery on a lane idle for 10us.
+- Fixed: a lane words alignment changed in U0 (GTP comma realignment or RX re-initialization: the
+  lanes are only re-aligned on COM, none in U0): the link flapped, stayed in Polling or stayed in
+  U0 with every x2 word corrupted (symbols rotated by 2, lanes paired one word apart), until the
+  next bitstream load (PHY retrains did not help, a RX reset in U0 reproduces it): Recovery on a
+  comma realignment/RX re-initialization in U0 at Gen 1x2 (`realign_u0`), RX re-initialization of a
+  lane with continuous decode errors (`rx_errors_reinit`).
+- Ruled out: RX elastic buffer errors (`rx_buferror` always 0), the GTP CDR hold during electrical
+  idle (raw idle detection vs filtered idle: no difference), unconstrained paths (only the JTAGBone
+  and the LEDs, `check_timing`), the Recovery on a lane idle (counters at 0 on the bad loads).
+- Open (Device Core pair): Recoveries during the script runs (Host U0 entries without deskew,
+  continuous Host comma realignments); the scripted host does not acknowledge the Device Header
+  Packets out of the runs (`pending_hp` Recoveries, test 7). Next: a scripted host acknowledging
+  the Device Header Packets out of the runs, then `--analyzer-group lanes` captures of a Recovery
+  on the core pair (Host deskew).
+
+Debug controls (`usb3_lanes_debug_control`, A/B tests on a loaded bitstream): bit 0 Recovery on a
+lane idle, bit 1 RX re-initialization on continuous errors, bit 2 Recovery on a lane realignment in
+U0 (all set by default; `usb3_lanes.py idle-recovery-*`/`rx-reinit-*`). Counters in `usb3_lanes.py
+status`: `deskew_lost_u0`, `lane_idle_u0`, `realign_u0`, per lane `rx_buferror`, `rx_realign`,
+`rx_errors_reinit`, `rx_idle_u0_cycles`, `rx_idle_raw_u0_cycles`.
 
 ## Troubleshooting
 
@@ -480,6 +508,7 @@ until a later Recovery, then clean).
 | Stuck in Polling, `rx_errors_cycles` increasing | Receiver equalization through the DAC cable: try `--lpm-hold rxeq`, a shorter cable. |
 | U0 with `x2: 0` and straight cables (x2 bitstreams) | Lane 1: `lane1_ts1` stays at 0 or `rx_idle[1]` stays at 1 (SFP-1 cable), `--no-x2` bitstream loaded by mistake. |
 | U0 but `deskew_aligned: 0`, or PRBS errors in one direction only | `retrain` output of both boards (history), `deskew` counter. |
+| Link flapping, stuck in Polling or no PRBS words after a load (retrains do not help) | `lane0/1_rx_realign`, `realign_u0`, `deskew_lost_u0` counters; reload the bitstreams; `--analyzer-group lanes` capture. |
 | PRBS errors increasing slowly | `rx_errors_cycles` per lane (link quality), `recovery_count`, cable length. |
 | `lane_swap: 1` with straight cables | Cables swapped (SFP-0/SFP-1 cages). |
 | Two boards, core: script `timeout` | Link not in U0 (`status` of both boards, test 1 with the PRBS bitstreams), Host board `--lanes-core` bitstream loaded. |

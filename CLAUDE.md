@@ -42,11 +42,13 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   `usb3_lanes.py script`).
 - Hardware available (user): two Acorn Minis + CLE-215+ and two SFP DAC cables (no SFP2USB adapter,
   no breakout, no Gen 1x2 host yet): tests 1-10 of doc/gen1x2-hardware-validation.md.
-- Hardware validated (2026-11-08, user's NUC with Vivado 2023.2 at ~/tools/Xilinx/Vivado/2023.2,
-  boards on FTDI locations 1-3 = Host, 1-5 = Device): tests 1-10 pass
-  ([results](doc/gen1x2-hardware-validation.md#results-two-boards-2026-11-08)). Open: deskew
-  sometimes paired one Ordered Set off after a retrain; scripted host does not ack the Device
-  Header Packets out of the runs (Recovery storm between runs).
+- Hardware (2026-11-08, user's NUC with Vivado 2023.2 at ~/tools/Xilinx/Vivado/2023.2, boards on
+  FTDI locations 1-3 = Host, 1-5 = Device): Gen 1x2 PHY validated (PRBS, lanes swap, fallback,
+  unplug, 20/20 bitstream loads good after the Recovery on a lane realignment in U0); Device Core
+  with the scripted host open (35-60% of the runs done, build/load dependent, Host deskew lost in
+  Recovery): [results](doc/gen1x2-hardware-validation.md#results-two-boards-2026-11-08). Test
+  ~20 loads per change (`bench/acorn_ftdi.py` load/server per board): a single good load proves
+  nothing.
 - Next: the Device Core build
   with a USB 3 host through the SFP2USB adapter/the breakout, then a Gen 1x2 host
   ([doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md): throughput; any host packet placement done in
