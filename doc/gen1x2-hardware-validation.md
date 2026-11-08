@@ -262,12 +262,12 @@ ready, U0, x2; Device board: SerDes ready, U0, lanes swapped.
 ```
 
 Pass: U0 reached with `x2: 1`, `deskew_aligned: 1` on both boards, `rx_overflow: 0`. Out of the
-script runs, the link does not stay in U0: the scripted host only sends LUP keep-alives and does
-not acknowledge the Device Header Packets (LGOOD_n), so the Device Link Layer requests a Recovery
-on each PENDING_HP_TIMER (10us) after U0 (`usb3_core_recovery_cause`: `pending_hp`), and the
-Recoveries/retrainings repeat (thousands per second, high `lane0/1_rx_errors_cycles` counts). Each
-script run also restarts from the link initialization (sequence numbers: one `lgood` Recovery per
-run). Test 8 is the criterion.
+script runs, the scripted host sends LUP keep-alives and, after a run, the acknowledges of the
+Device Header Packets (LGOOD_n/LCRD_x); before the first run it does not acknowledge them, so the
+Device Link Layer may request Recoveries on PENDING_HP_TIMER (`usb3_core_recovery_cause`:
+`pending_hp`). Each script run starts after a Hot Reset directed by the host (Header Sequence
+Numbers of both Link Layers reset: no `lgood`/`hp_seq` Recovery per run) and is restarted with a
+new Hot Reset on a U0 exit. Test 8 is the criterion.
 
 ### 8. Scripted host runs
 
@@ -281,7 +281,8 @@ Pass: `done` for each run (one JSON line per run with its duration), final line 
 `error: 0`, `timeout: 0`, `x2: 1`, `rx_overflow: 0` on both boards, `recovery_count` stable, no
 LBAD/retries in the Device Link Layer counters (`usb3_core_rx_lbad`, `usb3_core_tx_retry`,
 `usb3_core_recovery_req`). An `error` gives the failing step and script section (`link_init`,
-`get_device_descriptor`... `bulk_in_1`): report them; a `timeout` is a link not in U0.
+`get_device_descriptor`... `bulk_in_1`): report them; a `timeout` is a link not in U0. The
+final line also gives `resets_csr` (Hot Resets directed before the runs, restarts included).
 
 ### 9. Crossed cables (lanes swap with the core)
 
@@ -488,10 +489,31 @@ Found on hardware:
   idle (raw idle detection vs filtered idle: no difference), unconstrained paths (only the JTAGBone
   and the LEDs, `check_timing`), the Recovery on a lane idle (counters at 0 on the bad loads).
 - Open (Device Core pair): Recoveries during the script runs (Host U0 entries without deskew,
-  continuous Host comma realignments); the scripted host does not acknowledge the Device Header
-  Packets out of the runs (`pending_hp` Recoveries, test 7). Next: a scripted host acknowledging
-  the Device Header Packets out of the runs, then `--analyzer-group lanes` captures of a Recovery
-  on the core pair (Host deskew).
+  continuous Host comma realignments), build dependent (see below).
+
+Scripted host with a Hot Reset before each run (Device `acorn_x2_device_core` built after `88049cc`
+for all, crossed cables, 20 loads x 20 runs per host build, both boards loaded on each load,
+`--analyzer-group` none):
+
+| Host build | Runs done | Bad loads | Host `realign_u0` (median) | Host Recoveries (median) | Device Recovery causes (median per load) | Script errors |
+|------------|-----------|-----------|----------------------------|--------------------------|------------------------------------------|---------------|
+| `3fe469f` (no Hot Reset) | 246/400 (62%) | 0/20 | 72 | 90 | `pending_hp` 77, `lgood` 12, `hp_seq` 2 | 154, `link_init` |
+| Hot Reset, build A | 256/400 (64%) | 2/20 | 71 | 114 | `pending_hp` 84 | 144, `link_init` |
+| Hot Reset, build B (same source as A) | 340/400 (85%), 340/340 on the good loads | 3/20 | 14 | 89 | `pending_hp` 220 | 60, on the bad loads |
+
+- The Hot Reset removes the `lgood`/`hp_seq` Device Recoveries (Header Sequence Numbers in step at
+  each run start), with little effect on the runs done (62% to 64% on build A).
+- The runs done follow the build: two builds of the same source, 64% and 85%, build B with ~5x
+  fewer Host lanes realignments in U0. The `link_init` script errors are not U0 exits (restarted
+  with a Hot Reset): words corrupted around the lanes realignments in U0 (PHY, build dependent).
+- Bad loads (Host lanes flapping: 10^6 comma realignments, Device in Polling.LFPS/eSS.Inactive): 0/20
+  without the Hot Reset, 5/40 with it (not significant on these samples; a Hot Reset requested at
+  each U0 entry of a flapping link not ruled out).
+- `pending_hp` Device Recoveries remain on all builds (not removed by the acknowledges after the
+  runs: before the first run, during the Hot Resets/link initializations or the script restarts by
+  the client, not separated: the Device Core counters are not cleared before the runs).
+- Next: `--analyzer-group lanes` captures of the lanes realignments in U0 on a build like A (what
+  makes a build prone to them), a trace of a `pending_hp` Recovery.
 
 Debug controls (`usb3_lanes_debug_control`, A/B tests on a loaded bitstream): bit 0 Recovery on a
 lane idle, bit 1 RX re-initialization on continuous errors, bit 2 Recovery on a lane realignment in

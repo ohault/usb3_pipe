@@ -233,8 +233,9 @@ def main():
                 "time_ms": round(1e3*(time.time() - start), 1)}), flush=True)
         lanes.reg("usb3_script_control").write(0)
         status = lanes.status()
+        resets = {"resets_csr": lanes.reg("usb3_script_resets").read()} if hasattr(bus.regs, "usb3_script_resets") else {}
         print(json.dumps({**results, "passes_csr": lanes.reg("usb3_script_passes").read(),
-            "fails_csr": lanes.reg("usb3_script_fails").read(), "x2": status["x2"],
+            "fails_csr": lanes.reg("usb3_script_fails").read(), **resets, "x2": status["x2"],
             "lane_swap": status["lane_swap"], "recovery_count": status["recovery_count"],
             "rx_overflow": status["rx_overflow"]}))
     elif args.command == "prbs-enable":

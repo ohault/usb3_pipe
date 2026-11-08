@@ -578,8 +578,14 @@ def usb3_host_script(ssp=True):
 class USB3HostScript(LiteXModule):
     """Scripted USB host (USB3HostModel) on a USB3PHYX2Link with CSRs: the script runs in U0 when
     enabled (restarted when disabled or out of U0), done/error/step status, passes/fails counters.
-    Out of the script runs, a LUP keep-alive Link Command is sent every 10us in U0 (as a host,
-    7.5.6.1: the Device does not enter Recovery for a lack of link activity, 1ms)."""
+
+    Each run starts after a Hot Reset directed by the host (7.5.12, as a host resetting its port):
+    the Header Sequence Numbers of both Link Layers are reset (the script is built with sequence
+    numbers from 0); a U0 exit during a run (Recovery) restarts it with a new Hot Reset. Out of the
+    script runs, a LUP keep-alive Link Command is sent every 10us in U0 (as a host, 7.5.6.1: the
+    Device does not enter Recovery for a lack of link activity, 1ms) and, after a run, the model
+    reactive acknowledges (LGOOD_n/LCRD_x of the Device Header Packets) are still sent: no Device
+    Recovery for unacknowledged Header Packets between the runs (PENDING_HP_TIMER)."""
     def __init__(self, link, ssp=True, sys_clk_freq=125e6):
         from litex.soc.interconnect.csr import CSRStorage, CSRStatus, CSRField
         from litex.soc.interconnect import stream
@@ -596,10 +602,12 @@ class USB3HostScript(LiteXModule):
         self._step   = CSRStatus(32, description="Current script step (failing step on error).")
         self._passes = CSRStatus(32, description="Scripts done count.")
         self._fails  = CSRStatus(32, description="Scripts errors count.")
+        self._resets = CSRStatus(32, description="Hot Resets directed before the runs count.")
 
         # # #
 
         from migen.genlib.misc import WaitTimer
+        from migen.genlib.fsm import FSM, NextState
         from usb3_core.host_model import link_command, LUP
         script = usb3_host_script(ssp=ssp)
         self.model = model = USB3HostModel(script.steps)
@@ -613,29 +621,63 @@ class USB3HostScript(LiteXModule):
         lup_timer = WaitTimer(int(10e-6*sys_clk_freq))
         lup_busy  = Signal()
         lup_word  = Signal()
-        run       = Signal() # Script enabled (started between two LUPs).
+        run       = Signal() # Script enabled (started between two LUPs, after a Hot Reset).
         active    = Signal() # Script running.
+        model_tx  = Signal() # Model words to send (script, or acknowledges after the script).
         self.submodules += lup_timer
-        self.sync += If(~self._control.fields.enable | ~link.u0,
-            run.eq(0)
-        ).Elif(~lup_busy,
-            run.eq(1)
+
+        # Runs: Hot Reset (Header Sequence Numbers reset on both sides), U0, script.
+        enable = self._control.fields.enable
+        self.run_fsm = run_fsm = FSM(reset_state="IDLE")
+        run_fsm.act("IDLE",
+            If(enable & link.u0 & ~lup_busy,
+                NextState("HOT-RESET")
+            )
         )
+        run_fsm.act("HOT-RESET",
+            link.hot_reset_req.eq(1),
+            If(~enable,
+                NextState("IDLE")
+            ).Elif(link.hot_reset | link.polling_idle,
+                NextState("WAIT-U0")
+            )
+        )
+        run_fsm.act("WAIT-U0",
+            If(~enable,
+                NextState("IDLE")
+            ).Elif(link.u0 & ~lup_busy,
+                NextState("RUN")
+            )
+        )
+        run_fsm.act("RUN",
+            run.eq(1),
+            If(~enable | ~link.u0,
+                NextState("IDLE")
+            )
+        )
+        resets_d = Signal()
+        self.sync += [
+            resets_d.eq(run_fsm.ongoing("HOT-RESET")),
+            If(run_fsm.ongoing("HOT-RESET") & ~resets_d, self._resets.status.eq(self._resets.status + 1)),
+        ]
+
         self.comb += [
             active.eq(run & ~model.done & ~model.error),
+            model_tx.eq(active | (run & model.done & model.source.valid)),
             lup_timer.wait.eq(link.u0 & ~active & ~lup_busy),
-            If(active,
-                model.source.connect(pairs.sink),
-            ).Elif(lup_busy,
+            If(lup_busy,
                 pairs.sink.valid.eq(1),
                 pairs.sink.first.eq(~lup_word),
                 pairs.sink.last.eq(lup_word),
                 pairs.sink.data.eq(Mux(lup_word, lup[1][0], lup[0][0])),
                 pairs.sink.ctrl.eq(Mux(lup_word, lup[1][1], lup[0][1])),
+            ).Elif(model_tx,
+                model.source.connect(pairs.sink),
             ),
         ]
         self.sync += [
-            If(lup_timer.done & ~lup_busy & ~active,
+            # LUP between two model words only (not inside a Link Command of the acknowledges).
+            If(lup_timer.done & ~lup_busy & ~active & ~model.source.valid,
                 lup_busy.eq(1),
                 lup_word.eq(0),
             ).Elif(lup_busy & pairs.sink.ready,
