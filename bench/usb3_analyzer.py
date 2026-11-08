@@ -237,9 +237,13 @@ def capture(args):
         for name in args.state.split(":"):
             analyzer.add_trigger(cond={signal("ltssm_state"): str(states[name])})
     if args.trigger is not None:
-        # Any probe (name suffix, the first match in the analyzer.csv), value (default 1).
-        name, _, value = args.trigger.partition("=")
-        analyzer.add_trigger(cond={signal(name): value or "1"})
+        # Probes values (name suffix, the first match in the analyzer.csv), value (default 1), all
+        # of them (ex: lanes_deskew_lost,ltssm_u0: deskew lost in U0).
+        cond = {}
+        for term in args.trigger.split(","):
+            name, _, value = term.partition("=")
+            cond[signal(name)] = value or "1"
+        analyzer.add_trigger(cond=cond)
     if args.data is not None:
         analyzer.add_trigger(cond={
             signal("endpoint0_source_payload_data") : args.data,
@@ -275,7 +279,7 @@ def main():
     parser.add_argument("--analyzer-csv", default="build/sqrl_acorn/analyzer.csv", help="Analyzer configuration file.")
     parser.add_argument("--state",        default=None,                            help="Trigger on LTSSM state entry (STATE) or transition (FROM:TO).")
     parser.add_argument("--data",         default=None,                            help="Trigger on a Link Layer RX data word (hex, x: don't care nibble).")
-    parser.add_argument("--trigger",      default=None,                            help="Trigger on a probe value: NAME[=VALUE] (probe name suffix, VALUE default 1).")
+    parser.add_argument("--trigger",      default=None,                            help="Trigger on probes values: NAME[=VALUE][,NAME[=VALUE]...] (probe name suffixes, VALUE default 1, all of them).")
     parser.add_argument("--offset",       default=16,   type=int,                  help="Trigger offset (samples).")
     parser.add_argument("--length",       default=4096, type=int,                  help="Capture length (samples).")
     parser.add_argument("--subsampling",  default=1,    type=int,                  help="Subsampling.")

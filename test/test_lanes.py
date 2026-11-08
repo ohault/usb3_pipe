@@ -186,6 +186,68 @@ class TestLanes(unittest.TestCase):
         out = self.run_deskew(lanes)
         self.assertEqual(out, last)
 
+    def run_deskew_aligned(self, lanes):
+        # Deskew aligned/armed outputs per cycle (lanes fed in parallel).
+        dut = LaneDeskew(0xbcbcbcbc, 0b1111)
+        trace = []
+        def lane_gen(dut, lane):
+            for data, ctrl in lanes[lane]:
+                yield dut.sinks[lane].valid.eq(1)
+                yield dut.sinks[lane].data.eq(data)
+                yield dut.sinks[lane].ctrl.eq(ctrl)
+                yield
+            yield dut.sinks[lane].valid.eq(0)
+        def checker(dut):
+            for lane in range(2):
+                yield dut.sources[lane].ready.eq(1)
+            for _ in range(max(len(l) for l in lanes) + 16):
+                trace.append(((yield dut.aligned), (yield dut.armed)))
+                yield
+        run_simulation(dut, [lane_gen(dut, 0), lane_gen(dut, 1), checker(dut)])
+        return trace
+
+    def test_deskew_single_mismatch_tolerated(self):
+        # Last COM word of the TS stream lost on Lane 0 only (decode error substituted, K28.4), then
+        # Logical Idle: a single mismatch, the lanes still paired (two Acorn Minis, end of the
+        # Recovery TS2): aligned kept, the Logical Idle words then released paired.
+        rng    = random.Random(3)
+        marker = (0xbcbcbcbcbcbcbcbc, 0xff)
+        sub    = (0x9c9c9c9c9c9c9c9c, 0xff)
+        def ts(n):
+            r = []
+            for _ in range(n):
+                r += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
+            return r
+        gap, first, last = [(0, 0)]*20, ts(6), ts(1)
+        idle = [(rng.getrandbits(64), 0) for _ in range(24)]
+        lane0 = [self.stripe(w, 0) for w in gap + first] + [self.stripe(sub, 0)] + \
+            [self.stripe(w, 0) for w in last[1:] + idle]
+        lane1 = [self.stripe(w, 1) for w in gap + first + last + idle]
+        trace = self.run_deskew_aligned([lane0, lane1])
+        self.assertEqual(trace[-1][0], 1)
+        self.assertEqual(self.run_deskew([lane0, lane1])[-len(idle):], idle)
+
+    def test_deskew_lost_on_lane_shift(self):
+        # Lane 0 one word late from the middle of the TS stream (word dropped on Lane 1: lanes no
+        # longer paired, a mismatch at each Ordered Set): pairing lost (second mismatch), search
+        # armed again after the next gap.
+        rng    = random.Random(4)
+        marker = (0xbcbcbcbcbcbcbcbc, 0xff)
+        def ts(n):
+            r = []
+            for _ in range(n):
+                r += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
+            return r
+        gap, first, more = [(0, 0)]*20, ts(4), ts(4)
+        idle = [(0, 0)]*24
+        lane0 = [self.stripe(w, 0) for w in gap + first + more + idle]
+        lane1 = [self.stripe(w, 1) for w in gap + first + more[1:] + idle]
+        trace = self.run_deskew_aligned([lane0, lane1])
+        aligned = [a for a, _ in trace]
+        lost = len(aligned) - aligned[::-1].index(1) # First cycle after the last aligned one.
+        self.assertLess(lost, len(gap + first) + 12) # Within 2 Ordered Sets of the shift.
+        self.assertEqual(trace[-1], (0, 1))          # Not aligned, armed (gap after the TS).
+
     def test_lane_swap(self):
         # Logical lanes on the physical SerDes (lane i on SerDes i ^ swap), swap detected from the
         # partner's LFPS on a single physical lane (detection enabled only).

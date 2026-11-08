@@ -446,6 +446,22 @@ class TestPHYX2Core(unittest.TestCase):
             self.assertEqual(len(re.findall(side + r"\s*entering HotReset.Exit state", out)), 4, tail)
             self.assertNotRegex(out, side + r"\s*entering eSS.Inactive", tail)
 
+    def test_core_x2_deskew_lost(self):
+        # Gen 1x2 Acorn Mini lanes, Host deskew lost at the end of a directed Recovery (Recovery.Idle,
+        # as at the end of the TS2 on two Acorn Minis): U0 entered without deskew, Recovery once the
+        # deskew search is armed (Logical Idle gap), deskew re-acquired on its TS1, both back to U0.
+        # (In simulation the Device is in U0 a few cycles after the Host either way: the case of a
+        # Device still in Recovery.Idle receiving TS1 is not reproduced here.)
+        out = self.run_sim("core_x2_deskew_lost", ["--dev-mode", "x2", "--lanes-crossed",
+            "--lanes-tx-inverted", "--host-recovery", "--host-deskew-clear"])
+        tail = "\n---- tail ----\n" + out[-4000:]
+        self.assertIn("HOST deskew cleared in Recovery.Idle", out, tail)
+        after = out[out.index("HOST deskew cleared"):]
+        self.assertRegex(after, r"HOST\s*lanes deskewed", tail)
+        for side in ["HOST", r"DEV\s"]:
+            self.assertRegex(after, side + r"\s*entering U0 state", tail)
+            self.assertNotRegex(out, side + r"\s*entering eSS.Inactive", tail)
+
     def test_core_x2_tx_shift(self):
         # Gen 1x2 with the Host/Device TX packets delayed by 3 symbols: packets starting on Lane 1,
         # at any symbol position of the 64-bit words (LanesPacketAligner).

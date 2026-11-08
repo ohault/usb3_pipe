@@ -95,9 +95,13 @@ class LaneDeskew(LiteXModule):
     and RX buffers fill levels: up to a few words, a periodic marker would be ambiguous): the search
     is armed after a gap of gap words without marker on both lanes (ex: TSEQ or Logical Idle before
     the TS1 Ordered Sets), then the first marker received on each lane are the same marker. The words
-    before it are dropped, then both lanes are released together. A marker at the head of a single
-    lane (lanes no longer paired: ex: word alignment of a lane changed after the pairing) restarts the
-    search (armed on the next gap), as clear (ex: a lane in electrical idle).
+    before it are dropped, then both lanes are released together. Markers at the head of a single lane
+    twice without paired markers in between (lanes no longer paired: ex: word alignment of a lane
+    changed after the pairing, a mismatch at each Ordered Set) restart the search (armed on the next
+    gap), as clear (ex: a lane in electrical idle). A single mismatch is tolerated: the last markers of
+    an Ordered Sets stream one word apart on the lanes (ex: a decode error substituted at the end of
+    the TS2 Ordered Sets on one lane, Logical Idle after them: two Acorn Minis), the lanes still
+    paired.
 
     The sinks are never held (continuous lanes streams, a held lane would overflow the SerDes RX
     buffers): words received with a full FIFO are dropped.
@@ -106,6 +110,7 @@ class LaneDeskew(LiteXModule):
         self.sinks   = sinks   = [stream.Endpoint(lane_layout()) for _ in range(2)]
         self.sources = sources = [stream.Endpoint(lane_layout()) for _ in range(2)]
         self.aligned = aligned = Signal() # o
+        self.armed   = armed   = Signal() # o: Search armed (gap seen, pairing on the next markers).
         self.clear   = Signal()           # i: Pairing cleared (search re-armed on the next gap).
 
         # # #
@@ -139,15 +144,18 @@ class LaneDeskew(LiteXModule):
         self.heads = heads
 
         # Search armed after a gap on both lanes (no marker in the FIFOs, dropped while searching),
-        # first markers paired; aligned until the markers are no longer paired.
-        armed = Signal()
-        both  = Signal()
+        # first markers paired; aligned until the markers are no longer paired (second mismatch
+        # without paired markers in between).
+        both     = Signal()
+        mismatch = Signal()
         self.comb += both.eq(fifos[0].source.valid & fifos[1].source.valid)
         self.sync += [
             If(self.clear,
                 aligned.eq(0),
-                armed.eq(0)
+                armed.eq(0),
+                mismatch.eq(0)
             ).Elif(~aligned,
+                mismatch.eq(0),
                 If(gaps[0] & gaps[1],
                     armed.eq(1)
                 ).Elif(armed & heads[0] & heads[1],
@@ -155,7 +163,13 @@ class LaneDeskew(LiteXModule):
                     armed.eq(0)
                 )
             ).Elif(both & (heads[0] != heads[1]),
-                aligned.eq(0)
+                If(mismatch,
+                    aligned.eq(0)
+                ).Else(
+                    mismatch.eq(1)
+                )
+            ).Elif(both & heads[0] & heads[1],
+                mismatch.eq(0)
             )
         ]
         for lane in range(2):

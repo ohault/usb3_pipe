@@ -533,9 +533,24 @@ a Host realignment): the realignments are a consequence, not the cause.
   HotReset.Active (12ms) while the side timed out in HotReset.Exit (2ms), both to eSS.Inactive.
   Fixed in the LTSSM: HotReset.Active exit at the end of a full TS2 burst with Reset=0 sent after
   the partner Reset bit fell (7.5.12.2), `TestPHYX2Core.test_core_x2_hot_resets`.
-- Next: hardware results with the fix, the Recovery.Idle timeouts (Recovery at Gen 1x2 not
-  deskewed: `deskew_lost_u0`), a trace of a `pending_hp` Recovery. Tools: `bench/acorn_x2_loads.py`
-  (loads x runs, Device Core counters before/during the runs, summary).
+- With the Hot Reset fix (`bcd01c5`, 20 loads x 20 runs): 313/400 runs done, 300/300 on the 15
+  good loads, Device `pending_hp` during the runs median 5 per load; 5 bad loads: both sides
+  re-entering U0 thousands of times, each U0 entry without deskew (`deskew_lost_u0` ~ `u0_count`),
+  the Hot Resets themselves completing (HotReset.Exit -> U0 in ~3us).
+- Deskew lost in U0 captured (`--trigger lanes_deskew_lost,ltssm_u0`, bad load): the deskew dropped
+  at the end of the Recovery TS2, the Device last TS2 COM words one word apart on the lanes (a decode
+  error substituted, K28.4, at the end on Lane 0), Logical Idle after them still paired (both lanes
+  descrambled to zeros): a false loss. The Host then entered U0 without deskew and went back to
+  Recovery.Active at once (TS1) while the Device was still in Recovery.Idle (idle handshake, no exit
+  on TS1): Device tRecoveryIdleTimeout (2ms) -> eSS.Inactive, Host tRecoveryActiveTimeout (12ms), and
+  a Recovery without a Logical Idle gap does not re-arm the deskew (the U0 entries/Recoveries loop).
+- Fixed: the deskew pairing is lost on a second mismatch without paired markers in between (a single
+  mismatch tolerated: end of an Ordered Sets stream), and the Recovery on a deskew lost in U0 waits
+  for the deskew search armed (Logical Idle gap: the partner in U0, the deskew re-acquired on the
+  Recovery TS1). `test_lanes` deskew mismatch tests, `TestPHYX2Core.test_core_x2_deskew_lost`
+  (`sim.py --host-recovery --host-deskew-clear`).
+- Next: hardware results with these fixes, a trace of a `pending_hp` Recovery. Tools:
+  `bench/acorn_x2_loads.py` (loads x runs, Device Core counters before/during the runs, summary).
 
 Debug controls (`usb3_lanes_debug_control`, A/B tests on a loaded bitstream): bit 0 Recovery on a
 lane idle, bit 1 RX re-initialization on continuous errors, bit 2 Recovery on a lane realignment in

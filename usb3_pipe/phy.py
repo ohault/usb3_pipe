@@ -1001,12 +1001,19 @@ class USB3PHY(LiteXModule):
         self.lanes_deskew_lost      = Signal()        # o: Deskew lost trigger (x2, not deskewed).
         self.lanes_idle             = Signal()        # o: Lane idle trigger (x2, lane idle for 10us).
         self.lanes_realign          = Signal()        # o: Lane realigned in U0 (x2).
+        self.lanes_deskew_clear     = Signal()        # i: Deskew cleared (debug/simulation: deskew lost).
         self.comb += [
             self.lanes_deskew_lost.eq(x2 & ~deskew.aligned),
             self.lanes_idle.eq(x2 & lanes_idle & self.lanes_idle_recovery),
             self.lanes_realign.eq(x2 & ltssm.u0 & lanes_realign & self.lanes_realign_recovery),
-            ltssm.lanes_deskew_lost.eq(self.lanes_deskew_lost | self.lanes_idle),
-            deskew.clear.eq((lanes_idle & self.lanes_idle_recovery) | self.lanes_realign),
+            # Recovery on a deskew lost once the deskew search is armed (gap: Logical Idle received
+            # in U0), the deskew re-acquired on the Recovery TS1. Not on the U0 entry: a partner still
+            # in Recovery.Idle (idle handshake) would receive our TS1 instead of Idle Symbols and stay
+            # there until tRecoveryIdleTimeout (2ms, eSS.Inactive), and a Recovery without a gap does
+            # not re-arm the deskew (U0 entries/Recoveries loop: two Acorn Minis).
+            ltssm.lanes_deskew_lost.eq((self.lanes_deskew_lost & deskew.armed) | self.lanes_idle),
+            deskew.clear.eq((lanes_idle & self.lanes_idle_recovery) | self.lanes_realign |
+                self.lanes_deskew_clear),
         ]
 
         # RX: Gen 1x1 (Lane 0) ---------------------------------------------------------------------

@@ -331,7 +331,7 @@ class USB3PIPESim(SoCMini):
         lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096, prbs_gap_bits=4, dev_mode="x2",
         lanes_crossed=False, lanes_tx_shift=0, lanes_tx_inverted=False, gen2_capable=False, gen2=False,
         link_words=1, dev_pipe_cd=False, dev_u1u2=True, gen2_data_width=None, host_recovery=False,
-        host_hot_reset=0,
+        host_hot_reset=0, host_deskew_clear=False,
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
         host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None):
@@ -622,6 +622,22 @@ class USB3PIPESim(SoCMini):
                     ),
                     If(requested & host_ltssm.recovery, recovered.eq(1)),
                 ]
+                if host_deskew_clear:
+                    # Host deskew lost at the end of the directed Recovery (Recovery.Idle: the
+                    # partner TS2 COM words one word apart on the lanes, Logical Idle after them, as
+                    # on two Acorn Minis), U0 entered without deskew.
+                    cleared = Signal()
+                    in_recovery_idle = Signal()
+                    self.comb += in_recovery_idle.eq(
+                        phys["host"].ltssm_state == phys["host"].ltssm_states["Recovery.Idle"])
+                    self.sync += [
+                        phys["host"].lanes_deskew_clear.eq(0),
+                        If(requested & in_recovery_idle & ~cleared,
+                            Display("HOST deskew cleared in Recovery.Idle"),
+                            phys["host"].lanes_deskew_clear.eq(1),
+                            cleared.eq(1),
+                        ),
+                    ]
                 self.comb += end_timer.wait.eq(host_model.error |
                     (recovered & host_ltssm.u0 & dev_u0))
             if host_hot_reset:
@@ -862,6 +878,7 @@ def main():
     parser.add_argument("--host-lbad-test", action="store_true", help="Host model Bulk OUT burst with a DPH CRC error: device LBAD, LRTY and retransmission.")
     parser.add_argument("--host-recovery", action="store_true", help="Host directed to Recovery from U0 after the script (back to U0 on both sides).")
     parser.add_argument("--host-hot-reset", default=0, type=int, help="Host directed to N Hot Resets from U0 after the script, each one at the U0 entry after the previous one (back to U0 on both sides).")
+    parser.add_argument("--host-deskew-clear", action="store_true", help="With --host-recovery --lanes 2: Host deskew cleared in Recovery.Idle (U0 entered without deskew).")
     parser.add_argument("--host-itp",      action="store_true", help="Host model Isochronous Timestamp Packets between the transfers.")
     parser.add_argument("--dev-pipe-cd",   action="store_true", help="Device LTSSM/Link Layer/Core at half the PIPE frequency (USB3PHY pipe_cd, 64-bit Link Layer words).")
     parser.add_argument("--gen2-data-width", default=None, type=int, help="Gen 2 raw words width of the SerDes models (default: 40, ex: 80 as GW5 GTR12 1:4 at 125MHz).")
@@ -906,6 +923,7 @@ def main():
         gen2_data_width       = args.gen2_data_width,
         host_recovery         = args.host_recovery,
         host_hot_reset        = args.host_hot_reset,
+        host_deskew_clear     = args.host_deskew_clear,
         host_burst_out        = int(args.host_burst_out),
         host_burst_len        = int(args.host_burst_len),
         host_burst_stream     = int(args.host_burst_stream),
