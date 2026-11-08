@@ -78,7 +78,8 @@ class USB3LanesClient:
         r.update({name: self.reg(f"usb3_lanes_debug_{name}_count").read() for name in LANES_COUNTERS})
         # U0 exits requested by the lanes (Recovery causes) and lanes RX idle cycles in U0.
         for name in ["deskew_lost_u0", "lane_idle_u0", "realign_u0", "lane0_rx_idle_u0_cycles", "lane1_rx_idle_u0_cycles"] + [
-            f"lane{lane}_{name}" for lane in range(2) for name in ["rx_buferror", "rx_realign", "rx_errors_reinit"]]:
+            f"lane{lane}_{name}" for lane in range(2) for name in ["rx_buferror", "rx_realign", "rx_errors_reinit",
+            "rx_idle_raw_u0_cycles"]]:
             if hasattr(self.bus.regs, f"usb3_lanes_debug_{name}_count"):
                 r[name] = self.reg(f"usb3_lanes_debug_{name}_count").read()
         if hasattr(self.bus.regs, "usb3_lanes_debug_control"):
@@ -215,11 +216,14 @@ def main():
             lanes.reg("usb3_script_control").write(0)
             lanes.reg("usb3_script_control").write(1)
             start = time.time()
+            last  = 0 # Last step seen (the step is reset with the model when the link leaves U0).
             while True:
-                status = lanes.reg("usb3_script_status").read()
                 step   = lanes.reg("usb3_script_step").read()
+                status = lanes.reg("usb3_script_status").read()
+                last   = step if step else last
                 if status & 0b011:
                     result = "done" if (status & 0b001) else "error"
+                    step   = lanes.reg("usb3_script_step").read() or last
                     break
                 if time.time() - start > args.timeout:
                     result = "timeout" # Script not done (ex: link not in U0).

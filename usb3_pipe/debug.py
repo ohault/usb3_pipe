@@ -281,6 +281,8 @@ class USB3LanesDebug(LiteXModule):
                 events += [(f"lane{lane}_rx_idle_u0_cycles", u0 & phy.x2 & s.rx_idle, 0)]
             # SerDes RX status: elastic buffer errors, comma realignments (physical SerDes), RX
             # re-initializations on continuous decode errors.
+            if with_triggers and hasattr(s, "rx_idle_raw"):
+                events += [(f"lane{lane}_rx_idle_raw_u0_cycles", u0 & phy.x2 & s.rx_idle_raw, 0)]
             for name in ["rx_buferror", "rx_realign"]:
                 if hasattr(s, name):
                     events += [(f"lane{lane}_{name}", getattr(s, name), 0)]

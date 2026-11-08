@@ -275,6 +275,7 @@ class RXIdleFilter(LiteXModule):
     """
     def __init__(self, rx_elecidle, idle_cycles=10):
         self.idle           = Signal() # o
+        self.raw            = Signal() # o: Resynchronized transceiver idle detection (unfiltered).
         self.stretch_cycles = idle_cycles - 1
 
         # # #
@@ -292,6 +293,7 @@ class RXIdleFilter(LiteXModule):
             )
         ]
         self.comb += self.idle.eq(count == idle_cycles)
+        self.comb += self.raw.eq(rx_elecidle_r)
 
 # TX SKP Inserter (6.4.3) --------------------------------------------------------------------------
 

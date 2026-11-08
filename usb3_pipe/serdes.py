@@ -143,6 +143,7 @@ class USB3SerDes(LiteXModule):
         ]
         self.rx_idle_filter  = RXIdleFilter(rx_idle)
         self.rx_idle_stretch = self.rx_idle_filter.stretch_cycles
+        self.rx_idle_raw     = self.rx_idle_filter.raw # Unfiltered (debug: glitches in U0).
         self.comb += self.rx_idle.eq(self.rx_idle_filter.idle)
         self.rx_error_monitor = RXErrorMonitor(xcvr.decoders, clock_domain="rx")
         # At 10Gbps (Gen 2, raw 128b/132b words), the 8b/10b decode errors are always set: Gen 2 RX
