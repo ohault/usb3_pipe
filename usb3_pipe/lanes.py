@@ -257,7 +257,7 @@ class LanesPacketAligner(LiteXModule):
     7.2.4). The packets symbols are packed (Logical Idle removed) in a symbols buffer, the last
     word of a packet completed with Logical Idle symbols (00h data, as received from a partner
     keeping its packets on 32-bit words): a packet always starts on a 32-bit word. Up to two words
-    per cycle on the output (registered, no back-pressure: two cycles of latency); the completion
+    per cycle on the output (registered, no back-pressure: three cycles of latency); the completion
     of the DPPs adds up to 3 symbols per packet, absorbed by the symbols buffer (buffer_symbols,
     overflow: sticky flag, never with Logical Idle or a SKP Ordered Set every few packets).
 
@@ -282,11 +282,28 @@ class LanesPacketAligner(LiteXModule):
         last  = [Signal(name=f"last{i}")    for i in range(8)] # Last symbol of a packet.
         valid = Signal()
         self.comb += sink.ready.eq(1)
+
+        # Input registered with the framing K-symbols decoded (timing: the 64-bit words come
+        # straight from the lanes destriping/deskew FIFOs).
+        in_valid = Signal()
+        in_data  = Signal(64)
+        in_ctrl  = Signal(8)
+        in_k     = {s: [Signal(name=f"is_{n}{i}") for i in range(8)]
+            for s, n in [(SHP, "shp"), (SLC, "slc"), (SDP, "sdp"), (EPF, "epf")]}
+        self.sync += [
+            in_valid.eq(sink.valid),
+            in_data.eq(sink.data),
+            in_ctrl.eq(sink.ctrl),
+        ]
+        for i in range(8):
+            for s in in_k:
+                self.sync += in_k[s][i].eq(sink.ctrl[i] & (sink.data[8*i:8*(i+1)] == s.value))
+
         m, c = mode, count
         for i in range(8):
-            data, k = sink.data[8*i:8*(i+1)], sink.ctrl[i]
+            data, k = in_data[8*i:8*(i+1)], in_ctrl[i]
             def is_k(symbol):
-                return k & (data == symbol.value)
+                return in_k[symbol][i]
             _keep, _last = Signal(), Signal()
             nm, nc = Signal(2, name=f"mode{i}"), Signal(5, name=f"count{i}")
             self.comb += [
@@ -315,13 +332,13 @@ class LanesPacketAligner(LiteXModule):
             ]
             self.sync += [
                 sym[i].eq(Cat(data, k)),
-                keep[i].eq(sink.valid & _keep),
-                last[i].eq(sink.valid & _last),
+                keep[i].eq(in_valid & _keep),
+                last[i].eq(in_valid & _last),
             ]
             m, c = nm, nc
         self.sync += [
-            valid.eq(sink.valid),
-            If(sink.valid,
+            valid.eq(in_valid),
+            If(in_valid,
                 mode.eq(m),
                 count.eq(c),
             )

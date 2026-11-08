@@ -582,6 +582,7 @@ class USB3HostScript(LiteXModule):
     7.5.6.1: the Device does not enter Recovery for a lack of link activity, 1ms)."""
     def __init__(self, link, ssp=True, sys_clk_freq=125e6):
         from litex.soc.interconnect.csr import CSRStorage, CSRStatus, CSRField
+        from litex.soc.interconnect import stream
         from usb3_pipe.framing  import WordsToPairs, PairsToWords
         from usb3_core.host_model import USB3HostModel
         self._control = CSRStorage(fields=[
@@ -604,6 +605,8 @@ class USB3HostScript(LiteXModule):
         self.model = model = USB3HostModel(script.steps)
         self.pairs = pairs = WordsToPairs()
         self.words = words = PairsToWords()
+        # RX words registered before the model (timing: the script steps compare them).
+        self.rx_buffer = rx_buffer = stream.Buffer([("data", 32), ("ctrl", 4)], pipe_valid=True)
 
         # LUP keep-alive (out of the script runs).
         lup       = link_command(LUP())
@@ -643,7 +646,8 @@ class USB3HostScript(LiteXModule):
         self.comb += [
             pairs.source.connect(link.sink),
             link.source.connect(words.sink),
-            words.source.connect(model.sink),
+            words.source.connect(rx_buffer.sink),
+            rx_buffer.source.connect(model.sink),
             model.enable.eq(run),
             model.u0.eq(link.u0),
             self._status.fields.done.eq(model.done),

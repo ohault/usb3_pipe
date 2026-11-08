@@ -128,18 +128,32 @@ class PRBSPacketChecker(LiteXModule):
         self.comb += prev_next_stmts
         self.comb += sink.ready.eq(1)
 
-        is_start = (sink.data == start[0]) & (sink.ctrl == start[1])
-        is_end   = (sink.data == end[0])   & (sink.ctrl == end[1])
+        # Input registered with its markers/Logical Idle decoded (timing: the RX words come
+        # straight from the PHY datapath).
+        valid    = Signal()
+        data     = Signal(data_width)
+        ctrl     = Signal(data_width//8)
+        is_start = Signal()
+        is_end   = Signal()
+        is_idle  = Signal()
+        self.sync += [
+            valid.eq(sink.valid),
+            data.eq(sink.data),
+            ctrl.eq(sink.ctrl),
+            is_start.eq((sink.data == start[0]) & (sink.ctrl == start[1])),
+            is_end.eq(  (sink.data == end[0])   & (sink.ctrl == end[1])),
+            is_idle.eq( (sink.data == 0)        & (sink.ctrl == 0)),
+        ]
         # Re-synchronized on the first start marker after being enabled (packets cut by a link
         # retrain/disable are not errors).
         self.sync += If(~self.enable,
             synced.eq(0),
             in_packet.eq(0),
             prev_ok.eq(0),
-        ).Elif(sink.valid & is_start,
+        ).Elif(valid & is_start,
             synced.eq(1),
         )
-        self.sync += If(self.enable & sink.valid & (synced | is_start),
+        self.sync += If(self.enable & valid & (synced | is_start),
             If(is_start,
                 If(in_packet, self.errors.eq(self.errors + 1)),
                 in_packet.eq(1)
@@ -149,12 +163,12 @@ class PRBSPacketChecker(LiteXModule):
                 self.packets.eq(self.packets + 1)
             ).Elif(in_packet,
                 self.words.eq(self.words + 1),
-                prev.eq(sink.data),
+                prev.eq(data),
                 prev_ok.eq(1),
-                If((sink.ctrl != 0) | (prev_ok & (sink.data != prev_next)),
+                If((ctrl != 0) | (prev_ok & (data != prev_next)),
                     self.errors.eq(self.errors + 1)
                 )
-            ).Elif((sink.data != 0) | (sink.ctrl != 0),
+            ).Elif(~is_idle,
                 self.errors.eq(self.errors + 1)
             )
         )
