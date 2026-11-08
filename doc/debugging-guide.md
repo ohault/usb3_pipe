@@ -214,6 +214,36 @@ control below the Protocol Layer:
 ./bench/usb3_trace.py --port 1240 --csr-csv build/alibaba_xcku3p/csr.csv link
 ```
 
+## Gen 1x2 (two lanes)
+
+Two Acorn Baseboard Minis (`bench/acorn.py --lanes 2`, one board in each role, [targets.md](targets.md)),
+one `litex_server` per board (`bench/acorn_ftdi.py --location <loc> server --port <port>`). Procedure:
+[gen1x2-hardware-validation.md](gen1x2-hardware-validation.md).
+
+- `bench/usb3_lanes.py status`: x2 negotiated, lanes deskewed/swapped, per lane ready/RX idle/RX
+  polarity, U0/Recovery entries, then the `USB3LanesDebug` counters: per lane TS1/TS2 detections and
+  RX decode errors cycles; U0 exits requested by the lanes: `deskew_lost_u0` (U0 entered or kept
+  without deskew), `lane_idle_u0` (a lane in electrical idle for 10us), `realign_u0` (a lane comma
+  realignment or RX re-initialization in U0); per lane `rx_buferror`, `rx_realign` (transceiver
+  comma realignments), `rx_errors_reinit` (RX re-initializations on continuous decode errors),
+  RX idle cycles in U0. `clear` clears them. `idle-recovery-*`/`rx-reinit-*`: debug controls (A/B
+  tests on a loaded bitstream).
+- Scripted host (`--role host --lanes-core`): `usb3_lanes.py script --runs N` (one JSON line per run:
+  done/error/timeout, failing step and script section); Device Core counters
+  (`usb3_core_recovery_cause`: last cause and per cause counts, `usb3_core_rx_lbad`,
+  `usb3_core_tx_retry`).
+- A Gen 1x2 build behaves differently from one bitstream load to another, and from one build to
+  another of the same source: `bench/acorn_x2_loads.py` (both boards loaded N times, runs on each
+  load, counters, summary); compare two builds of the same source before crediting a change.
+- LTSSM histories of both boards around an event: `USB3DebugClient.history_freeze()` then
+  `clear()` and `history()` (`bench/usb3_debug.py`, Python API): the first 32 transitions after the
+  clear (the history is read over JTAG much slower than it changes: `usb3_debug.py history` on a
+  running link mixes old and new entries).
+- LiteScope `realign` group with `usb3_analyzer.py capture --trigger lanes_deskew_lost,ltssm_u0
+  --no-retrain` (deskew lost in U0) or `--trigger lanes_realign` (lane realigned in U0) during
+  scripted runs: the lanes RX words at the deskew input show which lane lost its alignment and why
+  (K28.4 decode error substitutions, symbols shifted).
+
 ## Gen 2 (10Gbps)
 
 With `--gen2-capable` (`bench/alibaba_xcku3p.py`), `bench/usb3_soc.py` adds the Gen 2 bring-up CSRs

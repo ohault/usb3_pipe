@@ -3,9 +3,12 @@
 **Status**: **Gen 1x1** (SuperSpeed, 5Gbps) and **Gen 2x1** (SuperSpeedPlus, 10Gbps) work on hardware
 (Gen 2x1 on UltraScale+ GTY: enumeration, Bulk transfers up to ~880MB/s, full duplex, see the
 [hardware milestones](#gen-2x1-hardware-milestones); on Gowin GW5AST-138B GTR12: in bring-up, [next
-steps](#next-steps)). **Gen 1x2** (2x5Gbps): PHY and SuperSpeedPlus Link Layer/Device Core in
-simulation only (enumeration and Bulk transfers at Gen 1x2, no hardware yet). **Gen 2x2**
-(2x10Gbps): not started.
+steps](#next-steps)). **Gen 1x2** (2x5Gbps, ohault/usb3_pipe fork): PHY and SuperSpeedPlus Link
+Layer/Device Core done in simulation; on hardware between two LiteX Acorn Baseboard Minis (Artix7
+GTP, SFP DAC cables, one board in each role): PHY validated (PRBS at 610MB/s per direction without
+errors, lanes swap, single lane fallback, unplug/replug) and the Device Core with a scripted USB host
+in gateware (400/400 runs over 20 bitstream loads); not yet with a USB host (Type-C breakout, Gen 1x2
+host: [M1](#gen-1x2-hardware-milestones)). **Gen 2x2** (2x10Gbps): not started.
 
 This document lists what Gen 2x1 (SuperSpeedPlus 10Gbps, 128b/132b, one lane) and Gen 1x2
 (SuperSpeedPlus 2x5Gbps, 8b/10b, two lanes) require, layer by layer, what was done and found during
@@ -310,10 +313,15 @@ SFP-1 with two SFP DAC cables (both SFP cages are in the same GTP quad), then a 
 breakout (two SFP cages, both SuperSpeed lane pairs routed to the USB-C connector) and a Gen 1x2
 capable host ([issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140)).
 
-**M0: two-lane link between two boards** (PHY validated on hardware, Device Core pair open, see
-[the results](gen1x2-hardware-validation.md#results-two-boards-2026-11-08)): the same test
-as `sim.py --lanes 2`, on hardware, without the SuperSpeedPlus Link Layer or a USB host. Step by step
-procedure: [gen1x2-hardware-validation.md](gen1x2-hardware-validation.md).
+**M0: two-lane link between two boards** (done: PHY and Device Core with a scripted host validated
+on hardware, [the results](gen1x2-hardware-validation.md#results-two-boards-2026-11-08)): the same
+tests as `sim.py --lanes 2 [--lanes-core]`, on hardware, without a USB host. Step by step procedure:
+[gen1x2-hardware-validation.md](gen1x2-hardware-validation.md). Found on hardware and fixed (each
+reproduced in simulation first): all the Acorn Mini SFP RX polarities inverted (flipped at the end
+of Polling.Active), Recovery on a lanes deskew lost, a lane in electrical idle or a lane realigned
+in U0, the HotReset.Active exit (a Reset=0 TS2 burst sent before leaving: back to back Hot Resets
+skewed by the Recovery), the lanes deskew (a single COM mismatch at the end of an Ordered Sets stream
+tolerated, the U0 deskew lost Recovery after the Logical Idle gap), `LanesPacketAligner` timing.
 `bench/acorn.py --lanes 2 --role host|device` builds `USB3PHY(lanes=2)` (Host or Device role) on
 SFP-0 (Lane 0, Configuration Lane) and SFP-1 (Lane 1), Lane 1 on the Lane 0 Quad PLL and TX clock
 (`A7USB3SerDes(pll=, tx_clk=)`: the lanes TX run in lockstep, as required by `USB3PHY(lanes=2)`), with
@@ -361,11 +369,12 @@ negotiated lanes in `/sys/bus/usb/devices/*/rx_lanes` and `tx_lanes`.
    ~1.18GB/s on the line): wider/faster Link Layer words for the last ~25%; 64-bit words for the other
    endpoints/device classes (UVC, MSC); U1/U2 on hardware (not enabled by the bench host); Gen 2
    SerDes clocking on Kintex7 GTX/UltraScale GTH.
-2. Gen 1x2 on Artix7/Kintex7 with a Type-C breakout: PHY done in simulation (`USB3PHY(lanes=2)`), two
-   boards link test ready ([M0](#gen-1x2-hardware-milestones)), single lane fallback and
-   Configuration Lane detection (lanes swap), SuperSpeedPlus Link Layer/Device Core at Gen 1x2
-   (`--lanes-core`, any host packet placement: `LanesPacketAligner`) in simulation; remaining:
-   hardware validation (two boards, then a Gen 1x2 host), Gen 1x2 throughput.
+2. Gen 1x2 on Artix7/Kintex7 with a Type-C breakout: PHY (`USB3PHY(lanes=2)`, single lane fallback,
+   Configuration Lane detection) and SuperSpeedPlus Link Layer/Device Core at Gen 1x2
+   (`--lanes-core`, any host packet placement: `LanesPacketAligner`) validated between two boards
+   ([M0](#gen-1x2-hardware-milestones)); remaining: a Gen 1x1 USB host (SFP2USB adapter or the
+   breakout), the dual SFP to USB-C breakout with a Gen 1x2 host (M1), Gen 1x2 throughput, the
+   single lane fallback when the Device starts training alone (Compliance, two boards).
 3. Gen 2x2 (20Gbps) on UltraScale+ GTY: combination of both, 7 buffers.
 4. Gen 2x1 on Gowin GW5AST (Tang Mega 138K Pro, `bench/sipeed_tang_mega_138k_pro.py`, build flow
    and options in [targets.md](targets.md)): Gen 1 is validated on hardware with the PIPE in its own

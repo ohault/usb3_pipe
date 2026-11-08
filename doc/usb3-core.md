@@ -206,8 +206,11 @@ A complete Acorn design (PHY + core + debug + bench) uses ~6000 LUTs (4.5% of th
 
 ## Limitations
 
-- Gen 1x1 and Gen 2x1 (SuperSpeedPlus device: no hub/deferred/arbitration weight handling), no
-  Gen 1x2/Gen 2x2 Link Layer yet ([gen2-x2-roadmap.md](gen2-x2-roadmap.md)).
+- Gen 1x1, Gen 2x1 and Gen 1x2 (SuperSpeedPlus device: no hub/deferred/arbitration weight
+  handling). Gen 1x2 through `USB3PHYX2Link` (64-bit endpoints examples): validated between two
+  boards with a scripted host, not yet with a USB host
+  ([gen1x2-hardware-validation.md](gen1x2-hardware-validation.md)); no Gen 2x2
+  ([gen2-x2-roadmap.md](gen2-x2-roadmap.md)).
 - 64/128-bit words for the Bulk endpoints only (`link_words=2|4`): the other endpoints/device
   classes are 32-bit (adapted by the Protocol Layer, at their 32-bit rate); the `cdc_*`/`console`/
   `uvc*`/`msc*`/`composite` examples use the 32-bit Link Layer.

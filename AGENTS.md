@@ -42,6 +42,8 @@ LiteScope captures, builds with parsed timing, simulation): https://github.com/e
   `TestPHYX2Core` in `test/test_phy.py`.
 - `./sim.py --lanes 2 [--lanes-core] [--dev-mode x2|x1|ss] [--lanes-crossed]`; `bench/acorn.py
   --lanes 2 [--role host] [--lanes-core]` (Acorn Mini only, two SFPs), `bench/acorn_ftdi.py`
-  (several boards on one host), `bench/usb3_lanes.py`.
+  (several boards on one host), `bench/usb3_lanes.py` (status, PRBS, scripted host runs),
+  `bench/acorn_x2_loads.py` (N bitstream loads x scripted host runs: a Gen 1x2 build behaves
+  differently from one load to the next).
 - Status and roadmap: [doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md); hardware procedure:
   [doc/gen1x2-hardware-validation.md](doc/gen1x2-hardware-validation.md).

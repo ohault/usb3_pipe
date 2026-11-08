@@ -61,6 +61,32 @@ $ ./bench/usb3_bulk.py loopback --size 1024 --count 1000
 Results (README status table): Bulk IN/OUT 446/449 MB/s, full duplex 376 + 400 MB/s, 139 GB soak
 without error, 72/72 clean Linux autosuspend resumes.
 
+### Gen 1x2 (two lanes, Acorn Baseboard Mini)
+
+```sh
+$ ./bench/acorn.py --lanes 2 --role host   --lanes-core --with-jtagbone --output-dir build/acorn_x2_host_script --build
+$ ./bench/acorn.py --lanes 2 --role device --lanes-core --example loopback --with-jtagbone --output-dir build/acorn_x2_device_core --build
+$ ./bench/acorn_x2_loads.py --host-build build/acorn_x2_host_script --device-build build/acorn_x2_device_core --loads 20 --runs 20
+```
+
+- `--lanes 2`: `USB3PHY(lanes=2)` on SFP-0 (Lane 0, Configuration Lane) and SFP-1 (Lane 1), Lane 1
+  on the Lane 0 Quad PLL and TX clock (lanes TX in lockstep). Mini only (both SFP cages in the same
+  GTP quad).
+- `--role host|device`: USB3PHY role (two boards, one in each role, SFP DAC cables; Rx.Detect is not
+  modelled: both start in Polling). `--no-x2`: Gen 1x2 not advertised (Gen 1x1 negotiated, single
+  lane fallback on the Configuration Lane).
+- Without `--lanes-core`: 64-bit PRBS Link-Layer stand-ins (`bench/usb3_lanes.py prbs`). With
+  `--lanes-core`: Device: the USB3 Device Core example (`--example`: SuperSpeedPlus at Gen 1x2 with
+  `loopback`/`wishbone`/`bench`, Gen 1x1 otherwise); Host: a scripted USB host in gateware
+  (`bench/usb3_lanes.py script`, SuperSpeed script with `--no-x2`).
+- Several boards on one host: `bench/acorn_ftdi.py list|load|server` (each board selected by the USB
+  location of its baseboard FTDI). `bench/acorn_x2_loads.py`: both boards loaded N times, scripted
+  host runs on each load, PHY/lanes status and Device Core counters, summary (a Gen 1x2 build behaves
+  differently from one bitstream load to the next: test ~20 loads).
+- LiteScope: `--analyzer-group lanes|realign` ([debugging-guide.md](debugging-guide.md)).
+
+Procedure and results: [gen1x2-hardware-validation.md](gen1x2-hardware-validation.md).
+
 ## KC705
 
 ```sh

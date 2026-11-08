@@ -499,9 +499,9 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     the Host or Device role + debug (USB3PHYDebug on Lane 0, USB3LanesDebug), PRBS Link-Layer stand-ins
     (PRBSLinkTester on the 64-bit link words) and LEDs (SerDes ready, U0, x2 negotiated).
 
-    No SuperSpeedPlus Link Layer yet (doc/gen2-x2-roadmap.md): the link is tested between two
-    boards (one in each role, as sim.py --lanes 2), not with a USB host. x2_capable=False: Gen 1x1
-    negotiated with the partner (single lane fallback on Lane 0, as sim.py --dev-mode x1).
+    The link is tested between two boards (one in each role, as sim.py --lanes 2,
+    doc/gen1x2-hardware-validation.md). x2_capable=False: Gen 1x1 negotiated with the partner
+    (single lane fallback on Lane 0, as sim.py --dev-mode x1).
 
     with_core (Host role): scripted USB host (USB3HostScript: USB3HostModel running the Gen 1x2
     enumeration + Bulk loopback script with the data checks, on a USB3PHYX2Link) for a Device board

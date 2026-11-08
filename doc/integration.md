@@ -70,7 +70,7 @@ self.usb3_phy = USB3PHY(serdes=self.usb3_serdes, sys_clk_freq=sys_clk_freq, role
 | `with_u1u2` | `True` | `False`: no U1/U2 in the LTSSM (less logic, LGO_U1/LGO_U2 rejected by the Link Layer). |
 | `with_endianness_swap` | `True` | First symbol on `data[31:24]` (`False`: on `data[7:0]`). |
 | `timer_scale` | `1` | LTSSM/LFPS timers scaling (simulation only). |
-| `lanes`, `x2_capable`, `deskew_depth` | `1`, `True`, `8` | Gen 1x2 (simulation only, [gen2-x2-roadmap.md](gen2-x2-roadmap.md)). |
+| `lanes`, `x2_capable`, `deskew_depth` | `1`, `True`, `8` | Gen 1x2: two SerDes (Lane 1 on the Lane 0 PLL and TX clock: lanes TX in lockstep), Gen 1x2 advertised (`x2_capable`), lanes deskew FIFOs depth (words). Link Layer through `USB3PHYX2Link` (SuperSpeedPlus at Gen 1x2, SuperSpeed at Gen 1x1) or `USB3PHYX1Link` (Gen 1x1 only); reference design: `bench/usb3_soc.py` `add_usb3_lanes_link`, [gen1x2-hardware-validation.md](gen1x2-hardware-validation.md). |
 
 Other signals: `reset` (PHY reset, `sys`: the link trains again from Polling; with `pipe_cd` the
 reset is resynchronized and also resets the PIPE/Gen2PIPE/CDC), `serdes_rx_reset` (transceiver RX

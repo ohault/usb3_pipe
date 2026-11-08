@@ -41,7 +41,7 @@ it needs the breakout (`dual-sfp2usbc-breakout` branch, `hardware/sfp2usbc/`) an
 | Part | Boards | Link partner | Link Layer | Simulation |
 |------|--------|--------------|------------|------------|
 | Two boards (tests 1-6) | 2 | Acorn Mini, Host role, 2 DAC cables | PRBS stand-ins | `sim.py --lanes 2` (`TestPHYX2`) |
-| Two boards, core (tests 7-10) | 2 | Acorn Mini, scripted USB host, 2 DAC cables | Device Core, SuperSpeedPlus at Gen 1x2 | `sim.py --lanes 2 --lanes-core` (`TestPHYX2Core`) |
+| Two boards, core (tests 7-10b) | 2 | Acorn Mini, scripted USB host, 2 DAC cables | Device Core, SuperSpeedPlus at Gen 1x2 (SuperSpeed at Gen 1x1: 10b) | `sim.py --lanes 2 --lanes-core [--dev-mode x1]` (`TestPHYX2Core`) |
 | Single board (tests 11-13) | 1 | USB 3 host, SFP2USB adapter (1 lane) | Device Core, Gen 1x1 | `sim.py --lanes 2 --lanes-core --dev-mode x1` (`TestPHYX2Core`) |
 | Gen 1x2 host (tests 14-18) | 1 | Gen 1x2 host, dual SFP to USB-C breakout | Device Core, SuperSpeedPlus at Gen 1x2 | `sim.py --lanes 2 --lanes-core` (`TestPHYX2Core`) |
 
@@ -213,6 +213,11 @@ Pass: `x2: 0` on both boards (Gen 1x1 negotiated in the LBPM PHY Capability exch
 only, SFP-1 in electrical idle (`rx_idle: [0, 1]`), PRBS without errors (32-bit link words: about
 half the Gen 1x2 rate). With crossed cables (test 4), the same on the Device SFP-1.
 
+Retrain both boards together after the loads (`usb3_debug_phy_reset` of both boards set, then
+released): the Device not x2 capable left alone in Polling.LFPS (loaded seconds before the Host)
+times out to Compliance (360ms) and does not come back to U0 when the Host starts (open, crossed
+cables, [Results](#results-two-boards-2026-11-08)). The Gen 1x2 capable Device recovers.
+
 ### 6. Unplug/replug (optional)
 
 ```sh
@@ -274,7 +279,7 @@ new Hot Reset on a U0 exit. Test 8 is the criterion.
 ```sh
 ./bench/usb3_lanes.py $H2 script --runs 100
 ./bench/usb3_lanes.py $D2 status
-litex_cli --port 1241 --regs | grep usb3_core     # Device Link Layer counters (LBAD, retries, Recovery).
+litex_cli --port 1241 --csr-csv build/acorn_x2_device_core/csr.csv --regs | grep usb3_core  # Device Link Layer counters.
 ```
 
 Pass: `done` for each run (one JSON line per run with its duration), final line with `done: 100`,
@@ -283,6 +288,16 @@ LBAD/retries in the Device Link Layer counters (`usb3_core_rx_lbad`, `usb3_core_
 `usb3_core_recovery_req`). An `error` gives the failing step and script section (`link_init`,
 `get_device_descriptor`... `bulk_in_1`): report them; a `timeout` is a link not in U0. The
 final line also gives `resets_csr` (Hot Resets directed before the runs, restarts included).
+
+A single bitstream load proves little (the behavior of a Gen 1x2 build changes from one load to
+the next): run ~20 loads, both boards loaded on each (servers restarted, counters cleared, Device
+Core counters read before and after the runs, summary with the bad loads apart):
+
+```sh
+./bench/acorn_x2_loads.py --host-build build/acorn_x2_host_script --device-build build/acorn_x2_device_core \
+    --loads 20 --runs 20 --out build/hw_runs/<name>/loads.jsonl
+./bench/acorn_x2_loads.py --summary build/hw_runs/<name>/loads.jsonl
+```
 
 ### 9. Crossed cables (lanes swap with the core)
 
@@ -306,6 +321,22 @@ for i in $(seq 20); do ./bench/usb3_lanes.py $D2 retrain --wait 2; ./bench/usb3_
 
 Pass: all the runs `done` after each retrain (the script restarts from the link initialization on
 each run), no `rx_overflow`.
+
+### 10b. Gen 1x1 Device Core (Host not Gen 1x2 capable)
+
+The same Device board (`loopback`, Gen 1x2 capable), a Host board built with `--no-x2`: Gen 1x1
+negotiated in the SuperSpeedPlus Polling (as with a Gen 1x1 USB host), the Device Core in SuperSpeed
+operation on its Configuration Lane, the scripted host running the SuperSpeed script (3-bit Header
+Sequence Numbers, `usb3_script_ssp: 0`):
+
+```sh
+./bench/acorn.py --lanes 2 --role host --lanes-core --no-x2 --with-jtagbone --output-dir build/acorn_x1_host_script --build
+./bench/acorn_x2_loads.py --host-build build/acorn_x1_host_script --device-build build/acorn_x2_device_core \
+    --loads 20 --runs 20 --out build/hw_runs/<name>/loads.jsonl
+```
+
+Pass: as test 8, `x2: 0` on both boards (`sim.py --lanes 2 --lanes-core --dev-mode x1
+--no-host-skp`, `TestPHYX2Core.test_core_x1_data`).
 
 ## Single Board With a USB 3 Host (SFP2USB Adapter)
 
@@ -448,8 +479,20 @@ branch), per test and per board:
 
 ## Results (Two Boards, 2026-11-08)
 
+Summary (latest builds, crossed cables):
+
+| Part | Status |
+|------|--------|
+| PHY, PRBS (tests 1-6) | Validated: 610MB/s per direction without errors, retrains, lanes swap, unplug/replug, 20/20 bitstream loads good. Single lane fallback (test 5): with both PHYs retrained together (a Device not x2 capable starting alone times out to Compliance: open). |
+| Device Core at Gen 1x2, scripted host (tests 7-9) | Validated: 400/400 runs over 20 bitstream loads, no Device Link Layer Recovery, LBAD or retry during the runs. |
+| Device Core at Gen 1x1 (test 10b), soak (test 10) | Below. |
+| USB hosts (tests 11-18) | Not run: SFP2USB adapter, dual SFP to USB-C breakout and Gen 1x2 host needed. |
+
+The sections below are in chronological order: first results, what was found on hardware and fixed
+(each reproduced in simulation first), and the results after each fix.
+
 Two LiteX Acorn Baseboard Minis (FT2232H) + SQRL Acorn CLE-215+, two passive SFP DAC cables,
-Vivado 2023.2 (all builds timing met). The first results (tests 1-10 passed) were obtained on
+Vivado 2023.2 (all builds timing met unless noted). The first results (tests 1-10 passed) were obtained on
 bitstream loads that happened to be good: about half of the loads were not, until the fixes below
 (found with `--analyzer-group lanes` captures and the `USB3LanesDebug` counters).
 
@@ -465,7 +508,8 @@ PHY with the PRBS stand-ins (`acorn_x2_host`/`acorn_x2_device`, all the fixes):
 | 6. Unplug/replug | Link out of U0 on the unplug, Polling retries, U0 deskewed on the replug, PRBS 30s 0 errors. |
 | Bitstream loads | 20/20 loads good (crossed cables), the Recovery on a lane realignment in U0 used on 11 of them. |
 
-Device Core with the scripted host (`acorn_x2_host_script`/`acorn_x2_device_core`): **open**.
+Device Core with the scripted host (`acorn_x2_host_script`/`acorn_x2_device_core`), first results
+(before the fixes below):
 
 | Test | Result |
 |------|--------|

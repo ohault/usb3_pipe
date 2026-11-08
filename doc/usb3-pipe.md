@@ -143,8 +143,11 @@ $ pytest test -m slow            # Long simulations (Verilator), not run by defa
 
 - Hardware: Gen 1x1 on Artix7 GTP, UltraScale+ GTY and Gowin GW5AST/GW5AT GTR12 (Kintex7 GTX
   build-tested); Gen 2x1 on UltraScale+ GTY (validated) and Gowin GW5AST GTR12 (bring-up,
-  [targets.md](targets.md)). Gen 1x2: simulation only (two boards link test ready for hardware
-  validation); Gen 2x2: not started ([gen2-x2-roadmap.md](gen2-x2-roadmap.md)).
+  [targets.md](targets.md)). Gen 1x2 (`lanes=2`, ohault/usb3_pipe fork): on Artix7 GTP between two
+  LiteX Acorn Baseboard Minis (SFP DAC cables, one board in each role: PHY and Device Core with a
+  scripted host validated), not yet with a USB host
+  ([gen1x2-hardware-validation.md](gen1x2-hardware-validation.md)); Gen 2x2: not started
+  ([gen2-x2-roadmap.md](gen2-x2-roadmap.md)).
 - `pipe_cd` (slow fabrics): 64-bit Link Layer at 62.5MHz (~430MB/s Bulk OUT, Bulk IN ~370MB/s with
   `max_burst=8`, ~400MB/s with 16: hosts opening windows of max_burst packets, ex: AMD xHCI ACK TPs
   with NumP counted down, leave the device waiting for a new window at the end of each burst); U1/U2

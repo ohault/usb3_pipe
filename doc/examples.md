@@ -219,9 +219,18 @@ Gen 2 section (XCKU3P).
   status table); bitstream loaded with openFPGALoader (`--load` expects a `.bit`).
 - KC705: build-tested, hardware validation in progress.
 
-`bench/acorn.py --lanes 2 --role host|device` (Acorn Baseboard Mini, SFP-0/SFP-1) is not a USB3
-Device Core example: Gen 1x2 PHY link test between two boards with PRBS Link-Layer stand-ins
-(`bench/usb3_lanes.py`), see [gen2-x2-roadmap.md](gen2-x2-roadmap.md#gen-1x2-hardware-milestones).
+`bench/acorn.py --lanes 2` (Acorn Baseboard Mini, SFP-0/SFP-1, Gen 1x2, one board in each role):
+- `--role host|device`: PHY link test between two boards with PRBS Link-Layer stand-ins
+  (`bench/usb3_lanes.py status|prbs|retrain`).
+- `--role device --lanes-core --example loopback|wishbone|bench`: the examples on the Gen 1x2 link
+  (`USB3PHYX2Link`: SuperSpeedPlus at Gen 1x2, SuperSpeed at Gen 1x1; the other examples run at Gen
+  1x1 through `USB3PHYX1Link`), for a dual SFP to USB-C breakout and a USB host, or with:
+- `--role host --lanes-core`: a scripted USB host in gateware (link initialization, enumeration-like
+  control transfers, Bulk loopback with the Bulk IN data checked) for a Device board running
+  `loopback` (`bench/usb3_lanes.py script --runs N`, `bench/acorn_x2_loads.py`: N bitstream loads x
+  runs); with `--no-x2`: SuperSpeed script, Gen 1x1 negotiated.
+
+See [gen1x2-hardware-validation.md](gen1x2-hardware-validation.md).
 
 | Target | Build directory | Not available |
 |---|---|---|
