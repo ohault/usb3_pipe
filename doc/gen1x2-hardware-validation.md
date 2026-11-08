@@ -261,9 +261,13 @@ ready, U0, x2; Device board: SerDes ready, U0, lanes swapped.
 ./bench/usb3_lanes.py $D2 status
 ```
 
-Pass: as test 1 (U0, `x2: 1`, `deskew_aligned: 1`) on both boards, `rx_overflow: 0`. The link
-stays in U0 between the script runs (the scripted host sends a LUP keep-alive every 10us, as a
-host: no Device Recovery for a lack of link activity), `recovery_count` stable over a minute.
+Pass: U0 reached with `x2: 1`, `deskew_aligned: 1` on both boards, `rx_overflow: 0`. Out of the
+script runs, the link does not stay in U0: the scripted host only sends LUP keep-alives and does
+not acknowledge the Device Header Packets (LGOOD_n), so the Device Link Layer requests a Recovery
+on each PENDING_HP_TIMER (10us) after U0 (`usb3_core_recovery_cause`: `pending_hp`), and the
+Recoveries/retrainings repeat (thousands per second, high `lane0/1_rx_errors_cycles` counts). Each
+script run also restarts from the link initialization (sequence numbers: one `lgood` Recovery per
+run). Test 8 is the criterion.
 
 ### 8. Scripted host runs
 
@@ -440,6 +444,32 @@ branch), per test and per board:
   orientation, host controller and cable references, `dmesg` lines of the enumeration.
 - On a failure: `retrain` output (LTSSM state history), per lane counters (`lane0/1_ts1`,
   `ts1_inv`, `ts2`, `rx_errors_cycles`, `deskew`), DAC cables references/lengths.
+
+## Results (Two Boards, 2026-11-08)
+
+Two LiteX Acorn Baseboard Minis (FT2232H) + SQRL Acorn CLE-215+, two passive SFP DAC cables,
+Vivado 2023.2 (all builds timing met), tests 1-10:
+
+| Test | Result |
+|------|--------|
+| 1. Link up (straight) | U0, `x2: 1`, deskewed, `lane_swap: 0` on both boards. |
+| 2. PRBS | 60s, 0 errors/0 recoveries in both directions, 610-638MB/s per direction (straight and crossed). |
+| 3. Retrains | Deskewed on both boards after each double retrain (1-3 Recoveries); transient PRBS errors only during the convergence after a retrain (see below). |
+| 4. Lanes swap (crossed) | Device `lane_swap: 1`, Host `lane_swap: 0`, PRBS 0 errors. |
+| 5. Single lane fallback | `x2: 0` on both boards, U0 on the Configuration Lane (Device SFP-1 with crossed cables), PRBS 60s 0 errors, 305MB/s. |
+| 6. Unplug/replug | Link out of U0 on the unplug, Polling retries, U0 deskewed on the replug, PRBS 30s 0 errors. |
+| 7. Link up, core | U0 at Gen 1x2, deskewed; not stable out of the script runs (scripted host, see test 7). |
+| 8. Scripted host | 100/100 runs done, Device LBAD 0, retries 0, `rx_overflow` 0. |
+| 9. Crossed, core | 100/100 runs done, Device `lane_swap: 1`. |
+| 10. Soak | 20 x (double retrain + 10 runs) then 10000 runs: 10200 done, 0 errors/timeouts, LBAD 0, retries 0. |
+
+Found on hardware (fixed): all the Acorn Mini SFP RX polarities are inverted (flipped at the end of
+Polling.Active on the 4 receivers) and the lanes deskew acquired on the first TS1 was lost before
+U0 on about half of the trainings (U0 without data): Recovery on a deskew lost in U0 at Gen 1x2
+(`sim.py --lanes-tx-inverted` for the polarities); a lane in electrical idle in U0 (cable
+unplugged) left the link in U0 with corrupted words after the replug: Recovery on a lane idle for
+10us. Open: after a retrain, the deskew is sometimes paired one Ordered Set off (PRBS errors in U0
+until a later Recovery, then clean).
 
 ## Troubleshooting
 
