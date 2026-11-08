@@ -104,6 +104,7 @@ class USB3LTSSM(LiteXModule):
 
         # Upper layer directs (7.5) ----------------------------------------------------------------
         self.directed_recovery = Signal()        # i: directed to Recovery
+        self.lanes_deskew_lost = Signal()        # i: Gen 1x2 lanes not deskewed in U0 (-> Recovery)
         self.directed_loopback = Signal()        # i: directed as Loopback master
         self.loopback_capable  = Signal(reset=0) # i: loopback master capability
         self.hot_reset_req     = Signal()        # i: DS directed PORT_RESET (Hot Reset)
@@ -605,6 +606,10 @@ class USB3LTSSM(LiteXModule):
             ).Elif(t_u0_recovery.done,
                 *goto_recovery()
             ).Elif(self.directed_recovery,
+                *goto_recovery()
+            # Gen 1x2: lanes deskew lost (one lane re-aligned during the TS1/TS2 Ordered Sets: no COM
+            # words in U0 to re-acquire it), re-acquired on the Recovery TS1 after Logical Idle.
+            ).Elif(self.lanes_deskew_lost,
                 *goto_recovery()
             ).Elif(self.directed_loopback & self.loopback_capable,
                 # Directed loopback from U0: via Recovery with TS2 Loopback bit (7.5.11).

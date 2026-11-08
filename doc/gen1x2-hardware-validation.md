@@ -125,8 +125,8 @@ of the chip, `ftdi_location` as `bus:ports`, ex: `1:2`), then check the identifi
 ```sh
 ./bench/acorn_ftdi.py --location <host_location> server --port 1240   # (one terminal each)
 ./bench/acorn_ftdi.py --location <dev_location>  server --port 1241
-litex_cli --port 1240 --ident # USB3SoC ...
-litex_cli --port 1241 --ident # USB3SoC ...
+litex_cli --port 1240 --csr-csv build/acorn_x2_host/csr.csv   --ident # USB3SoC <build date>
+litex_cli --port 1241 --csr-csv build/acorn_x2_device/csr.csv --ident # USB3SoC <build date>
 ```
 
 Restart the `litex_server` of a board after loading it. `./bench/acorn_ftdi.py --location
@@ -141,7 +141,7 @@ D="--port 1241 --csr-csv build/acorn_x2_device/csr.csv"
 ```
 
 `bench/usb3_lanes.py` commands: `status` (JSON status and counters), `clear` (PHY/lanes counters),
-`retrain` (link retraining, status and LTSSM state history), `watch` (status on changes), `prbs`
+`retrain` (PHY reset: link retraining, status and LTSSM state history), `watch` (status on changes), `prbs`
 (PRBS packets rate/errors over `--duration` seconds), `prbs-enable`/`prbs-disable`.
 
 ## Tests
@@ -169,13 +169,18 @@ Idle gaps between packets, not characterized on hardware yet): the errors are th
 
 ### 3. Retrains
 
+`retrain` resets the PHY of a board. With the PRBS stand-ins (no Link Layer), the partner of a
+board retrained alone stays in U0 (nothing detects the lost link) and the retrained board ends in
+Compliance (Polling.LFPS timeout without the partner LFPS): always retrain both boards together.
+
 ```sh
-for i in $(seq 10); do ./bench/usb3_lanes.py $D retrain --wait 2; done
+for i in $(seq 10); do ./bench/usb3_lanes.py $H retrain --wait 2 & ./bench/usb3_lanes.py $D retrain --wait 2; wait; done
 ./bench/usb3_lanes.py $D prbs --duration 30
 ```
 
-Pass: U0 with `x2: 1` and `deskew_aligned: 1` after each retrain, PRBS still without errors. Also
-from the Host (`$H retrain`).
+Pass: U0 with `x2: 1` and `deskew_aligned: 1` after each retrain on both boards, PRBS still without
+errors. A deskew lost during the TS1/TS2 Ordered Sets (`deskew` counter > 0 with `deskew_aligned:
+0`) is recovered by a Recovery (`recovery_count` + 1).
 
 ### 4. Lanes swap (crossed cables)
 
@@ -183,7 +188,7 @@ Cross the DAC cables: Host SFP-0 <-> Device SFP-1 and Host SFP-1 <-> Device SFP-
 Type-C plug on the dual SFP to USB-C breakout), then:
 
 ```sh
-./bench/usb3_lanes.py $D retrain --wait 2
+./bench/usb3_lanes.py $H retrain --wait 2 & ./bench/usb3_lanes.py $D retrain --wait 2; wait
 ./bench/usb3_lanes.py $D status
 ./bench/usb3_lanes.py $D prbs --duration 60
 ```

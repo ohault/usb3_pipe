@@ -300,6 +300,8 @@ class USB3PIPESim(SoCMini):
                         detects the Configuration Lane (lane_swap) from the Host Polling.LFPS.
     - lanes_tx_shift:   Gen 1x2 TX packets of the Host and Device delayed by 1-7 symbols (with_core:
                         packets at any symbol position, on Lane 1 with an odd shift, 6.13.4).
+    - lanes_tx_inverted: All the lanes TX inverted on both PHYs (as the LiteX Acorn Baseboard Mini SFP
+                        lanes: the four RX polarities flipped in Polling.Active).
     - with_core:        Host script/Device Core on the USB3PHYX2Link of the PHYs (words pairs, 64-bit
                         Device endpoints): SuperSpeedPlus at Gen 1x2 (dev_mode x2), SuperSpeed at
                         Gen 1x1 on Lane 0 (dev_mode x1, or ss: Device USB3PHY(lanes=1)), enumeration
@@ -327,7 +329,7 @@ class USB3PIPESim(SoCMini):
         ssc=False, prbs_words=2**16, max_cycles=2**24, host_skp=True, host_latency=256,
         host_status_gap=64, host_pm=False, host_lpm=False, host_itp=False, lanes=1,
         lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096, prbs_gap_bits=4, dev_mode="x2",
-        lanes_crossed=False, lanes_tx_shift=0, gen2_capable=False, gen2=False,
+        lanes_crossed=False, lanes_tx_shift=0, lanes_tx_inverted=False, gen2_capable=False, gen2=False,
         link_words=1, dev_pipe_cd=False, dev_u1u2=True, gen2_data_width=None, host_recovery=False,
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
@@ -442,7 +444,10 @@ class USB3PIPESim(SoCMini):
                 # Inverse TX polarity to test RX auto-polarity.
                 self.comb += serdes[0].tx_polarity.eq(1)
             else:
-                self.comb += serdes[1].tx_polarity.eq(name == "host") # Per lane polarity (6.13.7).
+                if lanes_tx_inverted:
+                    self.comb += [s.tx_polarity.eq(1) for s in serdes]
+                else:
+                    self.comb += serdes[1].tx_polarity.eq(name == "host") # Per lane polarity (6.13.7).
 
             if with_core and (name == "host"):
                 # Scripted host Link/Protocol Layer (link initialization, enumeration).
@@ -806,6 +811,7 @@ def main():
     parser.add_argument("--lane1-word-shift", default=2,        help="Device Lane 1 RX word shift (symbols, --lanes 2).")
     parser.add_argument("--dev-mode",      default="x2",          help="Device with --lanes 2: x2 (Gen 1x2), x1 (two lanes, not x2 capable: Gen 1x1 on Lane 0) or ss (Gen 1x1 SuperSpeed Device on Lane 0, no SuperSpeedPlus Polling).")
     parser.add_argument("--lanes-crossed", action="store_true",   help="--lanes 2: Host Lane 0/1 on the Device SerDes 1/0 (flipped USB Type-C plug, Device lanes swap).")
+    parser.add_argument("--lanes-tx-inverted", action="store_true", help="--lanes 2: All the lanes TX inverted on both PHYs (LiteX Acorn Baseboard Mini SFP lanes).")
     parser.add_argument("--lanes-tx-shift", default=0,          help="--lanes 2 --lanes-core: Gen 1x2 TX packets delayed by 1-7 symbols (packets at any symbol position).")
     parser.add_argument("--prbs-gap-bits", default=4,           help="Gaps of 0 to 2**N - 1 cycles between the PRBS packets (--no-core/--lanes 2).")
     parser.add_argument("--lane-skp",      default=4096,        help="Extra Host Lane 1/Lane 0 SKP Ordered Sets period (cycles, 0: disabled, --lanes 2).")
@@ -857,6 +863,7 @@ def main():
         dev_mode              = args.dev_mode,
         lanes_crossed         = args.lanes_crossed,
         lanes_tx_shift        = int(args.lanes_tx_shift),
+        lanes_tx_inverted     = args.lanes_tx_inverted,
         prbs_gap_bits         = int(args.prbs_gap_bits),
         gen2_capable          = args.gen2_capable or args.gen2,
         gen2                  = args.gen2,

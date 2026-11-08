@@ -908,6 +908,10 @@ class USB3PHY(LiteXModule):
             destriper.source.ready.eq(source.ready | ~ltssm.rx_ready | ~x2),
         ]
         self.deskew_aligned = deskew.aligned # o
+        # Deskew lost at Gen 1x2 (ex: a lane re-aligned by its RX polarity change or SKP removal
+        # during the TS1/TS2 Ordered Sets): Recovery, the deskew is re-acquired on its TS1 (after a
+        # gap: Logical Idle in U0). Without it, U0 without data on the x2 datapath until a Recovery.
+        self.comb += ltssm.lanes_deskew_lost.eq(x2 & ~deskew.aligned)
 
         # RX: Gen 1x1 (Lane 0) ---------------------------------------------------------------------
         # Framing alignment of the Lane 0 words (as USB3PIPE in Gen 1x1, words shifted by the SKP
