@@ -97,7 +97,7 @@ class LaneDeskew(LiteXModule):
     the TS1 Ordered Sets), then the first marker received on each lane are the same marker. The words
     before it are dropped, then both lanes are released together. A marker at the head of a single
     lane (lanes no longer paired: ex: word alignment of a lane changed after the pairing) restarts the
-    search (armed on the next gap).
+    search (armed on the next gap), as clear (ex: a lane in electrical idle).
 
     The sinks are never held (continuous lanes streams, a held lane would overflow the SerDes RX
     buffers): words received with a full FIFO are dropped.
@@ -106,6 +106,7 @@ class LaneDeskew(LiteXModule):
         self.sinks   = sinks   = [stream.Endpoint(lane_layout()) for _ in range(2)]
         self.sources = sources = [stream.Endpoint(lane_layout()) for _ in range(2)]
         self.aligned = aligned = Signal() # o
+        self.clear   = Signal()           # i: Pairing cleared (search re-armed on the next gap).
 
         # # #
 
@@ -143,7 +144,10 @@ class LaneDeskew(LiteXModule):
         both  = Signal()
         self.comb += both.eq(fifos[0].source.valid & fifos[1].source.valid)
         self.sync += [
-            If(~aligned,
+            If(self.clear,
+                aligned.eq(0),
+                armed.eq(0)
+            ).Elif(~aligned,
                 If(gaps[0] & gaps[1],
                     armed.eq(1)
                 ).Elif(armed & heads[0] & heads[1],

@@ -449,6 +449,9 @@ class USB3PHY(LiteXModule):
         self.lane_swap_unit = lane_swap_unit = LaneSwap(serdes, detect=lane_swap_detect)
         self.lane_swap = lane_swap_unit.swap
         serdes = lane_swap_unit.lanes
+        self.lanes_serdes = serdes # Logical lanes SerDes (Lane 0: Configuration Lane).
+        # Lane electrical idle filter in U0 at Gen 1x2 (lanes datapath): 10us.
+        self.lanes_idle_cycles = max(1, int(10e-6*sys_clk_freq)//timer_scale)
 
         # PIPEs / LTSSM ----------------------------------------------------------------------------
         self.pipes = pipes = []
@@ -911,7 +914,20 @@ class USB3PHY(LiteXModule):
         # Deskew lost at Gen 1x2 (ex: a lane re-aligned by its RX polarity change or SKP removal
         # during the TS1/TS2 Ordered Sets): Recovery, the deskew is re-acquired on its TS1 (after a
         # gap: Logical Idle in U0). Without it, U0 without data on the x2 datapath until a Recovery.
-        self.comb += ltssm.lanes_deskew_lost.eq(x2 & ~deskew.aligned)
+        # A lane in electrical idle for 10us (ex: one cable/lane unplugged, the other lane still in
+        # U0: the lane re-aligned on its return, the deskew is no longer valid and nothing else
+        # detects it with the PRBS stand-ins) is also a deskew lost: Recovery (Rx.Detect if the
+        # lane does not come back, tRecoveryActiveTimeout).
+        lanes_idle = Signal()
+        idle_count = Signal(max=self.lanes_idle_cycles + 1)
+        self.sync += If(~Reduce("OR", [s.rx_idle for s in self.lanes_serdes]),
+            idle_count.eq(0),
+        ).Elif(idle_count != self.lanes_idle_cycles,
+            idle_count.eq(idle_count + 1),
+        )
+        self.comb += lanes_idle.eq(idle_count == self.lanes_idle_cycles)
+        self.comb += ltssm.lanes_deskew_lost.eq(x2 & (~deskew.aligned | lanes_idle))
+        self.comb += deskew.clear.eq(lanes_idle)
 
         # RX: Gen 1x1 (Lane 0) ---------------------------------------------------------------------
         # Framing alignment of the Lane 0 words (as USB3PIPE in Gen 1x1, words shifted by the SKP
