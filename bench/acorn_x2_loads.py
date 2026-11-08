@@ -52,6 +52,12 @@ def last_json(out):
             pass
     return None
 
+def ident(port, csr_csv):
+    """SoC identifier (bitstream build date): a board reconfigured from its flash (power glitch)
+    answers with another design (CSR reads then meaningless)."""
+    code, out = run(["litex_cli", "--port", str(port), "--csr-csv", csr_csv, "--ident"], timeout=10)
+    return out.strip().splitlines()[-1].strip() if (code == 0 and out.strip()) else None
+
 def core_counters(port, csr_csv):
     """Device Core counters (8-bit saturating Recovery causes decoded), None if not reachable."""
     from litex import RemoteClient
@@ -185,6 +191,7 @@ def main():
                 r["error"] = "servers"
             if "error" not in r:
                 time.sleep(args.settle)
+                idents = [ident(args.host_port, host_csr), ident(args.device_port, device_csr)]
                 run(lanes + host_args + ["clear"])
                 run(lanes + dev_args  + ["clear"])
                 before = core_counters(args.device_port, device_csr)
@@ -196,6 +203,11 @@ def main():
                 for l in lines[:-1]:
                     if l.get("result") in ["error", "timeout"]:
                         r["fail_sections"][l["section"]] = r["fail_sections"].get(l["section"], 0) + 1
+                r["ident"] = {"host": idents[0], "device": idents[1]}
+                if [ident(args.host_port, host_csr), ident(args.device_port, device_csr)] != idents:
+                    # A board no longer runs the loaded bitstream (reconfigured from its flash):
+                    # its counters/runs results are not valid.
+                    r["error"] = "board reconfigured during the runs"
                 r["host"]   = last_json(run(lanes + host_args + ["status"])[1]) or {}
                 r["device"] = last_json(run(lanes + dev_args  + ["status"])[1]) or {}
                 r["core"]   = {"before": before, "after": after,
@@ -203,7 +215,8 @@ def main():
             results.append(r)
             with open(out, "a") as f:
                 f.write(json.dumps(r) + "\n")
-            print(f"load {load}: " + json.dumps(r.get("script", r.get("error"))) +
+            print(f"load {load}: " + (f"ERROR {r['error']}: " if "error" in r else "") +
+                json.dumps(r.get("script", r.get("error"))) +
                 (f" core runs: {json.dumps(r['core']['runs'])}" if r.get("core", {}).get("runs") else ""), flush=True)
     finally:
         servers.stop()

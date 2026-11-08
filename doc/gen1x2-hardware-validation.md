@@ -485,7 +485,9 @@ Summary (latest builds, crossed cables):
 |------|--------|
 | PHY, PRBS (tests 1-6) | Validated: 610MB/s per direction without errors, retrains, lanes swap, unplug/replug, 20/20 bitstream loads good. Single lane fallback (test 5): with both PHYs retrained together (a Device not x2 capable starting alone times out to Compliance: open). |
 | Device Core at Gen 1x2, scripted host (tests 7-9) | Validated: 400/400 runs over 20 bitstream loads, no Device Link Layer Recovery, LBAD or retry during the runs. |
-| Device Core at Gen 1x1 (test 10b), soak (test 10) | Below. |
+| Single lane fallback (test 5), `50681d4` | 6/10 loads: U0 at Gen 1x1 on both boards, PRBS 303MB/s per direction without errors; 4/10: Device in Compliance (open). |
+| Device Core at Gen 1x1 (test 10b), `50681d4` | 10/20 loads with 20/20 runs (~60000 Host Recoveries per load), 10/20 without U0 (no run), strictly alternating from one load to the next (open). |
+| Soak (test 10), Gen 1x2 | Inconclusive: ~4970 runs done, then the Host FPGA reconfigured from its flash during the runs (no USB event: power?), the following CSR reads meaningless. `bench/acorn_x2_loads.py` now checks the boards identifiers before and after the runs. |
 | USB hosts (tests 11-18) | Not run: SFP2USB adapter, dual SFP to USB-C breakout and Gen 1x2 host needed. |
 
 The sections below are in chronological order: first results, what was found on hardware and fixed
