@@ -433,6 +433,19 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertRegex(out, r"DEV\s*lanes swap: 1")
         self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 1, gen2: 0\)")
 
+    def test_core_x2_hot_resets(self):
+        # Gen 1x2 Acorn Mini lanes (crossed, TX inverted), Host directed to 4 back to back Hot
+        # Resets after the script, each one at the U0 entry after the previous one (as the hardware
+        # scripted host between its runs): HotReset.Active entries skewed by the Recovery, each
+        # side leaving HotReset.Active only after a full Reset=0 TS2 burst sent (7.5.12.2), all
+        # back to U0 (no tHotResetActiveTimeout/tHotResetExitTimeout to eSS.Inactive).
+        out = self.run_sim("core_x2_hot_resets", ["--dev-mode", "x2", "--lanes-crossed",
+            "--lanes-tx-inverted", "--host-hot-reset", "4"])
+        tail = "\n---- tail ----\n" + out[-4000:]
+        for side in ["HOST", r"DEV\s"]:
+            self.assertEqual(len(re.findall(side + r"\s*entering HotReset.Exit state", out)), 4, tail)
+            self.assertNotRegex(out, side + r"\s*entering eSS.Inactive", tail)
+
     def test_core_x2_tx_shift(self):
         # Gen 1x2 with the Host/Device TX packets delayed by 3 symbols: packets starting on Lane 1,
         # at any symbol position of the 64-bit words (LanesPacketAligner).

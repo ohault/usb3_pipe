@@ -526,10 +526,16 @@ a Host realignment): the realignments are a consequence, not the cause.
   while the Host stays in HotReset.Active until tHotResetActiveTimeout 12ms: 4 Host HotReset.Active
   entries, 2 exits; 5/5 Device exits), and Recovery.Idle timeouts (2ms -> eSS.Inactive). The Host
   also re-enters HotReset.Active from Polling.Idle (scripted host Hot Reset request still asserted).
-- Next: the Hot Reset handshake at Gen 1x2 in simulation (TS2 Reset bit window `hr_delay`, Reset bit
-  detection on the lanes), the Recovery.Idle timeouts (Recovery at Gen 1x2 not deskewed:
-  `deskew_lost_u0`), a trace of a `pending_hp` Recovery. Tools: `bench/acorn_x2_loads.py` (loads x
-  runs, Device Core counters before/during the runs, summary).
+- Reproduced in simulation (`sim.py --lanes 2 --lanes-core --host-hot-reset 4 --lanes-crossed
+  --lanes-tx-inverted`: Hot Resets back to back, each one at the U0 entry after the previous one):
+  HotReset.Active entries skewed (121 cycles, Device later), a side left HotReset.Active on the
+  partner Reset bit fall without having sent any Reset=0 TS2, the partner then stuck in
+  HotReset.Active (12ms) while the side timed out in HotReset.Exit (2ms), both to eSS.Inactive.
+  Fixed in the LTSSM: HotReset.Active exit at the end of a full TS2 burst with Reset=0 sent after
+  the partner Reset bit fell (7.5.12.2), `TestPHYX2Core.test_core_x2_hot_resets`.
+- Next: hardware results with the fix, the Recovery.Idle timeouts (Recovery at Gen 1x2 not
+  deskewed: `deskew_lost_u0`), a trace of a `pending_hp` Recovery. Tools: `bench/acorn_x2_loads.py`
+  (loads x runs, Device Core counters before/during the runs, summary).
 
 Debug controls (`usb3_lanes_debug_control`, A/B tests on a loaded bitstream): bit 0 Recovery on a
 lane idle, bit 1 RX re-initialization on continuous errors, bit 2 Recovery on a lane realignment in
