@@ -471,7 +471,9 @@ class USB3PIPESim(SoCMini):
                     burst_duplex_skp = host_burst_duplex_skp,
                     recovery_mid     = host_recovery_mid,
                     recovery_cut     = host_recovery_cut,
-                    check_data       = ssp_x2).steps))
+                    # Bulk IN data checked at Gen 1x2, and without SKP Ordered Sets requests by the
+                    # script (aligned DPPs: as the hardware scripted host at Gen 1x1, --no-host-skp).
+                    check_data       = ssp_x2 or not (host_skp or gen2)).steps))
                 self.add_module(name="host_model", module=host_model)
                 host_sink, host_source = link_phy.sink, link_phy.source
                 if getattr(link_phy, "link_words", 1) == 2:

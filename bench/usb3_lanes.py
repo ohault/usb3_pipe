@@ -204,7 +204,8 @@ def main():
         from usb3_soc import usb3_host_script
         from usb3_core.host_model import OP_MARK
         assert hasattr(bus.regs, "usb3_script_control"), "No scripted host in this build (--role host --lanes-core)."
-        script  = usb3_host_script()
+        ssp     = bool(lanes.reg("usb3_script_ssp").read()) if hasattr(bus.regs, "usb3_script_ssp") else True
+        script  = usb3_host_script(ssp=ssp)
         def section(step):
             name = "start"
             for i, s in enumerate(script.steps[:step + 1]):

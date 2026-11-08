@@ -505,7 +505,9 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
 
     with_core (Host role): scripted USB host (USB3HostScript: USB3HostModel running the Gen 1x2
     enumeration + Bulk loopback script with the data checks, on a USB3PHYX2Link) for a Device board
-    running the loopback example: the Gen 1x2 Device Core tested between two boards.
+    running the loopback example: the Gen 1x2 Device Core tested between two boards. Host not x2
+    capable: SuperSpeed script, Gen 1x1 negotiated (the Device Core at Gen 1x1, as with a Gen 1x1
+    USB host).
 
     with_core (Device role): USB3 Device Core example design instead of the PRBS stand-ins, through a
     dual SFP to USB-C breakout, Configuration Lane (plug orientation) detected (as sim.py --lanes 2
@@ -545,7 +547,9 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
         # RX buffer: a Device 1024-byte DPP (128 pairs at two words per cycle) taken by the script at
         # one word per cycle.
         soc.usb3_link   = usb3_link = USB3PHYX2Link(usb3_phy, rx_buffer_depth=512)
-        soc.usb3_script = USB3HostScript(usb3_link, sys_clk_freq=sys_clk_freq)
+        # SuperSpeedPlus script at Gen 1x2, SuperSpeed script when the Host is not x2 capable (Gen 1x1
+        # negotiated: as a Gen 1x1 USB host with the Device).
+        soc.usb3_script = USB3HostScript(usb3_link, ssp=x2_capable, sys_clk_freq=sys_clk_freq)
     elif with_core:
         # USB3 Device Core -------------------------------------------------------------------------
         if lanes_x2:
@@ -604,6 +608,7 @@ class USB3HostScript(LiteXModule):
         self._passes = CSRStatus(32, description="Scripts done count.")
         self._fails  = CSRStatus(32, description="Scripts errors count.")
         self._resets = CSRStatus(32, description="Hot Resets directed before the runs count.")
+        self._ssp    = CSRStatus(reset=int(ssp), description="SuperSpeedPlus script (Gen 1x2), SuperSpeed (Gen 1x1) otherwise.")
 
         # # #
 

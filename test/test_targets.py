@@ -152,6 +152,11 @@ def test_target_lanes_host_script(tmp_path):
     verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
     assert verilog.count("\nGTPE2_CHANNEL ") == 2
 
+def test_target_lanes_host_script_ss(tmp_path):
+    # Scripted host not x2 capable: SuperSpeed script (Gen 1x1 negotiated with the Device).
+    csr = elaborate("acorn", tmp_path, ["--lanes", "2", "--role", "host", "--lanes-core", "--no-x2"])
+    assert "usb3_script_ssp" in csr
+
 def test_target_lanes_host_script_analyzer(tmp_path):
     # Scripted host with the realign LiteScope group: lanes Recovery triggers and both lanes SerDes RX
     # status probes (usb3_analyzer.py --trigger lanes_realign).
