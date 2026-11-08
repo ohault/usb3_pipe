@@ -47,7 +47,8 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   unplug, 20/20 bitstream loads good after the Recovery on a lane realignment in U0); Device Core
   with the scripted host open (62-85% of the runs done, build dependent: follows the Host lanes
   realignments in U0, not the code; Hot Reset before each run removed the `lgood`/`hp_seq` Device
-  Recoveries, `pending_hp` remain):
+  Recoveries, `pending_hp` remain; the Host realignments in U0 are a consequence: the Device leaves
+  U0 on Hot Reset handshakes/Recovery.Idle not converging, then Polling.LFPS):
   [results](doc/gen1x2-hardware-validation.md#results-two-boards-2026-11-08). Test ~20 loads per
   change (`bench/acorn_ftdi.py` load/server per board): a single good load proves nothing, and
   compare two builds of the same source before crediting a change (A/B in its own git worktree,

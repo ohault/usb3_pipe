@@ -512,8 +512,24 @@ for all, crossed cables, 20 loads x 20 runs per host build, both boards loaded o
 - `pending_hp` Device Recoveries remain on all builds (not removed by the acknowledges after the
   runs: before the first run, during the Hot Resets/link initializations or the script restarts by
   the client, not separated: the Device Core counters are not cleared before the runs).
-- Next: `--analyzer-group lanes` captures of the lanes realignments in U0 on a build like A (what
-  makes a build prone to them), a trace of a `pending_hp` Recovery.
+
+Host lanes realignments in U0 captured (`--analyzer-group realign`, `usb3_analyzer.py capture
+--trigger lanes_realign --no-retrain` during scripted runs, a realign prone load: 122 `realign_u0`
+per 20 runs) and frozen LTSSM histories of both boards (first 32 transitions after a clear, around
+a Host realignment): the realignments are a consequence, not the cause.
+- On the 3 captures, the Host is in U0, deskewed, when both lanes get continuous decode errors then
+  electrical idle at once (2-8us before the trigger), followed on lane 0 by ~1us bursts every
+  6-11us (the Device Polling.LFPS): the comma realignments are on these bursts. The Device has left
+  U0 while the Host stays in it.
+- The histories show how the Device leaves: Hot Reset handshakes not converging (Device
+  HotReset.Active -> HotReset.Exit in ~2us, then tHotResetExitTimeout 2ms -> eSS.Inactive -> Polling,
+  while the Host stays in HotReset.Active until tHotResetActiveTimeout 12ms: 4 Host HotReset.Active
+  entries, 2 exits; 5/5 Device exits), and Recovery.Idle timeouts (2ms -> eSS.Inactive). The Host
+  also re-enters HotReset.Active from Polling.Idle (scripted host Hot Reset request still asserted).
+- Next: the Hot Reset handshake at Gen 1x2 in simulation (TS2 Reset bit window `hr_delay`, Reset bit
+  detection on the lanes), the Recovery.Idle timeouts (Recovery at Gen 1x2 not deskewed:
+  `deskew_lost_u0`), a trace of a `pending_hp` Recovery. Tools: `bench/acorn_x2_loads.py` (loads x
+  runs, Device Core counters before/during the runs, summary).
 
 Debug controls (`usb3_lanes_debug_control`, A/B tests on a loaded bitstream): bit 0 Recovery on a
 lane idle, bit 1 RX re-initialization on continuous errors, bit 2 Recovery on a lane realignment in

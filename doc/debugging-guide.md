@@ -119,7 +119,9 @@ Keep captures narrow (well below 128 bits), in the sys clock domain (captures in
 domain do not meet timing). Groups: `link` (LTSSM/TS/LFPS/RX status), `lfps`, `ts`, `datapath`
 (SerDes RX/TX words + Link Layer RX/TX words), `phase` (RX vs TX clocks phase, `--with-serdes-debug`),
 `u3` (U3 exit: LFPS TX/RX, TS1 detection, SerDes RX stream, RX vs TX clocks phase,
-`--with-serdes-debug`), from `usb3_pipe/debug.py` (`usb3_analyzer_groups`): `--with-analyzer
+`--with-serdes-debug`), `lanes` and `realign` (Gen 1x2, `--lanes 2`: lanes words at the deskew input
+and deskew pairing; `lanes` adds the destriped and TX words, `realign` the lanes Recovery triggers
+and both lanes SerDes RX status, 101 bits), from `usb3_pipe/debug.py` (`usb3_analyzer_groups`): `--with-analyzer
 --analyzer-group <group>` on all the `bench/` targets.
 
 `bench/usb3_analyzer.py` captures (retraining the PHY until the trigger fires) and analyzes:
@@ -135,6 +137,8 @@ headers), RX vs TX clock offset profile (`phase`).
 ./bench/usb3_analyzer.py ... capture --state Polling.RxEQ:Polling.Active
 # A control request (ex: SET_CONFIGURATION SETUP data word), without retraining.
 ./bench/usb3_analyzer.py ... capture --data 0x00090100 --no-retrain --offset 1024
+# Any probe value, without retraining (ex: a Gen 1x2 lane realigned in U0, realign group).
+./bench/usb3_analyzer.py ... capture --trigger lanes_realign --no-retrain --offset 2048
 # Recovered clock offset profile over ~2ms (phase group).
 ./bench/usb3_analyzer.py ... capture --state Polling.LFPS:Polling.RxEQ --subsampling 64
 # Re-analyze a capture.

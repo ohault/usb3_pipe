@@ -581,7 +581,8 @@ class USB3HostScript(LiteXModule):
 
     Each run starts after a Hot Reset directed by the host (7.5.12, as a host resetting its port):
     the Header Sequence Numbers of both Link Layers are reset (the script is built with sequence
-    numbers from 0); a U0 exit during a run (Recovery) restarts it with a new Hot Reset. Out of the
+    numbers from 0); a U0 exit during a run (Recovery) restarts it with a new Hot Reset, a U0 exit
+    after a run holds its result until disabled (one run per enable). Out of the
     script runs, a LUP keep-alive Link Command is sent every 10us in U0 (as a host, 7.5.6.1: the
     Device does not enter Recovery for a lack of link activity, 1ms) and, after a run, the model
     reactive acknowledges (LGOOD_n/LCRD_x of the Device Header Packets) are still sent: no Device
@@ -607,7 +608,7 @@ class USB3HostScript(LiteXModule):
         # # #
 
         from migen.genlib.misc import WaitTimer
-        from migen.genlib.fsm import FSM, NextState
+        from migen.genlib.fsm import FSM, NextState, NextValue
         from usb3_core.host_model import link_command, LUP
         script = usb3_host_script(ssp=ssp)
         self.model = model = USB3HostModel(script.steps)
@@ -649,9 +650,26 @@ class USB3HostScript(LiteXModule):
                 NextState("RUN")
             )
         )
+        held_done  = Signal() # Run result held out of U0 until disabled (one run per enable).
+        held_error = Signal()
         run_fsm.act("RUN",
             run.eq(1),
-            If(~enable | ~link.u0,
+            If(~enable,
+                NextState("IDLE")
+            ).Elif(~link.u0,
+                If(model.done | model.error,
+                    NextValue(held_done,  model.done),
+                    NextValue(held_error, model.error),
+                    NextState("HELD")
+                ).Else(
+                    NextState("IDLE") # Run restarted with a new Hot Reset.
+                )
+            )
+        )
+        run_fsm.act("HELD",
+            If(~enable,
+                NextValue(held_done,  0),
+                NextValue(held_error, 0),
                 NextState("IDLE")
             )
         )
@@ -692,8 +710,8 @@ class USB3HostScript(LiteXModule):
             rx_buffer.source.connect(model.sink),
             model.enable.eq(run),
             model.u0.eq(link.u0),
-            self._status.fields.done.eq(model.done),
-            self._status.fields.error.eq(model.error),
+            self._status.fields.done.eq(model.done | held_done),
+            self._status.fields.error.eq(model.error | held_error),
             self._status.fields.running.eq(model.enable & ~model.done & ~model.error),
             self._step.status.eq(model.step),
         ]
@@ -740,7 +758,7 @@ def usb3_soc_args(parser, output_dir, with_uartbone=True):
     parser.add_argument("--link-words",        default=1, type=int, help="Link Layer words: 1 (32-bit), 2 (64-bit) or 4 (128-bit, Gen 2 with wide SerDes words), loopback/bench examples: Gen 2 bandwidth.", choices=[1, 2, 4])
     parser.add_argument("--with-serdes-debug", action="store_true", help="Enable SerDes debug (TX/loopback controls, clocks/RX errors measurements).")
     parser.add_argument("--with-analyzer",     action="store_true", help="Enable LiteScope Analyzer.")
-    parser.add_argument("--analyzer-group",    default="link",      help="LiteScope probes group (phase: requires --with-serdes-debug, lanes: --lanes 2).", choices=USB3_ANALYZER_GROUPS)
+    parser.add_argument("--analyzer-group",    default="link",      help="LiteScope probes group (phase: requires --with-serdes-debug, lanes/realign: --lanes 2).", choices=USB3_ANALYZER_GROUPS)
 
 def usb3_soc_argdict(args):
     """Target SoC arguments from the common bench target arguments: USB3BaseSoC (bridges, CPU),

@@ -6,21 +6,24 @@
 
 """Scripted USB host of the hardware tests (bench/usb3_soc.py USB3HostScript): LUP keep-alive out of
 the script runs, Hot Reset directed before each run, script started between two LUPs after the Hot
-Reset, no LUP during a run, run restarted with a new Hot Reset on a U0 exit."""
+Reset, no LUP during a run, run restarted with a new Hot Reset on a U0 exit, run result held out of
+U0 until disabled (one run per enable)."""
 
 import os
 import sys
 import unittest
+from unittest import mock
 
 from migen import *
 
 from litex.soc.interconnect import stream
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bench"))
+import usb3_soc
 from usb3_soc import USB3HostScript, usb3_host_script
 
 from usb3_pipe.lanes      import link_pairs_layout
-from usb3_core.host_model import OP_SEND, link_command, LUP
+from usb3_core.host_model import OP_SEND, link_command, LUP, HostScript
 
 class FakeLink:
     def __init__(self):
@@ -96,6 +99,59 @@ class TestUSB3HostScript(unittest.TestCase):
         self.assertEqual(self.resets_csr, 2)
         # Script disabled: LUPs again.
         self.assertIn(lup[1], [t[1] for t in after])
+
+    def test_result_held_until_disabled(self):
+        # Short script (sends only: done without a Device), then a U0 exit after the run: no new
+        # Hot Reset/run until disabled, done status held.
+        def short_script(ssp=True):
+            script = HostScript(ssp=ssp)
+            script.send(link_command(LUP()))
+            script.end()
+            return script
+        link = FakeLink()
+        with mock.patch.object(usb3_soc, "usb3_host_script", short_script):
+            dut = USB3HostScript(link, sys_clk_freq=10e6)
+        resets = []
+        done   = {}
+        def generator():
+            yield link.sink.ready.eq(1)
+            yield link.u0.eq(1)
+            req_d     = 0
+            hot_reset = None
+            for cycle in range(600):
+                if cycle == 50:
+                    yield dut._control.fields.enable.eq(1)
+                if cycle == 200:
+                    yield link.u0.eq(0) # U0 exit after the run (Recovery).
+                if cycle == 220:
+                    yield link.u0.eq(1)
+                if cycle == 400:
+                    yield dut._control.fields.enable.eq(0)
+                if cycle == 420:
+                    yield dut._control.fields.enable.eq(1) # Next run.
+                req = (yield link.hot_reset_req)
+                if req and not req_d:
+                    resets.append(cycle)
+                if req and hot_reset is None:
+                    hot_reset = cycle
+                    yield link.u0.eq(0)
+                if hot_reset is not None:
+                    yield link.hot_reset.eq(cycle == hot_reset + 5)
+                    if cycle == hot_reset + 20:
+                        yield link.u0.eq(1)
+                        hot_reset = None
+                req_d = req
+                yield
+                if cycle in [190, 300, 390, 590]:
+                    done[cycle] = (yield dut._status.fields.done)
+            self.passes = (yield dut._passes.status)
+        run_simulation(dut, generator())
+        self.assertEqual(done[190], 1)                 # Run done.
+        self.assertEqual((done[300], done[390]), (1, 1)) # Held after the U0 exit, no new run.
+        self.assertEqual(len(resets), 2)               # One Hot Reset per enable.
+        self.assertTrue(50 <= resets[0] < 60 and 420 <= resets[1] < 430)
+        self.assertEqual(done[590], 1)                 # Second run done.
+        self.assertEqual(self.passes, 2)
 
 if __name__ == "__main__":
     unittest.main()

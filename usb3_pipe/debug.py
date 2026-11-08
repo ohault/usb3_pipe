@@ -526,7 +526,7 @@ def gen2_rx_analyzer_signals(rx_datapath):
 
 # USB3 Analyzer Groups -----------------------------------------------------------------------------
 
-USB3_ANALYZER_GROUPS = ["link", "lfps", "ts", "datapath", "phase", "u3", "lanes"]
+USB3_ANALYZER_GROUPS = ["link", "lfps", "ts", "datapath", "phase", "u3", "lanes", "realign"]
 
 def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
     """LiteScope probes groups of a USB3PHY/USB3SerDes (bench/usb3_analyzer.py), returns a dict
@@ -538,6 +538,9 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
     - phase    : LTSSM + RX vs TX clocks phase (requires serdes_debug: USB3SerDesDebug).
     - lanes    : LTSSM + Gen 1x2 lanes words at the deskew input, deskew pairing, destriped words,
                  lanes TX words to the SerDes.
+    - realign  : LTSSM + Gen 1x2 lanes RX words at the deskew input, deskew pairing, lanes Recovery
+                 triggers, both lanes SerDes RX status (comma realignments, decode errors, idle):
+                 a lane realigned in U0 (narrower than lanes: no TX/destriped words).
     - u3       : LTSSM + U3 exit: LFPS TX/RX, TS1 detection, SerDes RX stream, RX vs TX clocks phase
                  (requires serdes_debug).
     """
@@ -593,6 +596,15 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
             *[getattr(phy.lane_swap_unit.lanes[lane].sink, name) for lane in range(2)
                 for name in ["valid", "ready", "data", "ctrl"]],
         ]
+        # Lanes RX words at the deskew input, lanes Recovery triggers (U0 exits requested by the
+        # lanes) and the physical SerDes RX status of both lanes (comma realignments, decode
+        # errors, electrical idle): a lane realigned in U0 (usb3_analyzer.py --trigger lanes_realign).
+        groups["realign"] = link_signals + [
+            phy.x2, phy.lane_swap, deskew.aligned, deskew.clear, *deskew.heads,
+            *[getattr(deskew.sinks[lane], name) for lane in range(2) for name in ["valid", "data", "ctrl"]],
+        ] + [getattr(phy, name) for name in ["lanes_realign", "lanes_deskew_lost", "lanes_idle"]
+            if hasattr(phy, name)] + [getattr(s, name) for s in getattr(phy, "lanes_phys_serdes", [])
+            for name in ["rx_realign", "rx_errors", "rx_idle"] if hasattr(s, name)]
     if serdes_debug is not None:
         groups["phase"] = link_signals + [
             serdes_debug.rx_tx_phase,

@@ -152,6 +152,18 @@ def test_target_lanes_host_script(tmp_path):
     verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
     assert verilog.count("\nGTPE2_CHANNEL ") == 2
 
+def test_target_lanes_host_script_analyzer(tmp_path):
+    # Scripted host with the realign LiteScope group: lanes Recovery triggers and both lanes SerDes RX
+    # status probes (usb3_analyzer.py --trigger lanes_realign).
+    elaborate("acorn", tmp_path, ["--lanes", "2", "--role", "host", "--lanes-core", "--with-jtagbone",
+        "--with-analyzer", "--analyzer-group", "realign"])
+    probes = [l.split(",")[2] for l in (tmp_path / "analyzer.csv").read_text().splitlines()
+        if l.startswith("signal,")]
+    for name in ["lanes_realign", "lanes_deskew_lost", "lanes_idle"]:
+        assert any(re.search(rf"_{name}\d*$", p) for p in probes), name
+    for name in ["rx_realign", "rx_errors", "rx_idle"]:
+        assert sum(bool(re.search(rf"_{name}\d*$", p)) for p in probes) >= 2, name
+
 def test_target_lanes_args(tmp_path):
     # --role host/--no-x2/--lanes-core require --lanes 2, --lanes 2 requires the Mini, --lanes-core
     # requires the core.

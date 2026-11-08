@@ -15,6 +15,8 @@ Captures (the PHY is retrained until the trigger fires):
   ./bench/usb3_analyzer.py --csr-csv build/sqrl_acorn/csr.csv capture --state Polling.RxEQ:Polling.Active
   # A data word on the Link Layer RX (ex: SET_CONFIGURATION SETUP data, the PHY is not retrained).
   ./bench/usb3_analyzer.py --csr-csv build/sqrl_acorn/csr.csv capture --data 0x00090100 --no-retrain
+  # A lane realigned in U0 (realign group, Gen 1x2: the link in U0, e.g. scripted host runs).
+  ./bench/usb3_analyzer.py --csr-csv build/acorn_x2_host_script_la/csr.csv capture --trigger lanes_realign --no-retrain --offset 2048
   # RX vs TX clocks phase over ~2ms (phase group).
   ./bench/usb3_analyzer.py --csr-csv build/sqrl_acorn/csr.csv capture --state Polling.LFPS:Polling.RxEQ --subsampling 64
 
@@ -22,6 +24,7 @@ Analysis of a capture (analyzer.vcd):
   ./bench/usb3_analyzer.py analyze analyzer.vcd
 """
 
+import re
 import sys
 import time
 import argparse
@@ -224,11 +227,19 @@ def capture(args):
     analyzer.configure_group(0)
     analyzer.configure_subsampler(args.subsampling)
     signals = [l.split(",")[2] for l in open(args.analyzer_csv) if l.startswith("signal,")]
-    signal  = lambda suffix: [n for n in signals if n.endswith(suffix)][0]
+    def signal(suffix):
+        # Probe name suffix, Migen numbered names included (ex: lanes_realign -> ..._lanes_realign1).
+        matches = [n for n in signals if re.search(rf"(^|_){re.escape(suffix)}\d*$", n)]
+        assert matches, f"No {suffix} probe in {args.analyzer_csv}."
+        return matches[0]
     if args.state is not None:
         # State entry (STATE) or transition (FROM:TO): sequential trigger terms.
         for name in args.state.split(":"):
             analyzer.add_trigger(cond={signal("ltssm_state"): str(states[name])})
+    if args.trigger is not None:
+        # Any probe (name suffix, the first match in the analyzer.csv), value (default 1).
+        name, _, value = args.trigger.partition("=")
+        analyzer.add_trigger(cond={signal(name): value or "1"})
     if args.data is not None:
         analyzer.add_trigger(cond={
             signal("endpoint0_source_payload_data") : args.data,
@@ -264,6 +275,7 @@ def main():
     parser.add_argument("--analyzer-csv", default="build/sqrl_acorn/analyzer.csv", help="Analyzer configuration file.")
     parser.add_argument("--state",        default=None,                            help="Trigger on LTSSM state entry (STATE) or transition (FROM:TO).")
     parser.add_argument("--data",         default=None,                            help="Trigger on a Link Layer RX data word (hex, x: don't care nibble).")
+    parser.add_argument("--trigger",      default=None,                            help="Trigger on a probe value: NAME[=VALUE] (probe name suffix, VALUE default 1).")
     parser.add_argument("--offset",       default=16,   type=int,                  help="Trigger offset (samples).")
     parser.add_argument("--length",       default=4096, type=int,                  help="Capture length (samples).")
     parser.add_argument("--subsampling",  default=1,    type=int,                  help="Subsampling.")
