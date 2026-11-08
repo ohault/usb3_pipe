@@ -549,8 +549,26 @@ a Host realignment): the realignments are a consequence, not the cause.
   for the deskew search armed (Logical Idle gap: the partner in U0, the deskew re-acquired on the
   Recovery TS1). `test_lanes` deskew mismatch tests, `TestPHYX2Core.test_core_x2_deskew_lost`
   (`sim.py --host-recovery --host-deskew-clear`).
-- Next: hardware results with these fixes, a trace of a `pending_hp` Recovery. Tools:
-  `bench/acorn_x2_loads.py` (loads x runs, Device Core counters before/during the runs, summary).
+
+Results with the fixes (Device `cb0bfb6`, 20 loads x 20 runs, crossed cables):
+
+| Host build | Runs done | Loads all done | Loads none done | Timing (Host WNS) |
+|------------|-----------|----------------|-----------------|-------------------|
+| `3fe469f` (no Hot Reset) | 246/400 (62%) | 1 | 0 | met |
+| `bcd01c5` (Hot Reset fix) | 313/400 (78%) | 15 | 4 | met |
+| `cb0bfb6` (deskew fixes) | 385/400 (96%) | 18 | 0 | -0.548ns (`LanesPacketAligner`) |
+| `LanesPacketAligner` positions pipelined | **400/400** | **20** | 0 | +0.172ns |
+
+- Device Core counters during the runs: no Recovery request (`pending_hp` 0 on every load), no
+  LBAD/retry; one Hot Reset per run on most loads (no run restarted).
+- Host Recoveries outside the runs remain (40-3400 per load: before the first run, the Device
+  `pending_hp` Recoveries while the scripted host is idle), Host lanes realignments in U0 20-470 per
+  load: Recoveries the link recovers from.
+- `LanesPacketAligner` (Host Link Layer RX) was the critical path of the Host builds (a chain of 8
+  additions from the buffer level): the symbols positions are now computed one cycle earlier for
+  the 4 offsets of the level in its word (one more cycle of latency).
+- Next: the Host Recoveries outside the runs (scripted host idle: acknowledges before the first
+  run), the Device Core with a USB 3 host (tests 11-13). Tools: `bench/acorn_x2_loads.py`.
 
 Debug controls (`usb3_lanes_debug_control`, A/B tests on a loaded bitstream): bit 0 Recovery on a
 lane idle, bit 1 RX re-initialization on continuous errors, bit 2 Recovery on a lane realignment in

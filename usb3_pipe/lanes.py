@@ -275,7 +275,7 @@ class LanesPacketAligner(LiteXModule):
     7.2.4). The packets symbols are packed (Logical Idle removed) in a symbols buffer, the last
     word of a packet completed with Logical Idle symbols (00h data, as received from a partner
     keeping its packets on 32-bit words): a packet always starts on a 32-bit word. Up to two words
-    per cycle on the output (registered, no back-pressure: three cycles of latency); the completion
+    per cycle on the output (registered, no back-pressure: four cycles of latency); the completion
     of the DPPs adds up to 3 symbols per packet, absorbed by the symbols buffer (buffer_symbols,
     overflow: sticky flag, never with Logical Idle or a SKP Ordered Set every few packets).
 
@@ -362,29 +362,53 @@ class LanesPacketAligner(LiteXModule):
             )
         ]
 
+        # Symbols positions (registered, timing: independent of the buffer level) -----------------
+        # Position of each packet symbol and position after the cycle, relative to the 32-bit word of
+        # the buffer level, for the 4 offsets of the level in its word (the completion of the last
+        # word of a packet depends on it): the buffer stage selects them with the level 2 LSBs and
+        # adds the level word, instead of a chain of 8 dependent additions from the level.
+        rel_w   = bits_for(3 + 4*8)
+        rel     = [[Signal(rel_w, name=f"rel{r}_{i}") for i in range(8)] for r in range(4)]
+        rel_end = [Signal(rel_w, name=f"rel_end{r}") for r in range(4)]
+        for r in range(4):
+            q = Constant(r, rel_w)
+            for i in range(8):
+                nq   = Signal(rel_w, name=f"relq{r}_{i}")
+                end  = Signal(rel_w + 1, name=f"relend{r}_{i}")
+                self.comb += [
+                    end.eq(q + 4),
+                    nq.eq(q + keep[i]),
+                    # Last symbol of a packet: word completed (next packet on a 32-bit word).
+                    If(last[i], nq.eq(Cat(Constant(0, 2), end[2:]))),
+                ]
+                self.sync += rel[r][i].eq(q)
+                q = nq
+            self.sync += rel_end[r].eq(q)
+        sym_r  = [Signal(9, name=f"sym_r{i}")  for i in range(8)]
+        keep_r = [Signal(name=f"keep_r{i}")    for i in range(8)]
+        self.sync += [
+            *[sym_r[i].eq(sym[i])   for i in range(8)],
+            *[keep_r[i].eq(keep[i]) for i in range(8)],
+        ]
+
         # Symbols buffer (packets symbols packed, last word of the packets completed) --------------
         n      = buffer_symbols + 16 # Buffer + one cycle of symbols (8) and completions (2x3).
         level  = Signal(max=n + 1)
         buf    = [Signal(9, name=f"buf{j}") for j in range(buffer_symbols)]
+        base   = Signal(max=n + 1) # Level 32-bit word.
+        self.comb += base.eq(Cat(Constant(0, 2), level[2:]))
         dest   = []
-        p      = level
         for i in range(8):
-            d, np = Signal(max=n + 1, name=f"dest{i}"), Signal(max=n + 1, name=f"pos{i}")
-            end   = Signal(max=n + 5, name=f"end{i}")
-            self.comb += [
-                d.eq(p),
-                end.eq(p + 4),
-                np.eq(p + keep[i]),
-                # Last symbol of a packet: word completed (next packet on a 32-bit word).
-                If(last[i], np.eq(Cat(Constant(0, 2), end[2:]))),
-            ]
+            d = Signal(max=n + 1, name=f"dest{i}")
+            self.comb += d.eq(base + Array(rel[r][i] for r in range(4))[level[:2]])
             dest.append(d)
-            p = np
+        p = Signal(max=n + 1)
+        self.comb += p.eq(base + Array(rel_end)[level[:2]])
         new = [Signal(9, name=f"new{j}") for j in range(n)]
         for j in range(n):
             cases = If(level > j, new[j].eq(buf[j]) if j < buffer_symbols else new[j].eq(0))
             for i in range(8):
-                cases = cases.Elif(keep[i] & (dest[i] == j), new[j].eq(sym[i]))
+                cases = cases.Elif(keep_r[i] & (dest[i] == j), new[j].eq(sym_r[i]))
             self.comb += [new[j].eq(0), cases]
 
         # Output: up to two complete words per cycle.
