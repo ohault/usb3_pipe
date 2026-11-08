@@ -217,7 +217,11 @@ class USB3LanesDebug(LiteXModule):
     def __init__(self, phy, serdes, link=None):
         assert len(serdes) == 2
         with_rx_drop = hasattr(link, "rx_drop")
-        self._clear  = CSR() # Clear counters (write).
+        self._clear   = CSR() # Clear counters (write).
+        self._control = CSRStorage(fields=[
+            CSRField("idle_recovery", size=1, offset=0, reset=1,
+                description="Recovery on a lane in electrical idle for 10us in U0 at Gen 1x2 (0: disabled)."),
+        ])
         self._status = CSRStatus(fields=[
             CSRField("x2",             size=1, offset=0, description="Gen 1x2 negotiated (SuperSpeedPlus Polling)."),
             CSRField("gen2",           size=1, offset=1, description="Gen 2 negotiated."),
@@ -241,8 +245,19 @@ class USB3LanesDebug(LiteXModule):
             self._status.fields.rx_polarity.eq(Cat(*[s.rx_polarity for s in serdes])),
         ]
 
+        if hasattr(phy, "lanes_idle_recovery"):
+            self.comb += phy.lanes_idle_recovery.eq(self._control.fields.idle_recovery)
+
         # Event Counters.
         events = [("deskew", phy.deskew_aligned, 1)]
+        with_triggers = hasattr(phy, "lanes_idle") # USB3PHY(lanes=2) Recovery triggers.
+        if with_triggers:
+            u0 = phy.ltssm.u0
+            events += [
+                # U0 exits requested by the lanes (Recovery): deskew lost, lane in electrical idle.
+                ("deskew_lost_u0", u0 & phy.lanes_deskew_lost, 1),
+                ("lane_idle_u0",   u0 & phy.lanes_idle,        1),
+            ]
         if with_rx_drop:
             events += [("rx_drop", link.rx_drop, 0)] # Dropped RX buffer entries.
         for lane, (pipe, s) in enumerate(zip(phy.pipes, serdes)):
@@ -253,6 +268,8 @@ class USB3LanesDebug(LiteXModule):
                 (f"lane{lane}_ts2",              pipe.ts_rx_ts2,     1),
                 (f"lane{lane}_rx_errors_cycles", s.rx_errors,        0),
             ]
+            if with_triggers:
+                events += [(f"lane{lane}_rx_idle_u0_cycles", u0 & phy.x2 & s.rx_idle, 0)]
         for name, signal, edge in events:
             csr = CSRStatus(32, name=f"{name}_count",
                 description=f"{name} {'events' if edge else 'cycles'} count (saturating).")
@@ -491,7 +508,7 @@ def gen2_rx_analyzer_signals(rx_datapath):
 
 # USB3 Analyzer Groups -----------------------------------------------------------------------------
 
-USB3_ANALYZER_GROUPS = ["link", "lfps", "ts", "datapath", "phase", "u3"]
+USB3_ANALYZER_GROUPS = ["link", "lfps", "ts", "datapath", "phase", "u3", "lanes"]
 
 def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
     """LiteScope probes groups of a USB3PHY/USB3SerDes (bench/usb3_analyzer.py), returns a dict
@@ -501,6 +518,7 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
     - ts       : LTSSM + TS detections/generation, SerDes RX/TX streams.
     - datapath : LTSSM + SerDes and PHY RX/TX streams, SKP removal.
     - phase    : LTSSM + RX vs TX clocks phase (requires serdes_debug: USB3SerDesDebug).
+    - lanes    : LTSSM + Gen 1x2 lanes words at the deskew input, deskew pairing, destriped words.
     - u3       : LTSSM + U3 exit: LFPS TX/RX, TS1 detection, SerDes RX stream, RX vs TX clocks phase
                  (requires serdes_debug).
     """
@@ -542,6 +560,15 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
             phy.source, phy.sink,
         ],
     }
+    if hasattr(phy, "deskew"):
+        # Gen 1x2 (lanes=2): both lanes words at the deskew input (after the per lane word alignment
+        # and SKP removal), deskew pairing (heads: marker at the FIFOs outputs) and destriped words.
+        deskew = phy.deskew
+        groups["lanes"] = link_signals + [
+            phy.x2, phy.lane_swap, deskew.aligned, deskew.clear, *deskew.heads,
+            *[getattr(deskew.sinks[lane], name) for lane in range(2) for name in ["valid", "data", "ctrl"]],
+            phy.source.valid, phy.source.data, phy.source.ctrl,
+        ]
     if serdes_debug is not None:
         groups["phase"] = link_signals + [
             serdes_debug.rx_tx_phase,

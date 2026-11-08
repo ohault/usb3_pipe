@@ -698,7 +698,7 @@ def usb3_soc_args(parser, output_dir, with_uartbone=True):
     parser.add_argument("--link-words",        default=1, type=int, help="Link Layer words: 1 (32-bit), 2 (64-bit) or 4 (128-bit, Gen 2 with wide SerDes words), loopback/bench examples: Gen 2 bandwidth.", choices=[1, 2, 4])
     parser.add_argument("--with-serdes-debug", action="store_true", help="Enable SerDes debug (TX/loopback controls, clocks/RX errors measurements).")
     parser.add_argument("--with-analyzer",     action="store_true", help="Enable LiteScope Analyzer.")
-    parser.add_argument("--analyzer-group",    default="link",      help="LiteScope probes group (phase: requires --with-serdes-debug).", choices=USB3_ANALYZER_GROUPS)
+    parser.add_argument("--analyzer-group",    default="link",      help="LiteScope probes group (phase: requires --with-serdes-debug, lanes: --lanes 2).", choices=USB3_ANALYZER_GROUPS)
 
 def usb3_soc_argdict(args):
     """Target SoC arguments from the common bench target arguments: USB3BaseSoC (bridges, CPU),

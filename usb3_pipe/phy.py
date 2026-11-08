@@ -926,8 +926,15 @@ class USB3PHY(LiteXModule):
             idle_count.eq(idle_count + 1),
         )
         self.comb += lanes_idle.eq(idle_count == self.lanes_idle_cycles)
-        self.comb += ltssm.lanes_deskew_lost.eq(x2 & (~deskew.aligned | lanes_idle))
-        self.comb += deskew.clear.eq(lanes_idle)
+        self.lanes_idle_recovery = Signal(reset=1) # i: Recovery on a lane idle (debug: 0 disables).
+        self.lanes_deskew_lost   = Signal()        # o: Deskew lost trigger (x2, not deskewed).
+        self.lanes_idle          = Signal()        # o: Lane idle trigger (x2, lane idle for 10us).
+        self.comb += [
+            self.lanes_deskew_lost.eq(x2 & ~deskew.aligned),
+            self.lanes_idle.eq(x2 & lanes_idle & self.lanes_idle_recovery),
+            ltssm.lanes_deskew_lost.eq(self.lanes_deskew_lost | self.lanes_idle),
+            deskew.clear.eq(lanes_idle & self.lanes_idle_recovery),
+        ]
 
         # RX: Gen 1x1 (Lane 0) ---------------------------------------------------------------------
         # Framing alignment of the Lane 0 words (as USB3PIPE in Gen 1x1, words shifted by the SKP

@@ -76,6 +76,12 @@ class USB3LanesClient:
             "recovery_count" : dbg["recovery"],
         }
         r.update({name: self.reg(f"usb3_lanes_debug_{name}_count").read() for name in LANES_COUNTERS})
+        # U0 exits requested by the lanes (Recovery causes) and lanes RX idle cycles in U0.
+        for name in ["deskew_lost_u0", "lane_idle_u0", "lane0_rx_idle_u0_cycles", "lane1_rx_idle_u0_cycles"]:
+            if hasattr(self.bus.regs, f"usb3_lanes_debug_{name}_count"):
+                r[name] = self.reg(f"usb3_lanes_debug_{name}_count").read()
+        if hasattr(self.bus.regs, "usb3_lanes_debug_control"):
+            r["idle_recovery"] = self.reg("usb3_lanes_debug_control").read() & 0x1
         if hasattr(self.bus.regs, "usb3_lanes_debug_rx_drop_count"):
             r["rx_drop"] = self.reg("usb3_lanes_debug_rx_drop_count").read()
         if self.has_prbs():
@@ -86,6 +92,10 @@ class USB3LanesClient:
         # PHY/lanes counters (the PRBS counters are free running, see PRBSLinkTester).
         self.dbg.clear()
         self.reg("usb3_lanes_debug_clear").write(1)
+
+    def idle_recovery(self, enable=True):
+        # Recovery on a lane in electrical idle in U0 at Gen 1x2 (debug: 0 disables).
+        self.reg("usb3_lanes_debug_control").write(int(enable))
 
     def prbs_enable(self, enable=True):
         self.reg("usb3_prbs_control").write(int(enable))
@@ -105,7 +115,8 @@ def main():
     parser.add_argument("--runs",     default=1,    type=int,   help="script: runs of the scripted host.")
     parser.add_argument("--timeout",  default=2.0,  type=float, help="script: run timeout (s).")
     parser.add_argument("command",    choices=["status", "clear", "retrain", "watch", "prbs",
-        "prbs-enable", "prbs-disable", "script"])
+        "prbs-enable", "prbs-disable", "script",
+        "idle-recovery-enable", "idle-recovery-disable"])
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -115,6 +126,8 @@ def main():
         print(json.dumps(lanes.status()))
     elif args.command == "clear":
         lanes.clear()
+    elif args.command in ["idle-recovery-enable", "idle-recovery-disable"]:
+        lanes.idle_recovery(args.command == "idle-recovery-enable")
     elif args.command == "retrain":
         lanes.dbg.retrain()
         lanes.reg("usb3_lanes_debug_clear").write(1)
