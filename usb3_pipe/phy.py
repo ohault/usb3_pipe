@@ -373,9 +373,12 @@ class USB3PHY(LiteXModule):
         # it on each training failure (and Warm Reset), when the LTSSM exits to Rx.Detect, or when
         # requested (serdes_rx_reset, ex: debug).
         self.serdes_rx_reset = Signal() # i
-        for s in serdes:
+        rx_errors_reinit = [Constant(0)]*len(serdes)
+        if lanes == 2:
+            rx_errors_reinit = self.add_rx_errors_monitors(serdes, sys_clk_freq, timer_scale)
+        for s, reinit in zip(serdes, rx_errors_reinit):
             if pipe_cd is None:
-                self.comb += s.rx_reset.eq(ltssm.exit_to_rx_detect | self.serdes_rx_reset)
+                self.comb += s.rx_reset.eq(ltssm.exit_to_rx_detect | self.serdes_rx_reset | reinit)
             else:
                 self.specials += MultiReg(ltssm.exit_to_rx_detect | self.serdes_rx_reset,
                     s.rx_reset, pipe_cd)
@@ -420,6 +423,62 @@ class USB3PHY(LiteXModule):
         self.ltssm_state  = Signal(len(ltssm.fsm.state))
         self.comb += self.ltssm_state.eq(ltssm.fsm.state)
 
+    def add_rx_errors_monitors(self, serdes, sys_clk_freq, timer_scale, window=1024, holdoff=100e-6,
+        reset_cycles=16):
+        """RX errors monitors (Gen 1x2, one per physical SerDes): a transceiver RX initialization
+        can end in a bad state (continuous decode errors, ex: Artix7 GTP RX elastic buffer or CDR)
+        and the re-initialization on the exits to Rx.Detect may run while the partner is in
+        electrical idle/LFPS and end bad again. On hardware (two Acorn Minis) a receiver stayed with
+        decode errors on ~75% of the cycles until a RX reset during the partner's transmission.
+
+        A lane decoding errors on more than half of the cycles of a window (window cycles, RX not
+        idle, LTSSM in a state with continuous symbols: Polling.RxEQ to U0, Recovery) is
+        re-initialized (rx_reset for reset_cycles), then not monitored for holdoff (CDR lock).
+        rx_errors_reinit_enable (default 1) disables it (debug), rx_errors_reinit: re-initialization
+        pulses (per lane, debug counters). Returns the per lane rx_reset requests."""
+        ltssm = self.ltssm
+        self.rx_errors_reinit_enable = Signal(reset=1)       # i
+        self.rx_errors_reinit        = Signal(len(serdes))   # o: Re-initialization pulses.
+        symbols = Signal()
+        self.comb += symbols.eq(Reduce("OR", [ltssm.fsm.ongoing(state) for state in [
+            "Polling.RxEQ", "Polling.Active", "Polling.Configuration", "Polling.Idle", "U0",
+            "Recovery.Active", "Recovery.Configuration", "Recovery.Idle"]]))
+        holdoff_cycles = max(1, int(holdoff*sys_clk_freq)//timer_scale)
+        requests = []
+        for lane, s in enumerate(serdes):
+            count   = Signal(max=window + 1)
+            errors  = Signal(max=window + 1)
+            hold    = Signal(max=holdoff_cycles + 1)
+            reset   = Signal(max=reset_cycles + 1)
+            request = Signal()
+            self.sync += [
+                self.rx_errors_reinit[lane].eq(0),
+                If(reset != 0,
+                    reset.eq(reset - 1),
+                    hold.eq(holdoff_cycles),
+                ).Elif(hold != 0,
+                    hold.eq(hold - 1),
+                    count.eq(0),
+                    errors.eq(0),
+                ).Elif(~symbols | s.rx_idle | ~self.rx_errors_reinit_enable,
+                    count.eq(0),
+                    errors.eq(0),
+                ).Elif(count == window,
+                    count.eq(0),
+                    errors.eq(0),
+                    If(errors > window//2,
+                        reset.eq(reset_cycles),
+                        self.rx_errors_reinit[lane].eq(1),
+                    )
+                ).Else(
+                    count.eq(count + 1),
+                    errors.eq(errors + s.rx_errors),
+                )
+            ]
+            self.comb += request.eq(reset != 0)
+            requests.append(request)
+        return requests
+
     def add_lanes(self, serdes, sys_clk_freq, role, timer_scale, x2_capable, gen2_capable=False,
         lane_swap_detect=False):
         """Gen 1x2 (6.13): one USB3PIPE per lane under a single LTSSM, Lane 0 is the Configuration
@@ -446,6 +505,7 @@ class USB3PHY(LiteXModule):
         # Logical lanes on the physical SerDes (USB Type-C plug orientation): with
         # lane_swap_detect, the Configuration Lane is the physical lane receiving the partner's
         # Polling.LFPS (lane_swap = 1: Lane 0 on serdes[1]), else lane_swap input (default 0).
+        self.lanes_phys_serdes = serdes # Physical SerDes (RX status: comma realignments).
         self.lane_swap_unit = lane_swap_unit = LaneSwap(serdes, detect=lane_swap_detect)
         self.lane_swap = lane_swap_unit.swap
         serdes = lane_swap_unit.lanes
@@ -926,14 +986,27 @@ class USB3PHY(LiteXModule):
             idle_count.eq(idle_count + 1),
         )
         self.comb += lanes_idle.eq(idle_count == self.lanes_idle_cycles)
-        self.lanes_idle_recovery = Signal(reset=1) # i: Recovery on a lane idle (debug: 0 disables).
-        self.lanes_deskew_lost   = Signal()        # o: Deskew lost trigger (x2, not deskewed).
-        self.lanes_idle          = Signal()        # o: Lane idle trigger (x2, lane idle for 10us).
+        # A lane word alignment changed in U0 (transceiver comma realignment or RX
+        # re-initialization: the lane words are re-aligned on COM only, there is none in U0) also
+        # invalidates the deskew: pairing cleared, Recovery (the lanes words re-aligned and
+        # deskewed on the TS1). On hardware, a lane re-aligned in U0 left the link in U0 with every
+        # x2 word corrupted (two Acorn Minis, about half of the bitstream loads).
+        lanes_realign = Signal()
+        realign = [s.rx_realign for s in self.lanes_phys_serdes if hasattr(s, "rx_realign")]
+        if hasattr(self, "rx_errors_reinit"):
+            realign += [self.rx_errors_reinit != 0]
+        self.comb += lanes_realign.eq(Reduce("OR", realign) if realign else 0)
+        self.lanes_idle_recovery    = Signal(reset=1) # i: Recovery on a lane idle (debug: 0 disables).
+        self.lanes_realign_recovery = Signal(reset=1) # i: Recovery on a lane realigned in U0 (debug).
+        self.lanes_deskew_lost      = Signal()        # o: Deskew lost trigger (x2, not deskewed).
+        self.lanes_idle             = Signal()        # o: Lane idle trigger (x2, lane idle for 10us).
+        self.lanes_realign          = Signal()        # o: Lane realigned in U0 (x2).
         self.comb += [
             self.lanes_deskew_lost.eq(x2 & ~deskew.aligned),
             self.lanes_idle.eq(x2 & lanes_idle & self.lanes_idle_recovery),
+            self.lanes_realign.eq(x2 & ltssm.u0 & lanes_realign & self.lanes_realign_recovery),
             ltssm.lanes_deskew_lost.eq(self.lanes_deskew_lost | self.lanes_idle),
-            deskew.clear.eq(lanes_idle & self.lanes_idle_recovery),
+            deskew.clear.eq((lanes_idle & self.lanes_idle_recovery) | self.lanes_realign),
         ]
 
         # RX: Gen 1x1 (Lane 0) ---------------------------------------------------------------------

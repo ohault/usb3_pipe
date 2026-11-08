@@ -221,6 +221,10 @@ class USB3LanesDebug(LiteXModule):
         self._control = CSRStorage(fields=[
             CSRField("idle_recovery", size=1, offset=0, reset=1,
                 description="Recovery on a lane in electrical idle for 10us in U0 at Gen 1x2 (0: disabled)."),
+            CSRField("rx_errors_reinit", size=1, offset=1, reset=1,
+                description="RX re-initialization of a lane with continuous decode errors (0: disabled)."),
+            CSRField("realign_recovery", size=1, offset=2, reset=1,
+                description="Recovery on a lane realigned (comma realignment/RX re-initialization) in U0 at Gen 1x2 (0: disabled)."),
         ])
         self._status = CSRStatus(fields=[
             CSRField("x2",             size=1, offset=0, description="Gen 1x2 negotiated (SuperSpeedPlus Polling)."),
@@ -247,6 +251,10 @@ class USB3LanesDebug(LiteXModule):
 
         if hasattr(phy, "lanes_idle_recovery"):
             self.comb += phy.lanes_idle_recovery.eq(self._control.fields.idle_recovery)
+        if hasattr(phy, "lanes_realign_recovery"):
+            self.comb += phy.lanes_realign_recovery.eq(self._control.fields.realign_recovery)
+        if hasattr(phy, "rx_errors_reinit_enable"):
+            self.comb += phy.rx_errors_reinit_enable.eq(self._control.fields.rx_errors_reinit)
 
         # Event Counters.
         events = [("deskew", phy.deskew_aligned, 1)]
@@ -257,6 +265,7 @@ class USB3LanesDebug(LiteXModule):
                 # U0 exits requested by the lanes (Recovery): deskew lost, lane in electrical idle.
                 ("deskew_lost_u0", u0 & phy.lanes_deskew_lost, 1),
                 ("lane_idle_u0",   u0 & phy.lanes_idle,        1),
+                ("realign_u0",     phy.lanes_realign,          0),
             ]
         if with_rx_drop:
             events += [("rx_drop", link.rx_drop, 0)] # Dropped RX buffer entries.
@@ -270,6 +279,13 @@ class USB3LanesDebug(LiteXModule):
             ]
             if with_triggers:
                 events += [(f"lane{lane}_rx_idle_u0_cycles", u0 & phy.x2 & s.rx_idle, 0)]
+            # SerDes RX status: elastic buffer errors, comma realignments (physical SerDes), RX
+            # re-initializations on continuous decode errors.
+            for name in ["rx_buferror", "rx_realign"]:
+                if hasattr(s, name):
+                    events += [(f"lane{lane}_{name}", getattr(s, name), 0)]
+            if hasattr(phy, "rx_errors_reinit"):
+                events += [(f"lane{lane}_rx_errors_reinit", phy.rx_errors_reinit[lane], 0)]
         for name, signal, edge in events:
             csr = CSRStatus(32, name=f"{name}_count",
                 description=f"{name} {'events' if edge else 'cycles'} count (saturating).")
@@ -518,7 +534,8 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
     - ts       : LTSSM + TS detections/generation, SerDes RX/TX streams.
     - datapath : LTSSM + SerDes and PHY RX/TX streams, SKP removal.
     - phase    : LTSSM + RX vs TX clocks phase (requires serdes_debug: USB3SerDesDebug).
-    - lanes    : LTSSM + Gen 1x2 lanes words at the deskew input, deskew pairing, destriped words.
+    - lanes    : LTSSM + Gen 1x2 lanes words at the deskew input, deskew pairing, destriped words,
+                 lanes TX words to the SerDes.
     - u3       : LTSSM + U3 exit: LFPS TX/RX, TS1 detection, SerDes RX stream, RX vs TX clocks phase
                  (requires serdes_debug).
     """
@@ -568,6 +585,11 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
             phy.x2, phy.lane_swap, deskew.aligned, deskew.clear, *deskew.heads,
             *[getattr(deskew.sinks[lane], name) for lane in range(2) for name in ["valid", "data", "ctrl"]],
             phy.source.valid, phy.source.data, phy.source.ctrl,
+            # TX: both lanes words to the SerDes (TS/scrambled data, before SKP insertion/8b10b).
+            pipe.ts_tx_ts1, pipe.ts_tx_ts2, phy.pipes[1].ts_tx_ts2,
+            *[getattr(phy.lane_swap_unit.lanes[lane], name) for lane in range(2) for name in ["tx_idle"]],
+            *[getattr(phy.lane_swap_unit.lanes[lane].sink, name) for lane in range(2)
+                for name in ["valid", "ready", "data", "ctrl"]],
         ]
     if serdes_debug is not None:
         groups["phase"] = link_signals + [
