@@ -237,5 +237,27 @@ class TestUSB3HostScript(unittest.TestCase):
         self.assertTrue(contains(test_tx, test_first))      # Test script.
         self.assertEqual(self.resets_csr, 1)                # Only the test run Hot Reset counted.
 
+    def test_idle_init_with_u0_exits(self):
+        # Device leaving U0 every few cycles before the idle link initialization (unacknowledged
+        # Header Packets: PENDING_HP_TIMER Recoveries): the idle delay counts the time without a
+        # test run, not the U0 time, the idle Hot Reset is still requested.
+        link = FakeLink()
+        dut  = USB3HostScript(link, sys_clk_freq=10e6, idle_delay=5e-6) # 50 cycles.
+        resets = []
+        def generator():
+            yield link.sink.ready.eq(1)
+            req_d = 0
+            for cycle in range(400):
+                # U0 for 15 cycles, out of U0 for 5 (until the Hot Reset is requested).
+                if not resets:
+                    yield link.u0.eq((cycle % 20) < 15)
+                req = (yield link.hot_reset_req)
+                if req and not req_d:
+                    resets.append(cycle)
+                req_d = req
+                yield
+        run_simulation(dut, generator())
+        self.assertTrue(resets and resets[0] < 120, resets)
+
 if __name__ == "__main__":
     unittest.main()

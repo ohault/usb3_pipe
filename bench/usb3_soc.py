@@ -718,8 +718,9 @@ class USB3HostScript(LiteXModule):
         idle_timer = WaitTimer(max(1, int(idle_delay*sys_clk_freq)))
         self.submodules += idle_timer
         self.run_fsm = run_fsm = FSM(reset_state="IDLE")
-        self.comb += idle_timer.wait.eq(run_fsm.ongoing("IDLE") & link.u0 & ~enable & idle_init &
-            ~idle_done)
+        # Time without a test run (not U0 time: without the acknowledges of the idle initialization,
+        # the Device leaves U0 every PENDING_HP_TIMER, the timer would never complete).
+        self.comb += idle_timer.wait.eq(run_fsm.ongoing("IDLE") & ~enable & idle_init & ~idle_done)
         run_fsm.act("IDLE",
             If(link.u0 & ~lup_busy,
                 If(enable,
