@@ -62,6 +62,11 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   change (`bench/acorn_ftdi.py` load/server per board): a single good load proves nothing, and
   compare two builds of the same source before crediting a change (A/B in its own git worktree,
   check `build_info.json`/`csr.csv` of a kept bitstream: an earlier build may hold uncommitted code).
+- Upstream discussion (2026-11-09): results summary (`GEN1X2_SUMMARY_DRAFT.md`) posted on
+  [issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140#issuecomment-6747749373),
+  with an SFP2USB test request for Florent. The Gen 1x2 PR, when agreed: a new branch from upstream
+  master, a few topical commits (PHY lanes, LTSSM/Link, Device Core link, bench/tests, doc), without
+  the fork only files (CLAUDE.md notes, GEN1X2_SUMMARY_DRAFT.md).
 - Next: the Device Core build
   with a USB 3 host through the SFP2USB adapter/the breakout, then a Gen 1x2 host
   ([doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md): throughput; any host packet placement done in
