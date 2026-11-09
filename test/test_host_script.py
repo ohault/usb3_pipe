@@ -20,7 +20,7 @@ from litex.soc.interconnect import stream
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bench"))
 import usb3_soc
-from usb3_soc import USB3HostScript, usb3_host_script
+from usb3_soc import USB3HostScript, usb3_host_script, usb3_host_idle_script
 
 from usb3_pipe.lanes      import link_pairs_layout
 from usb3_core.host_model import OP_SEND, link_command, LUP, HostScript
@@ -46,6 +46,7 @@ class TestUSB3HostScript(unittest.TestCase):
         u0_back = [] # Cycles of the U0 returns after a Hot Reset.
         def generator():
             yield link.sink.ready.eq(1)
+            yield dut._control.fields.idle_init.eq(0) # Test runs only.
             yield link.u0.eq(1)
             req_d     = 0
             hot_reset = None # Cycle of the Hot Reset request being served by the fake PHY.
@@ -116,6 +117,7 @@ class TestUSB3HostScript(unittest.TestCase):
         done   = {}
         def generator():
             yield link.sink.ready.eq(1)
+            yield dut._control.fields.idle_init.eq(0) # Test runs only.
             yield link.u0.eq(1)
             req_d     = 0
             hot_reset = None
@@ -165,6 +167,7 @@ class TestUSB3HostScript(unittest.TestCase):
                 tx = []
                 def generator():
                     yield link.sink.ready.eq(1)
+                    yield dut._control.fields.idle_init.eq(0) # Test runs only.
                     yield link.u0.eq(1)
                     yield link.x2.eq(x2)
                     hot_reset = None
@@ -187,6 +190,52 @@ class TestUSB3HostScript(unittest.TestCase):
                 starts = [i for i in range(len(tx)) if tx[i:i + len(expected)] == expected]
                 self.assertTrue(starts, f"x2={x2}: script first sends not found")
                 self.assertEqual(self.ssp_csr, x2)
+
+    def test_idle_init(self):
+        # Out of the test runs (enable = 0), on the U0 entry: a Hot Reset then the idle link
+        # initialization (first sends: Advertisements), not counted as a run; a test run enabled
+        # later supersedes it (new Hot Reset, the test script, counted).
+        link = FakeLink()
+        dut  = USB3HostScript(link, sys_clk_freq=10e6)
+        idle_first = [s[1] for s in usb3_host_idle_script(ssp=True).steps if s[0] == OP_SEND][:4]
+        test_first = [s[1] for s in usb3_host_script(ssp=True).steps if s[0] == OP_SEND][:4]
+        tx      = []
+        resets  = []
+        def generator():
+            yield link.sink.ready.eq(1)
+            yield link.u0.eq(1)
+            req_d, hot_reset = 0, None
+            for cycle in range(900):
+                if cycle == 450:
+                    yield dut._control.fields.enable.eq(1)
+                req = (yield link.hot_reset_req)
+                if req and not req_d:
+                    resets.append(cycle)
+                if req and hot_reset is None:
+                    hot_reset = cycle
+                    yield link.u0.eq(0)
+                if hot_reset is not None:
+                    yield link.hot_reset.eq(cycle == hot_reset + 5)
+                    if cycle == hot_reset + 20:
+                        yield link.u0.eq(1)
+                        hot_reset = None
+                req_d = req
+                yield
+                if (yield link.sink.valid):
+                    tx.append((cycle, (yield link.sink.data) & 0xffffffff))
+            self.resets_csr = (yield dut._resets.status)
+            self.passes     = (yield dut._passes.status)
+            self.status     = (yield dut._status.status)
+        run_simulation(dut, generator())
+        def contains(words, seq):
+            return any(words[i:i + len(seq)] == seq for i in range(len(words)))
+        idle_tx = [w for c, w in tx if c < 450]
+        test_tx = [w for c, w in tx if c > 450]
+        self.assertTrue(resets and resets[0] < 50)          # Idle: Hot Reset on the U0 entry.
+        self.assertTrue(contains(idle_tx, idle_first))      # Idle link initialization.
+        self.assertTrue(any(c > 450 for c in resets))       # Test run: a new Hot Reset.
+        self.assertTrue(contains(test_tx, test_first))      # Test script.
+        self.assertEqual(self.resets_csr, 1)                # Only the test run Hot Reset counted.
 
 if __name__ == "__main__":
     unittest.main()

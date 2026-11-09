@@ -612,6 +612,17 @@ class USB3HostPortReset(LiteXModule):
 
 # USB3 Scripted Host -------------------------------------------------------------------------------
 
+def usb3_host_idle_script(ssp=True):
+    """Scripted USB host idle script (USB3HostScript out of the test runs): link initialization
+    (Advertisements, Port Capability/Configuration LMPs), then the reactive acknowledges of the
+    Device Header Packets (no Device Recovery on PENDING_HP_TIMER while the host is idle)."""
+    from usb3_core.host_model import HostScript
+    s = HostScript(ssp=ssp)
+    s.link_init()
+    s.auto_ack()
+    s.end()
+    return s
+
 def usb3_host_script(ssp=True):
     """Scripted USB host script for the hardware tests (USB3HostScript, bench/usb3_lanes.py script):
     link initialization, enumeration-like control transfers and Bulk loopback (EP2 OUT -> EP1 IN) with
@@ -642,6 +653,7 @@ class USB3HostScript(LiteXModule):
         from usb3_core.host_model import USB3HostModel
         self._control = CSRStorage(fields=[
             CSRField("enable", size=1, offset=0, reset=0, description="Run the script (in U0, restarted on 0 -> 1)."),
+            CSRField("idle_init", size=1, offset=1, reset=1, description="Out of the runs, link initialization and acknowledges of the Device Header Packets (after a Hot Reset, on each U0 entry)."),
         ])
         self._status = CSRStatus(fields=[
             CSRField("done",    size=1, offset=0, description="Script done (all the steps matched)."),
@@ -663,12 +675,19 @@ class USB3HostScript(LiteXModule):
         ssp_steps = usb3_host_script(ssp=True).steps
         ss_steps  = usb3_host_script(ssp=False).steps
         ss_start  = len(ssp_steps) + 1
+        ssp_idle_steps = usb3_host_idle_script(ssp=True).steps
+        ss_idle_steps  = usb3_host_idle_script(ssp=False).steps
+        ssp_idle_start = ss_start + len(ss_steps) + 1
+        ss_idle_start  = ssp_idle_start + len(ssp_idle_steps) + 1
+        end = [(OP_END, 0, 0, 0, 0, 0)]
         self._ss_start = CSRStatus(32, reset=ss_start, description="First step of the SuperSpeed script (steps of the SuperSpeedPlus script before).")
-        self.model = model = USB3HostModel(ssp_steps + [(OP_END, 0, 0, 0, 0, 0)] + ss_steps)
-        ssp = Signal(reset=1) # Script of the run: the negotiated link out of the runs, kept during a
-                              # run (the model step loaded from model.start while it is disabled).
+        self.model = model = USB3HostModel(ssp_steps + end + ss_steps + end + ssp_idle_steps + end +
+            ss_idle_steps)
+        ssp  = Signal(reset=1) # Script of the run: the negotiated link out of the runs, kept during a
+                               # run (the model step loaded from model.start while it is disabled).
+        test = Signal()        # Run kind: test run (enable), else idle link initialization.
         self.comb += [
-            model.start.eq(Mux(ssp, 0, ss_start)),
+            model.start.eq(Mux(test, Mux(ssp, 0, ss_start), Mux(ssp, ssp_idle_start, ss_idle_start))),
             self._ssp.status.eq(ssp),
         ]
         self.pairs = pairs = WordsToPairs()
@@ -686,24 +705,35 @@ class USB3HostScript(LiteXModule):
         model_tx  = Signal() # Model words to send (script, or acknowledges after the script).
         self.submodules += lup_timer
 
-        # Runs: Hot Reset (Header Sequence Numbers reset on both sides), U0, script.
-        enable = self._control.fields.enable
+        # Runs: Hot Reset (Header Sequence Numbers reset on both sides), U0, script. Test runs when
+        # enabled; out of them, an idle link initialization (idle_init, once per U0 entry).
+        enable    = self._control.fields.enable
+        idle_init = self._control.fields.idle_init
+        idle_done = Signal() # Idle link initialization done since the U0 entry.
+        abort     = Signal() # Run kind no longer wanted (test run disabled, or idle run superseded).
+        self.comb += abort.eq(Mux(test, ~enable, enable | ~idle_init))
         self.run_fsm = run_fsm = FSM(reset_state="IDLE")
         run_fsm.act("IDLE",
-            If(enable & link.u0 & ~lup_busy,
-                NextState("HOT-RESET")
+            If(link.u0 & ~lup_busy,
+                If(enable,
+                    NextValue(test, 1),
+                    NextState("HOT-RESET")
+                ).Elif(idle_init & ~idle_done,
+                    NextValue(test, 0),
+                    NextState("HOT-RESET")
+                )
             )
         )
         run_fsm.act("HOT-RESET",
             link.hot_reset_req.eq(1),
-            If(~enable,
+            If(abort,
                 NextState("IDLE")
             ).Elif(link.hot_reset | link.polling_idle,
                 NextState("WAIT-U0")
             )
         )
         run_fsm.act("WAIT-U0",
-            If(~enable,
+            If(abort,
                 NextState("IDLE")
             ).Elif(link.u0 & ~lup_busy,
                 NextState("RUN")
@@ -712,12 +742,17 @@ class USB3HostScript(LiteXModule):
         self.sync += If(~run, ssp.eq(link.x2))
         held_done  = Signal() # Run result held out of U0 until disabled (one run per enable).
         held_error = Signal()
+        self.sync += If(~link.u0 & ~run_fsm.ongoing("RUN"),
+            idle_done.eq(0)
+        ).Elif(run_fsm.ongoing("RUN") & ~test & model.done,
+            idle_done.eq(1)
+        )
         run_fsm.act("RUN",
             run.eq(1),
-            If(~enable,
+            If(abort,
                 NextState("IDLE")
             ).Elif(~link.u0,
-                If(model.done | model.error,
+                If(test & (model.done | model.error),
                     NextValue(held_done,  model.done),
                     NextValue(held_error, model.error),
                     NextState("HELD")
@@ -735,8 +770,8 @@ class USB3HostScript(LiteXModule):
         )
         resets_d = Signal()
         self.sync += [
-            resets_d.eq(run_fsm.ongoing("HOT-RESET")),
-            If(run_fsm.ongoing("HOT-RESET") & ~resets_d, self._resets.status.eq(self._resets.status + 1)),
+            resets_d.eq(run_fsm.ongoing("HOT-RESET") & test),
+            If(run_fsm.ongoing("HOT-RESET") & test & ~resets_d, self._resets.status.eq(self._resets.status + 1)),
         ]
 
         self.comb += [
@@ -770,12 +805,12 @@ class USB3HostScript(LiteXModule):
             rx_buffer.source.connect(model.sink),
             model.enable.eq(run),
             model.u0.eq(link.u0),
-            self._status.fields.done.eq(model.done | held_done),
-            self._status.fields.error.eq(model.error | held_error),
-            self._status.fields.running.eq(model.enable & ~model.done & ~model.error),
+            self._status.fields.done.eq((test & model.done) | held_done),
+            self._status.fields.error.eq((test & model.error) | held_error),
+            self._status.fields.running.eq(test & model.enable & ~model.done & ~model.error),
             self._step.status.eq(model.step),
         ]
-        for name, signal in [("passes", model.done), ("fails", model.error)]:
+        for name, signal in [("passes", test & run & model.done), ("fails", test & run & model.error)]:
             csr = getattr(self, f"_{name}")
             signal_d = Signal()
             self.sync += [
