@@ -80,7 +80,9 @@ The same bitstreams run at Gen 1x1: the Gen 1x2 capability advertised in the Sup
 is a runtime control (`usb3_lanes.py x2-disable`/`x2-enable`, then retrain), `--no-x2` (built not x2
 capable) is not needed for the tests.
 
-Optional: `--lpm-hold rxeq` (GTP LPM adaptation only in Polling.RxEQ), `--with-analyzer
+`--lpm-hold rxeq` (GTP LPM adaptation only in Polling.RxEQ, on the partner's TSEQ) is the default
+with `--lanes 2`: with a continuous adaptation the receive quality of a lane changed from one
+bitstream load to the next (`--lpm-hold none` to compare). Optional: `--with-analyzer
 --analyzer-group link` (LiteScope probes on Lane 0).
 
 ## Select Each Board
@@ -475,21 +477,28 @@ Results to report, per test and per board:
 
 ## Results (Two Boards, 2026-11-08)
 
-Summary (latest builds, crossed cables):
+Summary (latest builds, crossed cables, one Host and one Device bitstream for Gen 1x2 and Gen 1x1):
 
 | Part | Status |
 |------|--------|
 | PHY, PRBS (tests 1-6) | Validated: 610MB/s per direction without errors, retrains, lanes swap, unplug/replug, 20/20 bitstream loads good. Single lane fallback (test 5): with both PHYs retrained together (a Device not x2 capable starting alone times out to Compliance: open). |
-| Device Core at Gen 1x2, scripted host (tests 7-9) | Validated: 400/400 runs over 20 bitstream loads, no Device Link Layer Recovery, LBAD or retry during the runs. |
+| Device Core at Gen 1x2, scripted host (tests 7-9) | Validated: 400/400 runs over 20 bitstream loads (with `--lpm-hold rxeq`, the default with `--lanes 2`). |
+| Device Core at Gen 1x1 (test 10b) | Validated: 400/400 runs over 20 bitstream loads, same bitstreams (runtime Gen 1x2 control). |
+| Soak (test 10), Gen 1x2 (`daa2451`) | 10000/10000 runs on one load, no error/timeout (1 Warm Reset at the start, 207 runs restarted with a Hot Reset; Device Link Layer: 1189 Recovery requests, 1 LBAD, 0 retry during the runs). |
+| USB hosts (tests 11-18) | Not run: SFP2USB adapter, dual SFP to USB-C breakout and Gen 1x2 host needed. |
+
+Results after each fix (two Acorn Minis, crossed cables, 20 loads x 20 scripted runs unless noted):
+
+| Change | Results |
+|--------|---------|
+| Single lane fallback (test 5), `50681d4` | Before the Compliance fix: 6/10 loads (both boards retrained together), PRBS 303MB/s per direction without errors; 4/10 Device in Compliance. |
+| Soak, `50681d4` | Inconclusive: ~4970 runs, then the Host FPGA reconfigured from its flash (no USB event: power?). `bench/acorn_x2_loads.py` now checks the boards identifiers before and after the runs. |
 | Device Core at Gen 1x2, Compliance exit (`daa2451`) | 400/400 runs over 20 loads; Host port resets (Warm Reset, Device out of Compliance) on 2 loads. |
+| Device Core at Gen 1x1 (test 10b, `daa2451`) | 349/400 runs: 16/20 loads 20/20 (2 Warm Resets each: Device out of Compliance), 2 loads 14-15/20, 2 loads without U0 after 74 Warm Resets (open). Before the Compliance fix (`50681d4`): 200/400, alternating loads. |
 | One Host/one Device bitstream (`3a208f9`, Gen 1x1 by the runtime control) | Gen 1x2: 340/400 (17/20 loads 20/20); Gen 1x1 (`--x1`): 280/400 (14/20 loads 20/20). The other loads never reach U0, both modes (open): the Host Configuration Lane receives the Device Polling LFPS chopped (counted as Ping/U1 exit LFPS, its electrical idle detection toggling: 358106 transitions in 3s), the Device hears the Host; the Warm Resets loop every 600ms (Device Polling.LFPS -> Compliance -> Warm Reset). Load and build dependent (Host build WNS +0.002ns). |
 | RX idle filter spikes rejection (`90220e2`, one Host/Device bitstream) | Gen 1x1 (`--x1`): 400/400 runs, 20/20 loads (1-2 Warm Resets per load: Device out of Compliance). Gen 1x2: all 20 loads train (no stuck load, no Warm Reset needed), 338/400 runs: 15/20 loads 20/20, 5 loads with `link_init` errors/timeouts at Gen 1x2 (Host build WNS +0.009ns: scripted host model step -> script ROM path, open). |
 | Scripted host ROM registered (Host `1e04ceb`, WNS +0.247ns; Device `90220e2`) | Gen 1x2: 330/400 (15/20 loads 20/20, all loads train); Gen 1x1: 300/400 (15/20 loads 20/20, 5 loads stuck again: the spike rejection is not enough on every build/load). The failing loads in both modes are Host Lane 0 (SFP-0) receive quality: on the Gen 1x2 ones 1.2-3.1 million comma realignments (<= 90000 on the good loads), on the stuck ones the LFPS idle detection spikes: load dependent, GTP RX adaptation or the channel (open). Not the scripted host timing. |
-| Soak (test 10), Gen 1x2 (`daa2451`) | 10000/10000 runs on one load, no error/timeout (1 Warm Reset at the start, 207 runs restarted with a Hot Reset; Device Link Layer: 1189 Recovery requests, 1 LBAD, 0 retry during the runs). |
-| Device Core at Gen 1x1 (test 10b, `daa2451`) | 349/400 runs: 16/20 loads 20/20 (2 Warm Resets each: Device out of Compliance), 2 loads 14-15/20, 2 loads without U0 after 74 Warm Resets (open). Before the Compliance fix (`50681d4`): 200/400, alternating loads. |
-| Single lane fallback (test 5), `50681d4` | Before the Compliance fix: 6/10 loads (both boards retrained together), PRBS 303MB/s per direction without errors; 4/10 Device in Compliance. |
-| Soak, `50681d4` | Inconclusive: ~4970 runs, then the Host FPGA reconfigured from its flash (no USB event: power?). `bench/acorn_x2_loads.py` now checks the boards identifiers before and after the runs. |
-| USB hosts (tests 11-18) | Not run: SFP2USB adapter, dual SFP to USB-C breakout and Gen 1x2 host needed. |
+| GTP LPM adaptation hold (`--lpm-hold rxeq`, `885d9f1`) | **Gen 1x2: 400/400** runs (20/20 loads), **Gen 1x1 (`--x1`): 400/400** (20/20 loads, 20 Recoveries per load: the runs Hot Resets only). The receive quality changes from one load to the next came from the continuous GTP LPM adaptation (Host Lane 0): adaptation only in Polling.RxEQ, now the default with `--lanes 2`. |
 
 The sections below are in chronological order: first results, what was found on hardware and fixed
 (each reproduced in simulation first), and the results after each fix.
@@ -629,7 +638,7 @@ status`: `deskew_lost_u0`, `lane_idle_u0`, `realign_u0`, per lane `rx_buferror`,
 |---------|-------|
 | `litex_cli --ident` fails or returns another design | `--location` of the board (`acorn_ftdi.py list`), J10 Pico-EZmate cable, `--bind-port`/`--port`, `litex_server` restarted after the load. |
 | No U0, `rx_idle: [1, x]` | No signal on Lane 0: SFP-0 cable seated, the partner bitstream loaded. |
-| Stuck in Polling, `rx_errors_cycles` increasing | Receiver equalization through the DAC cable: try `--lpm-hold rxeq`, a shorter cable. |
+| Stuck in Polling, `rx_errors_cycles` increasing | Receiver equalization through the DAC cable: `--lpm-hold rxeq` (default with `--lanes 2`), a shorter cable. |
 | U0 with `x2: 0` and straight cables (x2 bitstreams) | Lane 1: `lane1_ts1` stays at 0 or `rx_idle[1]` stays at 1 (SFP-1 cable), `--no-x2` bitstream loaded by mistake. |
 | U0 but `deskew_aligned: 0`, or PRBS errors in one direction only | `retrain` output of both boards (history), `deskew` counter. |
 | Link flapping, stuck in Polling or no PRBS words after a load (retrains do not help) | `lane0/1_rx_realign`, `realign_u0`, `deskew_lost_u0` counters; reload the bitstreams; `--analyzer-group lanes` capture. |

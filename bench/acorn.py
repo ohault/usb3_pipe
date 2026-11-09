@@ -231,7 +231,7 @@ def main():
     gtp_group = parser.add_argument_group(title="GTP bring-up/debug overrides")
     gtp_group.add_argument("--rxcdr-cfg", default=None,   help="GTP RXCDR_CFG override (hex).")
     gtp_group.add_argument("--gtp-param", default=[],     help="GTP parameter override NAME=VALUE (ex: p_RXCDR_HOLD_DURING_EIDLE=1).", action="append")
-    gtp_group.add_argument("--lpm-hold",  default="none", help="GTP LPM adaptation hold (rxeq: adapt only in Polling.RxEQ).", choices=["none", "rxeq", "always"])
+    gtp_group.add_argument("--lpm-hold",  default=None,   help="GTP LPM adaptation hold (rxeq: adapt only in Polling.RxEQ; default: rxeq with --lanes 2, else none).", choices=["none", "rxeq", "always"])
     x2_group = parser.add_argument_group(title="Gen 1x2 (two lanes, SFP-0/SFP-1: two boards link tests with PRBS Link-Layer stand-ins, or dual SFP to USB-C breakout)")
     x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2, SFP-0/SFP-1, Mini only).", choices=[1, 2])
     x2_group.add_argument("--role",       default="device",    help="USB3PHY role with --lanes 2 (one board in each role).", choices=["device", "host"])
@@ -266,7 +266,11 @@ def main():
         with_dram   = with_dram,
         rxcdr_cfg   = None if args.rxcdr_cfg is None else int(args.rxcdr_cfg, 0),
         gtp_params  = {k: int(v, 0) for k, v in (p.split("=") for p in args.gtp_param)},
-        lpm_hold    = args.lpm_hold,
+        # Gen 1x2 (two Acorn Minis, SFP DAC cables): with the GTP LPM adapting continuously, the
+        # receive quality of a lane changed from one bitstream load to the next (LFPS idle detection
+        # spikes, millions of comma realignments, links never trained on some loads): adaptation
+        # only on the partner's TSEQ (Polling.RxEQ), 400/400 runs on 20 loads at Gen 1x2 and 1x1.
+        lpm_hold    = args.lpm_hold or ("rxeq" if args.lanes == 2 else "none"),
         lanes       = args.lanes,
         role        = args.role,
         x2_capable  = not args.no_x2,

@@ -53,7 +53,8 @@ $ ./bench/usb3_bulk.py loopback --size 1024 --count 1000
 - `--variant mini|standard`: baseboard variant (SFP pins).
 - `--with-dram`: DDR3 (LiteDRAM, initialized by the BIOS: a VexRiscv CPU is added when
   `--cpu-type` is not given, BIOS console on a stub UART); implied by the `msc_dram` example.
-- GTP bring-up overrides: `--rxcdr-cfg`, `--gtp-param NAME=VALUE`, `--lpm-hold rxeq|always`.
+- GTP bring-up overrides: `--rxcdr-cfg`, `--gtp-param NAME=VALUE`, `--lpm-hold none|rxeq|always`
+  (default: `rxeq` with `--lanes 2`, LPM adaptation only on the partner's TSEQ, else `none`).
 - With several FTDI adapters connected, select the Acorn explicitly (the programmer picks the first
   FTDI it finds); `bench/acorn_run.py` (load + `litex_server` + N link trainings with the results
   recorded) uses the `USB3_PIPE_FTDI` sysfs location.

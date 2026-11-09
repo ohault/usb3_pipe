@@ -48,7 +48,11 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   with the scripted host: 400/400 runs on 20 loads (2026-11-08 evening) after the fixes found on
   hardware: Hot Reset before each run, HotReset.Active exit after a Reset=0 TS2 burst, deskew single
   mismatch tolerated, U0 deskew lost Recovery after the Logical Idle gap, `LanesPacketAligner`
-  positions pipelined (timing); Host Recoveries outside the runs remain:
+  positions pipelined (timing); then (2026-11-09) the Device out of Compliance (lanes swap in
+  Compliance, Host port reset), the RX idle filter spikes rejection, one Host/one Device bitstream
+  (runtime Gen 1x2 control, both scripts) and the GTP LPM adaptation held outside Polling.RxEQ
+  (default with `--lanes 2`: the load to load receive quality changes): Gen 1x2 and Gen 1x1
+  400/400 runs on 20 loads each:
   [results](doc/gen1x2-hardware-validation.md#results-two-boards-2026-11-08). Test ~20 loads per
   change (`bench/acorn_ftdi.py` load/server per board): a single good load proves nothing, and
   compare two builds of the same source before crediting a change (A/B in its own git worktree,
