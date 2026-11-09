@@ -171,7 +171,10 @@ class USB3SoC(USB3BaseSoC):
                 rx_pads      = platform.request("sfp_rx", lane),
                 rxcdr_cfg    = rxcdr_cfg,
                 pll          = None if lane == 0 else usb3_serdes[0].pll,
-                tx_clk       = None if lane == 0 else usb3_serdes[0].gtp.cd_tx.clk)
+                tx_clk       = None if lane == 0 else usb3_serdes[0].gtp.cd_tx.clk,
+                # Gen 1x2 (two Acorn Minis): RX electrical idle detection spikes after the partner
+                # Polling LFPS bursts on some bitstream loads, rejected below the shortest LFPS burst.
+                rx_idle_min_burst = 40e-9 if lanes == 2 else None)
             serdes.gtp.gtp_params.update(gtp_params) # Debug overrides (--gtp-param).
             usb3_serdes.append(serdes)
         # Fabric reference clock on GTGREFCLK0 (see doc/debugging-guide.md): allowed as a warning.
