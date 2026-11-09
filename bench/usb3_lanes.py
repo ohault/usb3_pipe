@@ -87,6 +87,7 @@ class USB3LanesClient:
             r["idle_recovery"]    = (control >> 0) & 0x1
             r["rx_errors_reinit"] = (control >> 1) & 0x1
             r["realign_recovery"] = (control >> 2) & 0x1
+            r["x2_enable"]        = (control >> 3) & 0x1
         if hasattr(self.bus.regs, "usb3_lanes_debug_rx_drop_count"):
             r["rx_drop"] = self.reg("usb3_lanes_debug_rx_drop_count").read()
         if self.has_prbs():
@@ -108,6 +109,11 @@ class USB3LanesClient:
         control = self.reg("usb3_lanes_debug_control").read()
         self.reg("usb3_lanes_debug_control").write((control & ~0x2) | (int(enable) << 1))
 
+    def x2_enable(self, enable=True):
+        # Gen 1x2 advertised in the SuperSpeedPlus Polling (0: Gen 1x1 only), from the next training.
+        control = self.reg("usb3_lanes_debug_control").read()
+        self.reg("usb3_lanes_debug_control").write((control & ~0x8) | (int(enable) << 3))
+
     def prbs_enable(self, enable=True):
         self.reg("usb3_prbs_control").write(int(enable))
 
@@ -127,7 +133,8 @@ def main():
     parser.add_argument("--timeout",  default=2.0,  type=float, help="script: run timeout (s).")
     parser.add_argument("command",    choices=["status", "clear", "retrain", "watch", "prbs",
         "prbs-enable", "prbs-disable", "script",
-        "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable"])
+        "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable",
+        "x2-enable", "x2-disable"])
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -141,6 +148,13 @@ def main():
         lanes.idle_recovery(args.command == "idle-recovery-enable")
     elif args.command in ["rx-reinit-enable", "rx-reinit-disable"]:
         lanes.rx_errors_reinit(args.command == "rx-reinit-enable")
+    elif args.command in ["x2-enable", "x2-disable"]:
+        # Gen 1x2 capability advertised (x2-disable: Gen 1x1 negotiated), then retrain.
+        lanes.x2_enable(args.command == "x2-enable")
+        lanes.dbg.retrain()
+        lanes.reg("usb3_lanes_debug_clear").write(1)
+        time.sleep(args.wait)
+        print(json.dumps(lanes.status()))
     elif args.command == "retrain":
         lanes.dbg.retrain()
         lanes.reg("usb3_lanes_debug_clear").write(1)
@@ -204,14 +218,22 @@ def main():
         from usb3_soc import usb3_host_script
         from usb3_core.host_model import OP_MARK
         assert hasattr(bus.regs, "usb3_script_control"), "No scripted host in this build (--role host --lanes-core)."
-        ssp     = bool(lanes.reg("usb3_script_ssp").read()) if hasattr(bus.regs, "usb3_script_ssp") else True
-        script  = usb3_host_script(ssp=ssp)
+        # Both scripts in the scripted host ROM (SuperSpeedPlus, then SuperSpeed from ss_start), or a
+        # single one in older builds (usb3_script_ssp: its kind).
+        if hasattr(bus.regs, "usb3_script_ss_start"):
+            ss_start = lanes.reg("usb3_script_ss_start").read()
+        else:
+            ss = hasattr(bus.regs, "usb3_script_ssp") and not lanes.reg("usb3_script_ssp").read()
+            ss_start = 0 if ss else 2**32
+        scripts = {True: usb3_host_script(ssp=True), False: usb3_host_script(ssp=False)}
         def section(step):
-            name = "start"
-            for i, s in enumerate(script.steps[:step + 1]):
+            ssp    = step < ss_start
+            script = scripts[ssp]
+            name   = "start"
+            for i, s in enumerate(script.steps[:(step if ssp else step - ss_start) + 1]):
                 if s[0] == OP_MARK:
                     name = script.marks[s[1]]
-            return name
+            return name if ssp else f"ss:{name}"
         results = {"done": 0, "error": 0, "timeout": 0}
         for run in range(args.runs):
             lanes.reg("usb3_script_control").write(0)
@@ -235,6 +257,8 @@ def main():
         lanes.reg("usb3_script_control").write(0)
         status = lanes.status()
         resets = {"resets_csr": lanes.reg("usb3_script_resets").read()} if hasattr(bus.regs, "usb3_script_resets") else {}
+        if hasattr(bus.regs, "usb3_script_ss_start"):
+            resets["ssp"] = lanes.reg("usb3_script_ssp").read() # Script of the last run.
         print(json.dumps({**results, "passes_csr": lanes.reg("usb3_script_passes").read(),
             "fails_csr": lanes.reg("usb3_script_fails").read(), **resets, "x2": status["x2"],
             "lane_swap": status["lane_swap"], "recovery_count": status["recovery_count"],

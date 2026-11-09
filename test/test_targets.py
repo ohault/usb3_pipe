@@ -146,7 +146,9 @@ def test_target_lanes_host_script(tmp_path):
     # USB3PHYX2Link): the script CSRs, no PRBS stand-ins, both lanes.
     csr = elaborate("acorn", tmp_path, ["--lanes", "2", "--role", "host", "--lanes-core"])
     for csr_name in ["usb3_script_control", "usb3_script_status", "usb3_script_step",
-        "usb3_script_passes", "usb3_script_fails", "usb3_lanes_debug_rx_drop_count"]:
+        "usb3_script_passes", "usb3_script_fails", "usb3_lanes_debug_rx_drop_count",
+        "usb3_script_ss_start", "usb3_script_ssp", "usb3_port_reset_count",
+        "usb3_lanes_debug_control"]:
         assert csr_name in csr
     assert "usb3_prbs" not in csr
     verilog = next((tmp_path / "gateware").glob("*.v")).read_text()

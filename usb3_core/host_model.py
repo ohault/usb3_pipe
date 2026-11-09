@@ -244,7 +244,9 @@ class USB3HostModel(LiteXModule):
             init = [encode(s) for s in script] + [encode((OP_END, 0, 0, 0, 0, 0))])
         port = mem.get_port(async_read=True)
         self.specials += mem, port
-        self.step = step = Signal(max=len(script) + 1) # o: Current step (failing step on error).
+        self.step  = step = Signal(max=len(script) + 1) # o: Current step (failing step on error).
+        self.start = Signal(max=len(script) + 1)        # i: First step of a run (several scripts
+                                                        #    in the ROM, each ended by OP_END).
         fields = {}
         offset = 0
         for name, w in layout:
@@ -488,7 +490,7 @@ class USB3HostModel(LiteXModule):
         ]
 
         self.sync += If(~self.enable,
-            step.eq(0),
+            step.eq(self.start),
             idle_count.eq(0),
             self.error.eq(0),
             ack_enable.eq(0),

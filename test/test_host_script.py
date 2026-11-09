@@ -33,6 +33,7 @@ class FakeLink:
         self.hot_reset_req = Signal()
         self.hot_reset     = Signal()
         self.polling_idle  = Signal()
+        self.x2            = Signal(reset=1) # Gen 1x2 negotiated: SuperSpeedPlus script.
 
 class TestUSB3HostScript(unittest.TestCase):
     def test_lup_keep_alive_hot_reset_and_script(self):
@@ -152,6 +153,40 @@ class TestUSB3HostScript(unittest.TestCase):
         self.assertTrue(50 <= resets[0] < 60 and 420 <= resets[1] < 430)
         self.assertEqual(done[590], 1)                 # Second run done.
         self.assertEqual(self.passes, 2)
+
+    def test_script_of_the_negotiated_link(self):
+        # Both scripts in the ROM: SuperSpeedPlus at Gen 1x2, SuperSpeed at Gen 1x1 (first sends of
+        # the run, after the Hot Reset).
+        for x2 in [1, 0]:
+            with self.subTest(x2=x2):
+                link = FakeLink()
+                dut  = USB3HostScript(link, sys_clk_freq=10e6)
+                expected = [s[1] for s in usb3_host_script(ssp=bool(x2)).steps if s[0] == OP_SEND][:6]
+                tx = []
+                def generator():
+                    yield link.sink.ready.eq(1)
+                    yield link.u0.eq(1)
+                    yield link.x2.eq(x2)
+                    hot_reset = None
+                    for cycle in range(400):
+                        if cycle == 20:
+                            yield dut._control.fields.enable.eq(1)
+                        if (yield link.hot_reset_req) and hot_reset is None:
+                            hot_reset = cycle
+                            yield link.u0.eq(0)
+                        if hot_reset is not None:
+                            yield link.hot_reset.eq(cycle == hot_reset + 5)
+                            if cycle == hot_reset + 20:
+                                yield link.u0.eq(1)
+                        yield
+                        if (yield link.sink.valid) and hot_reset is not None and cycle > hot_reset + 20:
+                            tx.append((yield link.sink.data) & 0xffffffff)
+                    self.ssp_csr = (yield dut._ssp.status)
+                run_simulation(dut, generator())
+                # The run first sends (LUP keep-alives only before/after the run).
+                starts = [i for i in range(len(tx)) if tx[i:i + len(expected)] == expected]
+                self.assertTrue(starts, f"x2={x2}: script first sends not found")
+                self.assertEqual(self.ssp_csr, x2)
 
 if __name__ == "__main__":
     unittest.main()

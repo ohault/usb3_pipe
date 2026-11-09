@@ -225,6 +225,8 @@ class USB3LanesDebug(LiteXModule):
                 description="RX re-initialization of a lane with continuous decode errors (0: disabled)."),
             CSRField("realign_recovery", size=1, offset=2, reset=1,
                 description="Recovery on a lane realigned (comma realignment/RX re-initialization) in U0 at Gen 1x2 (0: disabled)."),
+            CSRField("x2_enable", size=1, offset=3, reset=1,
+                description="Gen 1x2 advertised in the SuperSpeedPlus Polling (0: Gen 1x1 only), from the next training (retrain), with a PHY built x2 capable."),
         ])
         self._status = CSRStatus(fields=[
             CSRField("x2",             size=1, offset=0, description="Gen 1x2 negotiated (SuperSpeedPlus Polling)."),
@@ -255,6 +257,8 @@ class USB3LanesDebug(LiteXModule):
             self.comb += phy.lanes_realign_recovery.eq(self._control.fields.realign_recovery)
         if hasattr(phy, "rx_errors_reinit_enable"):
             self.comb += phy.rx_errors_reinit_enable.eq(self._control.fields.rx_errors_reinit)
+        if hasattr(phy, "x2_enable"):
+            self.comb += phy.x2_enable.eq(self._control.fields.x2_enable)
 
         # Event Counters.
         events = [("deskew", phy.deskew_aligned, 1)]

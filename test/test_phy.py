@@ -514,6 +514,13 @@ class TestPHYX2Core(unittest.TestCase):
         out = self.run_sim("core_x1_crossed", ["--dev-mode", "x1", "--lanes-crossed"])
         self.assertRegex(out, r"DEV\s*lanes swap: 1")
 
+    def test_core_x1_runtime(self):
+        # Device built Gen 1x2 capable (USB3PHYX2Link), Gen 1x2 disabled at runtime (x2_enable,
+        # bench/usb3_lanes.py x2-disable): Gen 1x1 negotiated, SuperSpeed operation, script done.
+        out = self.run_sim("core_x1_runtime", ["--dev-mode", "x2", "--dev-x2-disable",
+            "--no-host-skp", "--lanes-crossed", "--lanes-tx-inverted"])
+        self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 0, gen2: 0\)")
+
     def test_core_x1_data(self):
         # Gen 1x1 negotiated on the Acorn Mini lanes (crossed, TX inverted), script without SKP
         # Ordered Sets requests and with the Bulk IN data checked (as the hardware scripted host

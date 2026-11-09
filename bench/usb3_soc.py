@@ -549,7 +549,7 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
         soc.usb3_link   = usb3_link = USB3PHYX2Link(usb3_phy, rx_buffer_depth=512)
         # SuperSpeedPlus script at Gen 1x2, SuperSpeed script when the Host is not x2 capable (Gen 1x1
         # negotiated: as a Gen 1x1 USB host with the Device).
-        soc.usb3_script = USB3HostScript(usb3_link, ssp=x2_capable, sys_clk_freq=sys_clk_freq)
+        soc.usb3_script = USB3HostScript(usb3_link, sys_clk_freq=sys_clk_freq)
     elif with_core:
         # USB3 Device Core -------------------------------------------------------------------------
         if lanes_x2:
@@ -630,8 +630,12 @@ class USB3HostScript(LiteXModule):
     script runs, a LUP keep-alive Link Command is sent every 10us in U0 (as a host, 7.5.6.1: the
     Device does not enter Recovery for a lack of link activity, 1ms) and, after a run, the model
     reactive acknowledges (LGOOD_n/LCRD_x of the Device Header Packets) are still sent: no Device
-    Recovery for unacknowledged Header Packets between the runs (PENDING_HP_TIMER)."""
-    def __init__(self, link, ssp=True, sys_clk_freq=125e6):
+    Recovery for unacknowledged Header Packets between the runs (PENDING_HP_TIMER).
+
+    Both scripts in the model ROM (SuperSpeedPlus, then SuperSpeed from step ss_start), the run
+    starting on the one of the negotiated link (Gen 1x2: SuperSpeedPlus, Gen 1x1: SuperSpeed),
+    latched at the run start (usb3_script_ssp)."""
+    def __init__(self, link, sys_clk_freq=125e6):
         from litex.soc.interconnect.csr import CSRStorage, CSRStatus, CSRField
         from litex.soc.interconnect import stream
         from usb3_pipe.framing  import WordsToPairs, PairsToWords
@@ -648,15 +652,25 @@ class USB3HostScript(LiteXModule):
         self._passes = CSRStatus(32, description="Scripts done count.")
         self._fails  = CSRStatus(32, description="Scripts errors count.")
         self._resets = CSRStatus(32, description="Hot Resets directed before the runs count.")
-        self._ssp    = CSRStatus(reset=int(ssp), description="SuperSpeedPlus script (Gen 1x2), SuperSpeed (Gen 1x1) otherwise.")
+        self._ssp    = CSRStatus(description="Script of the current/last run: SuperSpeedPlus (Gen 1x2), SuperSpeed (Gen 1x1) otherwise.")
 
         # # #
 
         from migen.genlib.misc import WaitTimer
         from migen.genlib.fsm import FSM, NextState, NextValue
         from usb3_core.host_model import link_command, LUP
-        script = usb3_host_script(ssp=ssp)
-        self.model = model = USB3HostModel(script.steps)
+        from usb3_core.host_model import OP_END
+        ssp_steps = usb3_host_script(ssp=True).steps
+        ss_steps  = usb3_host_script(ssp=False).steps
+        ss_start  = len(ssp_steps) + 1
+        self._ss_start = CSRStatus(32, reset=ss_start, description="First step of the SuperSpeed script (steps of the SuperSpeedPlus script before).")
+        self.model = model = USB3HostModel(ssp_steps + [(OP_END, 0, 0, 0, 0, 0)] + ss_steps)
+        ssp = Signal(reset=1) # Script of the run: the negotiated link out of the runs, kept during a
+                              # run (the model step loaded from model.start while it is disabled).
+        self.comb += [
+            model.start.eq(Mux(ssp, 0, ss_start)),
+            self._ssp.status.eq(ssp),
+        ]
         self.pairs = pairs = WordsToPairs()
         self.words = words = PairsToWords()
         # RX words registered before the model (timing: the script steps compare them).
@@ -695,6 +709,7 @@ class USB3HostScript(LiteXModule):
                 NextState("RUN")
             )
         )
+        self.sync += If(~run, ssp.eq(link.x2))
         held_done  = Signal() # Run result held out of U0 until disabled (one run per enable).
         held_error = Signal()
         run_fsm.act("RUN",

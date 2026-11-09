@@ -331,7 +331,7 @@ class USB3PIPESim(SoCMini):
         lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096, prbs_gap_bits=4, dev_mode="x2",
         lanes_crossed=False, lanes_tx_shift=0, lanes_tx_inverted=False, gen2_capable=False, gen2=False,
         link_words=1, dev_pipe_cd=False, dev_u1u2=True, gen2_data_width=None, host_recovery=False,
-        host_hot_reset=0, host_deskew_clear=False, host_start_delay=0, host_port_reset=False,
+        host_hot_reset=0, host_deskew_clear=False, host_start_delay=0, host_port_reset=False, dev_x2_disable=False,
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
         host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None):
@@ -346,8 +346,10 @@ class USB3PIPESim(SoCMini):
             # SuperSpeedPlus at Gen 1x2 (dev_mode x2), SuperSpeed at Gen 1x1 on Lane 0 (x1/ss). No
             # extra lane SKP Ordered Sets (the Host script SKP Ordered Sets on Lane 0 in Gen 1x1 only).
             lane_skp = 0
-        ssp_x2 = with_core and (lanes == 2) and (dev_mode == "x2") # SuperSpeedPlus at Gen 1x2.
-        x1 = (lanes == 2) and (dev_mode != "x2") # Gen 1x1 negotiated by the Gen 1x2 Host.
+        # Gen 1x2 negotiated: Device x2 capable (dev_mode x2), not disabled at runtime.
+        x2_link = (dev_mode == "x2") and not dev_x2_disable
+        ssp_x2 = with_core and (lanes == 2) and x2_link # SuperSpeedPlus at Gen 1x2.
+        x1 = (lanes == 2) and not x2_link # Gen 1x1 negotiated by the Gen 1x2 Host.
         assert (not dev_pipe_cd) or (lanes == 1)
         sys_clk_freq = int(133e6)
         # SerDes models data width: 4 symbols per clock with the core (full PIPE rate, as on
@@ -572,6 +574,11 @@ class USB3PIPESim(SoCMini):
         # Simulation Timer.
         timer = Signal(32)
         self.sync += timer.eq(timer + 1)
+
+        # Device Gen 1x2 capability disabled at runtime (x2_enable = 0: Gen 1x1 negotiated with the
+        # PHY/Link built Gen 1x2 capable, as bench/usb3_lanes.py x2-disable).
+        if dev_x2_disable:
+            self.comb += phys["dev"].x2_enable.eq(0)
 
         # Host started late (PHY held in reset): the Device trains alone (ex: Device board loaded
         # first, its Polling.LFPS timing out to Compliance before the Host starts).
@@ -907,6 +914,7 @@ def main():
     parser.add_argument("--host-hot-reset", default=0, type=int, help="Host directed to N Hot Resets from U0 after the script, each one at the U0 entry after the previous one (back to U0 on both sides).")
     parser.add_argument("--host-deskew-clear", action="store_true", help="With --host-recovery --lanes 2: Host deskew cleared in Recovery.Idle (U0 entered without deskew).")
     parser.add_argument("--host-start-delay", default=0, help="Host PHY held in reset for N cycles (the Device trains alone first, ex: --timer-scale 100 --host-start-delay 600000: Device in Compliance).")
+    parser.add_argument("--dev-x2-disable", action="store_true", help="--lanes 2: Device Gen 1x2 capability disabled at runtime (x2_enable = 0): Gen 1x1 negotiated.")
     parser.add_argument("--host-port-reset", action="store_true", help="Host port reset policy: Warm Reset when U0 is not reached (bench/usb3_soc.py USB3HostPortReset).")
     parser.add_argument("--host-itp",      action="store_true", help="Host model Isochronous Timestamp Packets between the transfers.")
     parser.add_argument("--dev-pipe-cd",   action="store_true", help="Device LTSSM/Link Layer/Core at half the PIPE frequency (USB3PHY pipe_cd, 64-bit Link Layer words).")
@@ -955,6 +963,7 @@ def main():
         host_deskew_clear     = args.host_deskew_clear,
         host_start_delay      = int(args.host_start_delay),
         host_port_reset       = args.host_port_reset,
+        dev_x2_disable        = args.dev_x2_disable,
         host_burst_out        = int(args.host_burst_out),
         host_burst_len        = int(args.host_burst_len),
         host_burst_stream     = int(args.host_burst_stream),

@@ -70,6 +70,20 @@ def port_resets(port, csr_csv):
     bus.close()
     return count
 
+def x1_retrain(boards):
+    """Gen 1x2 not advertised on both boards (usb3_lanes_debug_control x2_enable = 0), both PHYs
+    retrained together: Gen 1x1 negotiated, with the same bitstreams."""
+    from litex import RemoteClient
+    buses = [RemoteClient(port=port, csr_csv=csr_csv) for port, csr_csv in boards]
+    for bus in buses:
+        bus.open()
+        control = bus.regs.usb3_lanes_debug_control.read()
+        bus.regs.usb3_lanes_debug_control.write(control & ~0x8)
+    for bus in buses: bus.regs.usb3_debug_phy_reset.write(1)
+    for bus in buses: bus.regs.usb3_debug_clear.write(1)
+    for bus in buses[::-1]: bus.regs.usb3_debug_phy_reset.write(0)
+    for bus in buses: bus.close()
+
 def core_counters(port, csr_csv):
     """Device Core counters (8-bit saturating Recovery causes decoded), None if not reachable."""
     from litex import RemoteClient
@@ -167,6 +181,7 @@ def main():
     parser.add_argument("--device-port",     default=1241,   type=int, help="Device litex_server port.")
     parser.add_argument("--loads",           default=20,     type=int, help="Bitstream loads.")
     parser.add_argument("--runs",            default=20,     type=int, help="Scripted host runs per load.")
+    parser.add_argument("--x1",              action="store_true", help="Gen 1x1: Gen 1x2 not advertised on both boards after each load (runtime control), both retrained.")
     parser.add_argument("--settle",          default=2.0,    type=float, help="Time (s) after the servers start.")
     parser.add_argument("--out",             default=None,   help="Results (JSON lines, appended; default: build/hw_runs/<time>/loads.jsonl).")
     parser.add_argument("--summary",         default=None,   help="Only print the summary of a results file.")
@@ -204,6 +219,9 @@ def main():
                 r["error"] = "servers"
             if "error" not in r:
                 time.sleep(args.settle)
+                if args.x1:
+                    x1_retrain([(args.host_port, host_csr), (args.device_port, device_csr)])
+                    time.sleep(args.settle)
                 idents = [ident(args.host_port, host_csr), ident(args.device_port, device_csr)]
                 run(lanes + host_args + ["clear"])
                 run(lanes + dev_args  + ["clear"])

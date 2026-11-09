@@ -579,6 +579,10 @@ class USB3PHY(LiteXModule):
         self.ssp  = ssp = SSPPolling(sys_clk_freq, timer_scale=timer_scale,
             x2_capable   = x2_capable,
             gen2_capable = gen2_capable)
+        # Gen 1x2 advertised (runtime: 0 forces Gen 1x1 from the next SuperSpeedPlus Polling, ex:
+        # tests of the Gen 1x1 operation with a partner x2 capable; x2_capable is the maximum).
+        self.x2_enable = Signal(reset=1) # i
+        self.comb += ssp.x2_capable.eq(int(x2_capable) & self.x2_enable)
         self.x2   = Signal() # o: Gen X2 (two lanes) negotiated.
         self.gen2 = Signal() # o: Gen 2 (10Gbps) negotiated.
         self.comb += [
