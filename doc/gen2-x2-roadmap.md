@@ -10,6 +10,23 @@ errors, lanes swap, single lane fallback, unplug/replug) and the Device Core wit
 in gateware (400/400 runs over 20 bitstream loads); not yet with a USB host (Type-C breakout, Gen 1x2
 host: [M1](#gen-1x2-hardware-milestones)). **Gen 2x2** (2x10Gbps): not started.
 
+Gen 1x2 status (experimental, following [issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140)):
+
+| | Simulation (`sim.py --lanes 2`) | Hardware: two LiteX Acorn Baseboard Minis + Acorn CLE-215+ (Artix7 GTP), SFP DAC cables, one board in each role |
+|---|---|---|
+| PHY (`USB3PHY(lanes=2)`) | SuperSpeedPlus Polling (SCD/LBPM) with Gen 1x2 negotiated, lanes deskew/striping, per lane scramblers/polarity, lanes swap (plug orientation), single lane fallback, Hot Reset, Recovery | PRBS Link-Layer stand-ins: 610MB/s per direction without errors, retrains, lanes swap, unplug/replug, 20/20 bitstream loads; single lane fallback (Gen 1x1) |
+| Link Layer/Device Core | SuperSpeedPlus at Gen 1x2 (`USB3PHYX2Link`: 4-bit sequence numbers, Type 1/Type 2 credits, packets at any symbol position), SuperSpeed at Gen 1x1 | Scripted USB host in gateware on the other board (enumeration-like control transfers, Bulk loopback, data checked): 400/400 runs over 20 bitstream loads, no Link Layer Recovery/LBAD/retry |
+| With a USB host | | Not yet: SFP2USB adapter (Gen 1x1), dual SFP to USB-C breakout (in preparation) and a Gen 1x2 host |
+
+```sh
+$ ./sim.py --lanes 2 --lanes-core              # Gen 1x2: Host model <-> two lanes <-> Device Core (SuperSpeedPlus).
+$ ./bench/acorn.py --lanes 2 --role host   --lanes-core --with-jtagbone --output-dir build/acorn_x2_host_script --build
+$ ./bench/acorn.py --lanes 2 --role device --lanes-core --example loopback --with-jtagbone --output-dir build/acorn_x2_device_core --build
+$ ./bench/acorn_x2_loads.py --host-build build/acorn_x2_host_script --device-build build/acorn_x2_device_core --loads 20 --runs 20
+```
+
+Procedure and results: [gen1x2-hardware-validation.md](gen1x2-hardware-validation.md).
+
 This document lists what Gen 2x1 (SuperSpeedPlus 10Gbps, 128b/132b, one lane) and Gen 1x2
 (SuperSpeedPlus 2x5Gbps, 8b/10b, two lanes) require, layer by layer, what was done and found during
 the Gen 2x1 bring-up and what remains. References are to the USB 3.2 specification (Rev 1.1). PHY and
