@@ -26,7 +26,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
 - `master`: tracks `enjoy-digital/usb3_pipe` master.
 - `usb3.2-gen1-x2`: Gen 1x2 work (was `claude/usb3-pipe-proposal-vn9kxn`, upstream PR #152, closed
   by the maintainer: "explore 2 x 5 Gbps in a fork for now, discuss later if it works and is
-  useful"). Develop here, merge `upstream/master` regularly (merge commits, no rebase).
+  useful"). Develop here, merge `upstream/master` regularly (merge commits, no rebase). One
+  exception (2026-11-09, user request): the history was rewritten once so that a single commit
+  changes `README.md` since upstream master (force pushed).
 - `fix/hot-reset-exit-rx-idle-spikes` (worktree `../usb3_pipe_upstream`): the general fixes from the
   Gen 1x2 work rebased on upstream master (HotReset.Active exit, RX idle filter spikes), upstream
   PR [enjoy-digital/usb3_pipe#173](https://github.com/enjoy-digital/usb3_pipe/pull/173).
