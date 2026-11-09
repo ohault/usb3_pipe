@@ -565,10 +565,50 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     # Lanes Debug (with the USB3PHYX2Link RX buffer overflow/drops) --------------------------------
     soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes, link=usb3_link)
 
+    # Host Port Reset (Host role: Warm Reset when U0 is not reached, as the host software) --------
+    if role == "host":
+        soc.usb3_port_reset = USB3HostPortReset(usb3_phy, sys_clk_freq=sys_clk_freq)
+
     # Leds -----------------------------------------------------------------------------------------
     status = usb3_phy.lane_swap if (with_core and not host_script) else usb3_phy.x2
     for led, signal in zip(leds, [usb3_phy.ready, usb3_phy.u0, status]):
         soc.comb += led.eq(~signal if leds_inverted else signal)
+
+# USB3 Host Port Reset ----------------------------------------------------------------------------
+
+class USB3HostPortReset(LiteXModule):
+    """Host port reset policy (as the host software resetting its port, xHCI PORTSC Warm Port
+    Reset): a Warm Reset directed to the LTSSM (Downstream Port) when U0 is not reached for timeout
+    seconds, the request held until the WarmReset state (or dropped on U0: a link in U0 is never
+    reset). A Device left in Compliance (Polling.LFPS timeout before the Host started, ex: the
+    Device board loaded first) only leaves it on a Warm Reset (7.5.5.2)."""
+    def __init__(self, phy, sys_clk_freq=125e6, timeout=0.5):
+        from litex.soc.interconnect.csr import CSRStorage, CSRStatus, CSRField
+        from migen.genlib.misc import WaitTimer
+        self._control = CSRStorage(fields=[
+            CSRField("enable", size=1, offset=0, reset=1, description="Warm Reset when U0 is not reached."),
+        ])
+        self._count = CSRStatus(32, description="Warm Resets requested count.")
+
+        # # #
+
+        timer      = WaitTimer(int(timeout*sys_clk_freq))
+        requesting = Signal()
+        in_warm    = Signal()
+        self.submodules += timer
+        self.comb += in_warm.eq(phy.ltssm_state == phy.ltssm_states["WarmReset"])
+        self.comb += [
+            timer.wait.eq(self._control.fields.enable & ~phy.u0 & ~requesting & ~in_warm),
+            phy.warm_reset_req.eq(requesting),
+        ]
+        self.sync += [
+            If(phy.u0 | in_warm | ~self._control.fields.enable,
+                requesting.eq(0)
+            ).Elif(timer.done & ~requesting,
+                requesting.eq(1),
+                self._count.status.eq(self._count.status + 1),
+            )
+        ]
 
 # USB3 Scripted Host -------------------------------------------------------------------------------
 

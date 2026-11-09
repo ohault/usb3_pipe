@@ -331,7 +331,7 @@ class USB3PIPESim(SoCMini):
         lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096, prbs_gap_bits=4, dev_mode="x2",
         lanes_crossed=False, lanes_tx_shift=0, lanes_tx_inverted=False, gen2_capable=False, gen2=False,
         link_words=1, dev_pipe_cd=False, dev_u1u2=True, gen2_data_width=None, host_recovery=False,
-        host_hot_reset=0, host_deskew_clear=False,
+        host_hot_reset=0, host_deskew_clear=False, host_start_delay=0, host_port_reset=False,
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
         host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None):
@@ -572,6 +572,31 @@ class USB3PIPESim(SoCMini):
         # Simulation Timer.
         timer = Signal(32)
         self.sync += timer.eq(timer + 1)
+
+        # Host started late (PHY held in reset): the Device trains alone (ex: Device board loaded
+        # first, its Polling.LFPS timing out to Compliance before the Host starts).
+        if host_start_delay:
+            host_held = Signal(reset=1)
+            self.sync += If(host_held & (timer == int(host_start_delay)),
+                Display("[%08d] HOST started", timer),
+                host_held.eq(0),
+            )
+            self.comb += phys["host"].reset.eq(host_held)
+
+        # Host port reset policy (bench/usb3_soc.py USB3HostPortReset: Warm Reset when U0 is not
+        # reached, as the host software), timeout scaled with the LTSSM timers.
+        if host_port_reset:
+            import sys as _sys
+            _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench"))
+            from usb3_soc import USB3HostPortReset
+            self.host_port_reset = USB3HostPortReset(phys["host"], sys_clk_freq=sys_clk_freq,
+                timeout=0.5/timer_scale)
+            port_reset_d = Signal()
+            self.sync += [
+                port_reset_d.eq(phys["host"].warm_reset_req),
+                If(phys["host"].warm_reset_req & ~port_reset_d,
+                    Display("[%08d] HOST port reset (Warm Reset requested)", timer)),
+            ]
 
         # Simulation Status.
         for name, ltssm in ltssms.items():
@@ -881,6 +906,8 @@ def main():
     parser.add_argument("--host-recovery", action="store_true", help="Host directed to Recovery from U0 after the script (back to U0 on both sides).")
     parser.add_argument("--host-hot-reset", default=0, type=int, help="Host directed to N Hot Resets from U0 after the script, each one at the U0 entry after the previous one (back to U0 on both sides).")
     parser.add_argument("--host-deskew-clear", action="store_true", help="With --host-recovery --lanes 2: Host deskew cleared in Recovery.Idle (U0 entered without deskew).")
+    parser.add_argument("--host-start-delay", default=0, help="Host PHY held in reset for N cycles (the Device trains alone first, ex: --timer-scale 100 --host-start-delay 600000: Device in Compliance).")
+    parser.add_argument("--host-port-reset", action="store_true", help="Host port reset policy: Warm Reset when U0 is not reached (bench/usb3_soc.py USB3HostPortReset).")
     parser.add_argument("--host-itp",      action="store_true", help="Host model Isochronous Timestamp Packets between the transfers.")
     parser.add_argument("--dev-pipe-cd",   action="store_true", help="Device LTSSM/Link Layer/Core at half the PIPE frequency (USB3PHY pipe_cd, 64-bit Link Layer words).")
     parser.add_argument("--gen2-data-width", default=None, type=int, help="Gen 2 raw words width of the SerDes models (default: 40, ex: 80 as GW5 GTR12 1:4 at 125MHz).")
@@ -926,6 +953,8 @@ def main():
         host_recovery         = args.host_recovery,
         host_hot_reset        = args.host_hot_reset,
         host_deskew_clear     = args.host_deskew_clear,
+        host_start_delay      = int(args.host_start_delay),
+        host_port_reset       = args.host_port_reset,
         host_burst_out        = int(args.host_burst_out),
         host_burst_len        = int(args.host_burst_len),
         host_burst_stream     = int(args.host_burst_stream),

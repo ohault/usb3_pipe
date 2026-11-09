@@ -462,6 +462,29 @@ class TestPHYX2Core(unittest.TestCase):
             self.assertRegex(after, side + r"\s*entering U0 state", tail)
             self.assertNotRegex(out, side + r"\s*entering eSS.Inactive", tail)
 
+    def check_compliance_exit(self, name, args):
+        # Device started alone (Host PHY held in reset longer than tPollingLFPSTimeout, as a Device
+        # board loaded before the Host board): Device in Compliance (without the Host Polling.LFPS
+        # its Configuration Lane is not known), Host port reset policy: Warm Reset when U0 is not
+        # reached, detected by the Device on the physical lane of the Host Configuration Lane
+        # (crossed lanes: lanes swap in Compliance), both back to U0, script done.
+        out = self.run_sim(name, ["--lanes-crossed", "--lanes-tx-inverted", "--timer-scale", "100",
+            "--host-start-delay", "600000", "--host-port-reset", "--max-cycles", "6000000"] + args)
+        tail = "\n---- tail ----\n" + out[-4000:]
+        self.assertRegex(out, r"DEV\s*entering Compliance state", tail)
+        self.assertIn("HOST port reset", out, tail)
+        self.assertRegex(out, r"DEV\s*entering WarmReset state", tail)
+        self.assertRegex(out, r"DEV\s*lanes swap: 1", tail)
+        return out
+
+    def test_core_x2_compliance_exit(self):
+        self.check_compliance_exit("core_x2_compliance", ["--dev-mode", "x2"])
+
+    def test_core_x1_compliance_exit(self):
+        # Device not x2 capable (Gen 1x1 negotiated after the Warm Reset).
+        out = self.check_compliance_exit("core_x1_compliance", ["--dev-mode", "x1"])
+        self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 0, gen2: 0\)")
+
     def test_core_x2_tx_shift(self):
         # Gen 1x2 with the Host/Device TX packets delayed by 3 symbols: packets starting on Lane 1,
         # at any symbol position of the 64-bit words (LanesPacketAligner).

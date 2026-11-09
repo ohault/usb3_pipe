@@ -527,7 +527,11 @@ class USB3PHY(LiteXModule):
             pipes.append(pipe)
         self.ltssm = ltssm = USB3LTSSM(sys_clk_freq=sys_clk_freq, timer_scale=timer_scale, ssp=True)
         self.comb += ltssm.ds_port.eq(role == "host")
-        self.comb += lane_swap_unit.enable.eq(ltssm.ssp_polling)
+        # Configuration Lane detection in the SuperSpeedPlus Polling, and in Compliance: a Device
+        # timed out to Compliance before receiving the partner's Polling.LFPS (partner not started
+        # yet) only leaves it on a Warm Reset LFPS, sent by the Host on its Configuration Lane: the
+        # lanes swap follows it, the Warm Reset is then detected on (logical) Lane 0.
+        self.comb += lane_swap_unit.enable.eq(ltssm.ssp_polling | ltssm.compliance)
 
         # Lane 0 (Configuration Lane): LTSSM <-> PIPE, TS/Idle status combined with Lane 1 below.
         self.comb += connect_ltssm_pipe(ltssm, pipes[0], with_rx_ts_status=False)
