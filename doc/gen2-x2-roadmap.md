@@ -3,7 +3,7 @@
 **Status**: **Gen 1x1** (SuperSpeed, 5Gbps) and **Gen 2x1** (SuperSpeedPlus, 10Gbps) work on hardware
 (Gen 2x1 on UltraScale+ GTY: enumeration, Bulk transfers up to ~880MB/s, full duplex, see the
 [hardware milestones](#gen-2x1-hardware-milestones); on Gowin GW5AST-138B GTR12: in bring-up, [next
-steps](#next-steps)). **Gen 1x2** (2x5Gbps, ohault/usb3_pipe fork): PHY and SuperSpeedPlus Link
+steps](#next-steps)). **Gen 1x2** (2x5Gbps, experimental): PHY and SuperSpeedPlus Link
 Layer/Device Core done in simulation; on hardware between two LiteX Acorn Baseboard Minis (Artix7
 GTP, SFP DAC cables, one board in each role): PHY validated (PRBS at 610MB/s per direction without
 errors, lanes swap, single lane fallback, unplug/replug) and the Device Core with a scripted USB host

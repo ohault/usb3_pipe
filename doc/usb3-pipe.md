@@ -143,7 +143,7 @@ $ pytest test -m slow            # Long simulations (Verilator), not run by defa
 
 - Hardware: Gen 1x1 on Artix7 GTP, UltraScale+ GTY and Gowin GW5AST/GW5AT GTR12 (Kintex7 GTX
   build-tested); Gen 2x1 on UltraScale+ GTY (validated) and Gowin GW5AST GTR12 (bring-up,
-  [targets.md](targets.md)). Gen 1x2 (`lanes=2`, ohault/usb3_pipe fork): on Artix7 GTP between two
+  [targets.md](targets.md)). Gen 1x2 (`lanes=2`, experimental): on Artix7 GTP between two
   LiteX Acorn Baseboard Minis (SFP DAC cables, one board in each role: PHY and Device Core with a
   scripted host validated), not yet with a USB host
   ([gen1x2-hardware-validation.md](gen1x2-hardware-validation.md)); Gen 2x2: not started

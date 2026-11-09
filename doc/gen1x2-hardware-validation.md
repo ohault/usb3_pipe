@@ -36,7 +36,7 @@ board and no DAC cable, and can be run first.
 A fourth part runs the same Device Core at Gen 1x2 (SuperSpeedPlus, both lanes) with a Gen 1x2
 capable host through the dual SFP to USB-C breakout
 ([Gen 1x2 Device Core With a Gen 1x2 Host](#gen-1x2-device-core-with-a-gen-1x2-host-dual-sfp-to-usb-c-breakout)):
-it needs the breakout (`dual-sfp2usbc-breakout` branch, `hardware/sfp2usbc/`) and such a host.
+it needs the breakout (in preparation) and such a host.
 
 | Part | Boards | Link partner | Link Layer | Simulation |
 |------|--------|--------------|------------|------------|
@@ -406,7 +406,7 @@ credits) on the striped lanes, 64-bit Bulk endpoints. Simulation: `sim.py --lane
 
 Hardware:
 - The Acorn Mini with the dual SFP to USB-C breakout: Lane 0 on SFP-0 (TX1/RX1, CC1 orientation),
-  Lane 1 on SFP-1, Rd on CC1/CC2 (Device), no USB 2.0 ([breakout README](https://github.com/ohault/usb3_pipe/tree/dual-sfp2usbc-breakout/hardware/sfp2usbc)).
+  Lane 1 on SFP-1, Rd on CC1/CC2 (Device), no USB 2.0.
 - A USB 3.2 x2 capable host (ex: ASMedia ASM3242 based Gen 2x2 PCIe card; Gen 1x2 support to check
   in its specification), a USB-C to USB-C cable rated for USB 3.2 x2 (both SuperSpeed pairs wired,
   ex: USB 3.2 Gen 2x2/20Gbps or USB4 cable), Linux (the negotiated lanes are in the sysfs).

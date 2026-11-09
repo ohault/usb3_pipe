@@ -34,7 +34,7 @@ Method: https://github.com/enjoy-digital/litex/wiki/Debug-A-SoC-On-Hardware (che
 traces, narrow LiteScope captures). `litex_mcp` gives the same loop as MCP tools (CSRs by name,
 LiteScope captures, builds with parsed timing, simulation): https://github.com/enjoy-digital/litex/wiki/LiteX-for-AI-Agents#drive-a-soc-through-mcp.
 
-## Gen 1x2 (ohault/usb3_pipe fork)
+## Gen 1x2 (experimental)
 
 - `usb3_pipe/lanes.py`, `USB3PHY(lanes=2)`, the `USB3PHYX1Link`/`USB3PHYX2Link` adapters in
   `usb3_pipe/phy.py` (Gen 1x1 on the Configuration Lane/SuperSpeedPlus at Gen 1x2 for the Device
