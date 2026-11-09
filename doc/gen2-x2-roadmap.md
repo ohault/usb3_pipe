@@ -354,8 +354,8 @@ $ ./bench/acorn.py --lanes 2 --role device --with-jtagbone --output-dir build/ac
 $ ./bench/usb3_lanes.py --port 1234 --csr-csv build/acorn_x2_host/csr.csv status   # x2, deskew, U0.
 $ ./bench/usb3_lanes.py --port 1235 --csr-csv build/acorn_x2_device/csr.csv prbs --duration 60
 $ ./bench/usb3_lanes.py --port 1235 --csr-csv build/acorn_x2_device/csr.csv retrain --wait 2
-# Single lane fallback: Device board rebuilt with --no-x2.
-$ ./bench/acorn.py --lanes 2 --role device --no-x2 --with-jtagbone --output-dir build/acorn_x1_device --build --load
+# Single lane fallback: Gen 1x2 not advertised by the Device (runtime control), retrain.
+$ ./bench/usb3_lanes.py --port 1235 --csr-csv build/acorn_x2_device/csr.csv x2-disable --wait 2
 ```
 
 To check on hardware: SuperSpeedPlus Polling (SCD1/SCD2, LBPM) with Gen 1x2 negotiated (`x2`), link

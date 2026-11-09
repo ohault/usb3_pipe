@@ -228,7 +228,8 @@ Gen 2 section (XCKU3P).
 - `--role host --lanes-core`: a scripted USB host in gateware (link initialization, enumeration-like
   control transfers, Bulk loopback with the Bulk IN data checked) for a Device board running
   `loopback` (`bench/usb3_lanes.py script --runs N`, `bench/acorn_x2_loads.py`: N bitstream loads x
-  runs); with `--no-x2`: SuperSpeed script, Gen 1x1 negotiated.
+  runs); SuperSpeedPlus or SuperSpeed script for the negotiated link (Gen 1x1: `usb3_lanes.py
+  x2-disable`, `acorn_x2_loads.py --x1`).
 
 See [gen1x2-hardware-validation.md](gen1x2-hardware-validation.md).
 

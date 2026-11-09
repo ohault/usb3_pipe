@@ -226,8 +226,9 @@ one `litex_server` per board (`bench/acorn_ftdi.py --location <loc> server --por
   without deskew), `lane_idle_u0` (a lane in electrical idle for 10us), `realign_u0` (a lane comma
   realignment or RX re-initialization in U0); per lane `rx_buferror`, `rx_realign` (transceiver
   comma realignments), `rx_errors_reinit` (RX re-initializations on continuous decode errors),
-  RX idle cycles in U0. `clear` clears them. `idle-recovery-*`/`rx-reinit-*`: debug controls (A/B
-  tests on a loaded bitstream).
+  RX idle cycles in U0. `clear` clears them. `x2-disable`/`x2-enable`: Gen 1x2 advertised or not
+  (then retrain: Gen 1x1 with the same bitstreams). `idle-recovery-*`/`rx-reinit-*`: debug
+  controls (A/B tests on a loaded bitstream).
 - Scripted host (`--role host --lanes-core`): `usb3_lanes.py script --runs N` (one JSON line per run:
   done/error/timeout, failing step and script section); Device Core counters
   (`usb3_core_recovery_cause`: last cause and per cause counts, `usb3_core_rx_lbad`,

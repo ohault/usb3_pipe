@@ -76,11 +76,9 @@ One bitstream per role (Vivado), JTAGBone for the CSRs:
 ./bench/acorn.py --lanes 2 --role device --with-jtagbone --output-dir build/acorn_x2_device --build
 ```
 
-For the single lane fallback test (test 5), a Device without the x2 capability:
-
-```sh
-./bench/acorn.py --lanes 2 --role device --no-x2 --with-jtagbone --output-dir build/acorn_x1_device --build
-```
+The same bitstreams run at Gen 1x1: the Gen 1x2 capability advertised in the SuperSpeedPlus Polling
+is a runtime control (`usb3_lanes.py x2-disable`/`x2-enable`, then retrain), `--no-x2` (built not x2
+capable) is not needed for the tests.
 
 Optional: `--lpm-hold rxeq` (GTP LPM adaptation only in Polling.RxEQ), `--with-analyzer
 --analyzer-group link` (LiteScope probes on Lane 0).
@@ -198,14 +196,13 @@ back straight after this test.
 
 ### 5. Single lane fallback (Gen 1x1 negotiated)
 
-Load `build/acorn_x1_device` (built with `--no-x2`) on the Device board, use its CSRs:
+Gen 1x2 not advertised by the Device (runtime control, then retrain), PRBS at Gen 1x1:
 
 ```sh
-./bench/acorn_ftdi.py --location <dev_location>  load build/acorn_x1_device/gateware/sqrl_acorn.bit
-D1="--port 1241 --csr-csv build/acorn_x1_device/csr.csv"
-./bench/usb3_lanes.py $D1 status
-./bench/usb3_lanes.py $D1 prbs --duration 60
+./bench/usb3_lanes.py $D x2-disable --wait 2
+./bench/usb3_lanes.py $D prbs --duration 60
 ./bench/usb3_lanes.py $H status
+./bench/usb3_lanes.py $D x2-enable --wait 2       # Back to Gen 1x2.
 ```
 
 Pass: `x2: 0` on both boards (Gen 1x1 negotiated in the LBPM PHY Capability exchange), U0 on SFP-0
@@ -322,21 +319,21 @@ for i in $(seq 20); do ./bench/usb3_lanes.py $D2 retrain --wait 2; ./bench/usb3_
 Pass: all the runs `done` after each retrain (the script restarts from the link initialization on
 each run), no `rx_overflow`.
 
-### 10b. Gen 1x1 Device Core (Host not Gen 1x2 capable)
+### 10b. Gen 1x1 Device Core
 
-The same Device board (`loopback`, Gen 1x2 capable), a Host board built with `--no-x2`: Gen 1x1
+The same bitstreams, Gen 1x2 not advertised (runtime control on both boards, `--x1`): Gen 1x1
 negotiated in the SuperSpeedPlus Polling (as with a Gen 1x1 USB host), the Device Core in SuperSpeed
-operation on its Configuration Lane, the scripted host running the SuperSpeed script (3-bit Header
-Sequence Numbers, `usb3_script_ssp: 0`):
+operation on its Configuration Lane, the scripted host running its SuperSpeed script (3-bit Header
+Sequence Numbers, `usb3_script_ssp: 0`; both scripts are in the scripted host, the run uses the one
+of the negotiated link):
 
 ```sh
-./bench/acorn.py --lanes 2 --role host --lanes-core --no-x2 --with-jtagbone --output-dir build/acorn_x1_host_script --build
-./bench/acorn_x2_loads.py --host-build build/acorn_x1_host_script --device-build build/acorn_x2_device_core \
+./bench/acorn_x2_loads.py --x1 --host-build build/acorn_x2_host_script --device-build build/acorn_x2_device_core \
     --loads 20 --runs 20 --out build/hw_runs/<name>/loads.jsonl
 ```
 
-Pass: as test 8, `x2: 0` on both boards (`sim.py --lanes 2 --lanes-core --dev-mode x1
---no-host-skp`, `TestPHYX2Core.test_core_x1_data`).
+Pass: as test 8, `x2: 0` on both boards (`sim.py --lanes 2 --lanes-core --dev-x2-disable
+--no-host-skp`, `TestPHYX2Core.test_core_x1_runtime`).
 
 ## Single Board With a USB 3 Host (SFP2USB Adapter)
 
@@ -485,6 +482,7 @@ Summary (latest builds, crossed cables):
 | PHY, PRBS (tests 1-6) | Validated: 610MB/s per direction without errors, retrains, lanes swap, unplug/replug, 20/20 bitstream loads good. Single lane fallback (test 5): with both PHYs retrained together (a Device not x2 capable starting alone times out to Compliance: open). |
 | Device Core at Gen 1x2, scripted host (tests 7-9) | Validated: 400/400 runs over 20 bitstream loads, no Device Link Layer Recovery, LBAD or retry during the runs. |
 | Device Core at Gen 1x2, Compliance exit (`daa2451`) | 400/400 runs over 20 loads; Host port resets (Warm Reset, Device out of Compliance) on 2 loads. |
+| One Host/one Device bitstream (`3a208f9`, Gen 1x1 by the runtime control) | Gen 1x2: 340/400 (17/20 loads 20/20); Gen 1x1 (`--x1`): 280/400 (14/20 loads 20/20). The other loads never reach U0, both modes (open): the Host Configuration Lane receives the Device Polling LFPS chopped (counted as Ping/U1 exit LFPS, its electrical idle detection toggling: 358106 transitions in 3s), the Device hears the Host; the Warm Resets loop every 600ms (Device Polling.LFPS -> Compliance -> Warm Reset). Load and build dependent (Host build WNS +0.002ns). |
 | Soak (test 10), Gen 1x2 (`daa2451`) | 10000/10000 runs on one load, no error/timeout (1 Warm Reset at the start, 207 runs restarted with a Hot Reset; Device Link Layer: 1189 Recovery requests, 1 LBAD, 0 retry during the runs). |
 | Device Core at Gen 1x1 (test 10b, `daa2451`) | 349/400 runs: 16/20 loads 20/20 (2 Warm Resets each: Device out of Compliance), 2 loads 14-15/20, 2 loads without U0 after 74 Warm Resets (open). Before the Compliance fix (`50681d4`): 200/400, alternating loads. |
 | Single lane fallback (test 5), `50681d4` | Before the Compliance fix: 6/10 loads (both boards retrained together), PRBS 303MB/s per direction without errors; 4/10 Device in Compliance. |

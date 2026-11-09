@@ -73,12 +73,16 @@ $ ./bench/acorn_x2_loads.py --host-build build/acorn_x2_host_script --device-bui
   on the Lane 0 Quad PLL and TX clock (lanes TX in lockstep). Mini only (both SFP cages in the same
   GTP quad).
 - `--role host|device`: USB3PHY role (two boards, one in each role, SFP DAC cables; Rx.Detect is not
-  modelled: both start in Polling). `--no-x2`: Gen 1x2 not advertised (Gen 1x1 negotiated, single
-  lane fallback on the Configuration Lane).
+  modelled: both start in Polling). Gen 1x2 advertised by default, disabled at runtime
+  (`usb3_lanes.py x2-disable`, then retrain: Gen 1x1 negotiated, single lane fallback on the
+  Configuration Lane); `--no-x2`: built not x2 capable.
 - Without `--lanes-core`: 64-bit PRBS Link-Layer stand-ins (`bench/usb3_lanes.py prbs`). With
   `--lanes-core`: Device: the USB3 Device Core example (`--example`: SuperSpeedPlus at Gen 1x2 with
   `loopback`/`wishbone`/`bench`, Gen 1x1 otherwise); Host: a scripted USB host in gateware
-  (`bench/usb3_lanes.py script`, SuperSpeed script with `--no-x2`).
+  (`bench/usb3_lanes.py script`: SuperSpeedPlus and SuperSpeed scripts, the run on the one of the
+  negotiated link). The Host board directs a Warm Reset when U0 is not reached for 0.5s
+  (`USB3HostPortReset`: a Device left in Compliance). One Host and one Device bitstream for the Gen
+  1x2 and Gen 1x1 tests (`bench/acorn_x2_loads.py --x1`).
 - Several boards on one host: `bench/acorn_ftdi.py list|load|server` (each board selected by the USB
   location of its baseboard FTDI). `bench/acorn_x2_loads.py`: both boards loaded N times, scripted
   host runs on each load, PHY/lanes status and Device Core counters, summary (a Gen 1x2 build behaves
