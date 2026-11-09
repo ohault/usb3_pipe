@@ -10,7 +10,7 @@ errors, lanes swap, single lane fallback, unplug/replug) and the Device Core wit
 in gateware (400/400 runs over 20 bitstream loads); not yet with a USB host (Type-C breakout, Gen 1x2
 host: [M1](#gen-1x2-hardware-milestones)). **Gen 2x2** (2x10Gbps): not started.
 
-Gen 1x2 status (experimental, following [issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140)):
+Gen 1x2 status (experimental):
 
 | | Simulation (`sim.py --lanes 2`) | Hardware: two LiteX Acorn Baseboard Minis + Acorn CLE-215+ (Artix7 GTP), SFP DAC cables, one board in each role |
 |---|---|---|
@@ -328,7 +328,7 @@ needed a host port power cycle: capability changes between trainings are a test-
 Hardware: two LiteX Acorn Baseboard Minis (Acorn CLE-215+, Artix7 GTP), SFP-0 <-> SFP-0 and SFP-1 <->
 SFP-1 with two SFP DAC cables (both SFP cages are in the same GTP quad), then a dual SFP to USB-C
 breakout (two SFP cages, both SuperSpeed lane pairs routed to the USB-C connector) and a Gen 1x2
-capable host ([issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140)).
+capable host.
 
 **M0: two-lane link between two boards** (done: PHY and Device Core with a scripted host validated
 on hardware, [the results](gen1x2-hardware-validation.md#results-two-boards-2026-11-08)): the same

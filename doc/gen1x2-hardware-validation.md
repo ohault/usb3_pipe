@@ -2,8 +2,7 @@
 
 Hardware validation of the USB 3.2 Gen 1x2 PHY (`USB3PHY(lanes=2)`), first between two boards, one
 in the Host role and one in the Device role, without a Gen 1x2 USB host or a USB Type-C breakout
-([Gen 1x2 hardware milestones](gen2-x2-roadmap.md#gen-1x2-hardware-milestones), M0,
-[issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140)), then with USB hosts through
+([Gen 1x2 hardware milestones](gen2-x2-roadmap.md#gen-1x2-hardware-milestones), M0), then with USB hosts through
 the SFP2USB adapter and the dual SFP to USB-C breakout. The two boards tests run in simulation with
 `sim.py --lanes 2` (`test/test_phy.py` `TestPHYX2`).
 
@@ -463,8 +462,7 @@ control timers): entries/exits in the `usb3_debug.py` counters, transfers still 
 
 ## Report
 
-Results to report (in [issue #140](https://github.com/enjoy-digital/usb3_pipe/issues/140) or with the
-branch), per test and per board:
+Results to report, per test and per board:
 - `status` JSON (LTSSM state, x2, deskew/lanes swap, per lane ready/RX idle/RX polarity, counters,
   `rx_overflow`/`rx_drop` with the `--lanes-core` Gen 1x2 builds).
 - `prbs` final JSON (rates, errors, recoveries).
