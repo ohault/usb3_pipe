@@ -240,20 +240,35 @@ class USB3HostModel(LiteXModule):
                 value  |= (v & ((1 << w) - 1)) << offset
                 offset += w
             return value
-        mem  = Memory(width, len(script) + 1,
-            init = [encode(s) for s in script] + [encode((OP_END, 0, 0, 0, 0, 0))])
-        port = mem.get_port(async_read=True)
-        self.specials += mem, port
-        self.step  = step = Signal(max=len(script) + 1) # o: Current step (failing step on error).
+        end  = encode((OP_END, 0, 0, 0, 0, 0))
+        mem  = Memory(width, len(script) + 2, init=[encode(s) for s in script] + [end, end])
+        self.step  = step = Signal(max=len(script) + 2) # o: Current step (failing step on error).
         self.start = Signal(max=len(script) + 1)        # i: First step of a run (several scripts
                                                         #    in the ROM, each ended by OP_END).
+        # Registered ROM reads (timing: the step decode, compare and next step logic start from a
+        # register, not from a large asynchronous ROM): one port reads the step, the other the
+        # next one. The step only advances by 1 (or is reloaded with start while the model is
+        # disabled, many cycles), so the current step entry is the next one read in the previous
+        # cycle when the step just advanced, else the step one.
+        port_cur  = mem.get_port()
+        port_next = mem.get_port()
+        self.specials += mem, port_cur, port_next
+        step_d   = Signal.like(step)
+        advanced = Signal()
+        self.sync += step_d.eq(step)
+        self.comb += [
+            port_cur.adr.eq(step),
+            port_next.adr.eq(step + 1),
+            advanced.eq(step != step_d),
+        ]
+        dat_r = Signal(width)
+        self.comb += dat_r.eq(Mux(advanced, port_next.dat_r, port_cur.dat_r))
         fields = {}
         offset = 0
         for name, w in layout:
             fields[name] = Signal(w, name=f"script_{name}")
-            self.comb += fields[name].eq(port.dat_r[offset:offset + w])
+            self.comb += fields[name].eq(dat_r[offset:offset + w])
             offset += w
-        self.comb += port.adr.eq(step)
 
         # RX logging.
         self.comb += sink.ready.eq(1)
