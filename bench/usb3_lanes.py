@@ -236,8 +236,10 @@ def main():
             return name if ssp else f"ss:{name}"
         results = {"done": 0, "error": 0, "timeout": 0}
         for run in range(args.runs):
-            lanes.reg("usb3_script_control").write(0)
-            lanes.reg("usb3_script_control").write(1)
+            # Run restart (enable 0 -> 1), the other control bits kept (idle_init).
+            control = lanes.reg("usb3_script_control").read()
+            lanes.reg("usb3_script_control").write(control & ~1)
+            lanes.reg("usb3_script_control").write(control | 1)
             start = time.time()
             last  = 0 # Last step seen (the step is reset with the model when the link leaves U0).
             while True:
@@ -254,7 +256,7 @@ def main():
             results[result] += 1
             print(json.dumps({"run": run, "result": result, "step": step, "section": section(step),
                 "time_ms": round(1e3*(time.time() - start), 1)}), flush=True)
-        lanes.reg("usb3_script_control").write(0)
+        lanes.reg("usb3_script_control").write(lanes.reg("usb3_script_control").read() & ~1)
         status = lanes.status()
         resets = {"resets_csr": lanes.reg("usb3_script_resets").read()} if hasattr(bus.regs, "usb3_script_resets") else {}
         if hasattr(bus.regs, "usb3_script_ss_start"):
