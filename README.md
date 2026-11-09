@@ -31,7 +31,7 @@ or an external USB controller/FIFO ([FTDI FT60X](https://ftdichip.com/products/f
 | Enumeration | SuperSpeed (5000M) | SuperSpeedPlus (10000M), SuperSpeedPlus BOS capability | SuperSpeed (5000M) | SuperSpeedPlus at Gen 1x2 with a scripted USB host in gateware on the other board (enumeration-like control transfers); not yet with a USB host |
 | Bulk IN/OUT | 446/449 MB/s (~90% of 5Gbps 8b/10b) | 426/466 MB/s (32-bit link), 744-785/~880 MB/s (64-bit link) | 372/433 MB/s (64-bit link at 62.5MHz) | Bulk loopback with the data checked by the scripted host (throughput not measured); PHY: 610 MB/s per direction (PRBS) |
 | Full duplex | 376 + 400 MB/s | 325 + 430 MB/s (32-bit link), 619 + 736 MB/s (64-bit link) | 262 + 383 MB/s | PHY: 610 + 610 MB/s (PRBS, both directions) |
-| Stability | 139 GB full duplex, data checked: 0 errors, no retry/Recovery | 156 GB full duplex (64-bit link), data checked: 0 errors, 0 LBAD, 0 Recovery | 20s runs, data checked: 0 errors, 0 LBAD, 0 Recovery | 400/400 scripted runs over 20 bitstream loads, 0 LBAD/retry/Link Layer Recovery during the runs; soak: in progress |
+| Stability | 139 GB full duplex, data checked: 0 errors, no retry/Recovery | 156 GB full duplex (64-bit link), data checked: 0 errors, 0 LBAD, 0 Recovery | 20s runs, data checked: 0 errors, 0 LBAD, 0 Recovery | 400/400 scripted runs over 20 bitstream loads; soak: 10000/10000 runs on one load, 0 errors, 1 LBAD |
 | Suspend/Resume | Linux autosuspend (U3) and resume: 72/72 clean resumes (~0.6s) | | | |
 
 Standard Linux drivers (usbfs, cdc_acm, uvcvideo, usb-storage). Demos: Bulk loopback/benchmark, LiteX

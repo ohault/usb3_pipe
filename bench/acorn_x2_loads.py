@@ -19,8 +19,8 @@ cleared, Device Core counters read before and after the runs (deltas: Recoveries
       --loads 20 --runs 20 --out build/hw_runs/my_change/loads.jsonl
   ./bench/acorn_x2_loads.py --summary build/hw_runs/my_change/loads.jsonl
 
-A load is bad when the Host lanes flap (recovery_count > --bad-recoveries): PHY level, reported
-apart from the runs done on the good loads.
+A load is bad when no run was done (link down) or on an error (ex: a board reconfigured from its
+flash during the runs): reported apart from the runs done on the good loads.
 """
 
 import os
@@ -57,6 +57,18 @@ def ident(port, csr_csv):
     answers with another design (CSR reads then meaningless)."""
     code, out = run(["litex_cli", "--port", str(port), "--csr-csv", csr_csv, "--ident"], timeout=10)
     return out.strip().splitlines()[-1].strip() if (code == 0 and out.strip()) else None
+
+def port_resets(port, csr_csv):
+    """Host port reset policy Warm Resets count (bench/usb3_soc.py USB3HostPortReset), None without."""
+    from litex import RemoteClient
+    try:
+        bus = RemoteClient(port=port, csr_csv=csr_csv)
+        bus.open()
+    except Exception:
+        return None
+    count = bus.regs.usb3_port_reset_count.read() if hasattr(bus.regs, "usb3_port_reset_count") else None
+    bus.close()
+    return count
 
 def core_counters(port, csr_csv):
     """Device Core counters (8-bit saturating Recovery causes decoded), None if not reachable."""
@@ -113,11 +125,13 @@ class Servers:
 
 # Summary ------------------------------------------------------------------------------------------
 
-def summary(loads, bad_recoveries=500):
+def summary(loads):
     def median(values):
         return statistics.median(values) if values else None
     def is_bad(d):
-        return ("error" in d) or (d["host"].get("recovery_count", 0) > bad_recoveries)
+        # Load without any run done (link down: PHY level) or with an error (ex: a board
+        # reconfigured during the runs).
+        return ("error" in d) or (d.get("script", {}).get("done", 0) == 0)
     good = [d for d in loads if not is_bad(d)]
     bad  = [d["load"] for d in loads if is_bad(d)]
     runs = sum(d["runs"] for d in loads if "runs" in d)
@@ -154,13 +168,12 @@ def main():
     parser.add_argument("--loads",           default=20,     type=int, help="Bitstream loads.")
     parser.add_argument("--runs",            default=20,     type=int, help="Scripted host runs per load.")
     parser.add_argument("--settle",          default=2.0,    type=float, help="Time (s) after the servers start.")
-    parser.add_argument("--bad-recoveries",  default=500,    type=int, help="Host recovery_count of a bad load (summary).")
     parser.add_argument("--out",             default=None,   help="Results (JSON lines, appended; default: build/hw_runs/<time>/loads.jsonl).")
     parser.add_argument("--summary",         default=None,   help="Only print the summary of a results file.")
     args = parser.parse_args()
 
     if args.summary:
-        print(json.dumps(summary([json.loads(l) for l in open(args.summary)], args.bad_recoveries), indent=2))
+        print(json.dumps(summary([json.loads(l) for l in open(args.summary)]), indent=2))
         return
 
     out = args.out or os.path.join("build", "hw_runs", time.strftime("%Y%m%d-%H%M%S"), "loads.jsonl")
@@ -204,6 +217,7 @@ def main():
                     if l.get("result") in ["error", "timeout"]:
                         r["fail_sections"][l["section"]] = r["fail_sections"].get(l["section"], 0) + 1
                 r["ident"] = {"host": idents[0], "device": idents[1]}
+                r["port_resets"] = port_resets(args.host_port, host_csr)
                 if [ident(args.host_port, host_csr), ident(args.device_port, device_csr)] != idents:
                     # A board no longer runs the loaded bitstream (reconfigured from its flash):
                     # its counters/runs results are not valid.
@@ -217,11 +231,12 @@ def main():
                 f.write(json.dumps(r) + "\n")
             print(f"load {load}: " + (f"ERROR {r['error']}: " if "error" in r else "") +
                 json.dumps(r.get("script", r.get("error"))) +
+                (f" port resets: {r['port_resets']}" if r.get("port_resets") is not None else "") +
                 (f" core runs: {json.dumps(r['core']['runs'])}" if r.get("core", {}).get("runs") else ""), flush=True)
     finally:
         servers.stop()
         print(f"results: {out} (litex_servers stopped)", flush=True)
-    print(json.dumps(summary(results, args.bad_recoveries), indent=2))
+    print(json.dumps(summary(results), indent=2))
 
 if __name__ == "__main__":
     main()

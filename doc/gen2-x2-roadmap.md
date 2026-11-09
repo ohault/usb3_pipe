@@ -390,8 +390,9 @@ negotiated lanes in `/sys/bus/usb/devices/*/rx_lanes` and `tx_lanes`.
    Configuration Lane detection) and SuperSpeedPlus Link Layer/Device Core at Gen 1x2
    (`--lanes-core`, any host packet placement: `LanesPacketAligner`) validated between two boards
    ([M0](#gen-1x2-hardware-milestones)); remaining: a Gen 1x1 USB host (SFP2USB adapter or the
-   breakout), the dual SFP to USB-C breakout with a Gen 1x2 host (M1), Gen 1x2 throughput, the
-   single lane fallback when the Device starts training alone (Compliance, two boards).
+   breakout), the dual SFP to USB-C breakout with a Gen 1x2 host (M1), Gen 1x2 throughput, Gen 1x1
+   between the two boards (Device out of Compliance on 18/20 loads: 2 loads still stuck after the
+   Host Warm Resets).
 3. Gen 2x2 (20Gbps) on UltraScale+ GTY: combination of both, 7 buffers.
 4. Gen 2x1 on Gowin GW5AST (Tang Mega 138K Pro, `bench/sipeed_tang_mega_138k_pro.py`, build flow
    and options in [targets.md](targets.md)): Gen 1 is validated on hardware with the PIPE in its own

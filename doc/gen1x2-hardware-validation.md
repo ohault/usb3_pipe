@@ -212,10 +212,11 @@ Pass: `x2: 0` on both boards (Gen 1x1 negotiated in the LBPM PHY Capability exch
 only, SFP-1 in electrical idle (`rx_idle: [0, 1]`), PRBS without errors (32-bit link words: about
 half the Gen 1x2 rate). With crossed cables (test 4), the same on the Device SFP-1.
 
-Retrain both boards together after the loads (`usb3_debug_phy_reset` of both boards set, then
-released): the Device not x2 capable left alone in Polling.LFPS (loaded seconds before the Host)
-times out to Compliance (360ms) and does not come back to U0 when the Host starts (open, crossed
-cables, [Results](#results-two-boards-2026-11-08)). The Gen 1x2 capable Device recovers.
+A Device loaded seconds before the Host times out of Polling.LFPS to Compliance (360ms) and only
+leaves it on a Warm Reset: the Host board directs one when U0 is not reached for 0.5s
+(`USB3HostPortReset`, `usb3_port_reset_count`), the Device detects it on either physical lane
+(lanes swap in Compliance). Without them (builds before `daa2451`): retrain both boards together
+after the loads (`usb3_debug_phy_reset` of both boards set, then released).
 
 ### 6. Unplug/replug (optional)
 
@@ -483,9 +484,11 @@ Summary (latest builds, crossed cables):
 |------|--------|
 | PHY, PRBS (tests 1-6) | Validated: 610MB/s per direction without errors, retrains, lanes swap, unplug/replug, 20/20 bitstream loads good. Single lane fallback (test 5): with both PHYs retrained together (a Device not x2 capable starting alone times out to Compliance: open). |
 | Device Core at Gen 1x2, scripted host (tests 7-9) | Validated: 400/400 runs over 20 bitstream loads, no Device Link Layer Recovery, LBAD or retry during the runs. |
-| Single lane fallback (test 5), `50681d4` | 6/10 loads: U0 at Gen 1x1 on both boards, PRBS 303MB/s per direction without errors; 4/10: Device in Compliance (open). |
-| Device Core at Gen 1x1 (test 10b), `50681d4` | 10/20 loads with 20/20 runs (~60000 Host Recoveries per load), 10/20 without U0 (no run), strictly alternating from one load to the next (open). |
-| Soak (test 10), Gen 1x2 | Inconclusive: ~4970 runs done, then the Host FPGA reconfigured from its flash during the runs (no USB event: power?), the following CSR reads meaningless. `bench/acorn_x2_loads.py` now checks the boards identifiers before and after the runs. |
+| Device Core at Gen 1x2, Compliance exit (`daa2451`) | 400/400 runs over 20 loads; Host port resets (Warm Reset, Device out of Compliance) on 2 loads. |
+| Soak (test 10), Gen 1x2 (`daa2451`) | 10000/10000 runs on one load, no error/timeout (1 Warm Reset at the start, 207 runs restarted with a Hot Reset; Device Link Layer: 1189 Recovery requests, 1 LBAD, 0 retry during the runs). |
+| Device Core at Gen 1x1 (test 10b, `daa2451`) | 349/400 runs: 16/20 loads 20/20 (2 Warm Resets each: Device out of Compliance), 2 loads 14-15/20, 2 loads without U0 after 74 Warm Resets (open). Before the Compliance fix (`50681d4`): 200/400, alternating loads. |
+| Single lane fallback (test 5), `50681d4` | Before the Compliance fix: 6/10 loads (both boards retrained together), PRBS 303MB/s per direction without errors; 4/10 Device in Compliance. |
+| Soak, `50681d4` | Inconclusive: ~4970 runs, then the Host FPGA reconfigured from its flash (no USB event: power?). `bench/acorn_x2_loads.py` now checks the boards identifiers before and after the runs. |
 | USB hosts (tests 11-18) | Not run: SFP2USB adapter, dual SFP to USB-C breakout and Gen 1x2 host needed. |
 
 The sections below are in chronological order: first results, what was found on hardware and fixed
