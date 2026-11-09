@@ -202,6 +202,7 @@ class TestUSB3HostScript(unittest.TestCase):
         tx      = []
         resets  = []
         def generator():
+            yield dut._control.fields.idle_init.eq(1) # (Off by default.)
             yield link.sink.ready.eq(1)
             yield link.u0.eq(1)
             req_d, hot_reset = 0, None
@@ -245,6 +246,7 @@ class TestUSB3HostScript(unittest.TestCase):
         dut  = USB3HostScript(link, sys_clk_freq=10e6, idle_delay=5e-6) # 50 cycles.
         resets = []
         def generator():
+            yield dut._control.fields.idle_init.eq(1) # (Off by default.)
             yield link.sink.ready.eq(1)
             req_d = 0
             for cycle in range(400):

@@ -653,7 +653,7 @@ class USB3HostScript(LiteXModule):
         from usb3_core.host_model import USB3HostModel
         self._control = CSRStorage(fields=[
             CSRField("enable", size=1, offset=0, reset=0, description="Run the script (in U0, restarted on 0 -> 1)."),
-            CSRField("idle_init", size=1, offset=1, reset=1, description="Out of the runs, link initialization and acknowledges of the Device Header Packets (after a Hot Reset, on each U0 entry)."),
+            CSRField("idle_init", size=1, offset=1, reset=0, description="Out of the runs, link initialization and acknowledges of the Device Header Packets (after a Hot Reset, on each U0 entry): no Device Recovery out of the runs (counters), optional."),
         ])
         self._status = CSRStatus(fields=[
             CSRField("done",    size=1, offset=0, description="Script done (all the steps matched)."),
@@ -732,11 +732,16 @@ class USB3HostScript(LiteXModule):
                 )
             )
         )
+        # A Hot Reset not completed in 20ms (the LTSSM HotReset.Active/Recovery timeouts are 12ms) is
+        # abandoned: the run state never waits forever for it.
+        hot_reset_timer = WaitTimer(int(20e-3*sys_clk_freq))
+        self.submodules += hot_reset_timer
+        self.comb += hot_reset_timer.wait.eq(run_fsm.ongoing("HOT-RESET"))
         run_fsm.act("HOT-RESET",
             # A Hot Reset once requested is not aborted (a request dropped in Recovery leaves the two
-            # sides out of step): only a disabled test run returns to IDLE here.
+            # sides out of step): only a disabled test run (or the timeout) returns to IDLE here.
             link.hot_reset_req.eq(1),
-            If(test & ~enable,
+            If((test & ~enable) | hot_reset_timer.done,
                 NextState("IDLE")
             ).Elif(link.hot_reset | link.polling_idle,
                 NextState("WAIT-U0")
