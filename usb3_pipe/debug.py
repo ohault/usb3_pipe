@@ -570,6 +570,8 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
         "lfps" : link_signals + [
             serdes.tx_idle, serdes.tx_lfps, serdes.tx_pattern,
             serdes.rx_idle, serdes.rx_errors,
+            # Unfiltered transceiver idle detection (bursts split by the idle detection toggling).
+            *([serdes.rx_idle_raw] if hasattr(serdes, "rx_idle_raw") else []),
             pipe.lfps_rx_polling, pipe.lfps_rx_ping, pipe.lfps_rx_exit_u1,
             pipe.lfps_rx_exit_u2, pipe.lfps_rx_wakeup_u3, pipe.lfps_rx_reset,
             pipe.lfps_tx_polling, pipe.lfps_tx_count,
