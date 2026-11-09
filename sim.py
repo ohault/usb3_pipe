@@ -639,6 +639,37 @@ class USB3PIPESim(SoCMini):
             if (not host_recovery) and (not host_hot_reset) and hasattr(self, "host_pm_recovery"):
                 # Script directed Recovery (PM_RECOVERY).
                 self.sync += phys["host"].ltssm.directed_recovery.eq(self.host_pm_recovery)
+            if host_hot_reset:
+                # Host directed to host_hot_reset Hot Resets from U0 once the script is done, each one
+                # requested at the U0 entry after the previous one (as a host resetting its port
+                # again right after the link came back: the HotReset.Active entries skewed by the
+                # Recovery), request held until the Hot Reset or a Polling.Idle.
+                host_ltssm = phys["host"].ltssm
+                dev_u0     = Signal()
+                requesting = Signal()
+                hot_reset  = Signal()
+                resets     = Signal(8)
+                self.specials += MultiReg(phys["dev"].ltssm.u0, dev_u0)
+                self.sync += [
+                    host_ltssm.directed_recovery.eq(self.host_pm_recovery),
+                    hot_reset.eq(host_ltssm.hot_reset),
+                    If(host_model.done & ~requesting & host_ltssm.u0 & (resets < int(host_hot_reset)) &
+                        ~host_ltssm.hot_reset,
+                        Display("HOST directed to Hot Reset"),
+                        requesting.eq(1),
+                    ).Elif(requesting & (host_ltssm.hot_reset | host_ltssm.polling_idle),
+                        requesting.eq(0),
+                    ),
+                    If(host_ltssm.hot_reset & ~hot_reset, resets.eq(resets + 1)),
+                ]
+                # End once both sides are in U0 after the last Hot Reset (the Device Link Layer then
+                # requests Recoveries on PENDING_HP_TIMER: the finished host model does not run the
+                # Link initialization again after the Hot Reset).
+                self.comb += [
+                    host_ltssm.hot_reset_req.eq(requesting),
+                    end_timer.wait.eq(host_model.error |
+                        ((resets >= int(host_hot_reset)) & ~requesting & host_ltssm.u0 & dev_u0)),
+                ]
             if host_recovery:
                 # Host directed to Recovery from U0 once the script is done, end once both sides are
                 # back in U0.
@@ -674,37 +705,6 @@ class USB3PIPESim(SoCMini):
                     ]
                 self.comb += end_timer.wait.eq(host_model.error |
                     (recovered & host_ltssm.u0 & dev_u0))
-            if host_hot_reset:
-                # Host directed to host_hot_reset Hot Resets from U0 once the script is done, each one
-                # requested at the U0 entry after the previous one (as the hardware scripted host
-                # between its runs, bench/usb3_soc.py USB3HostScript: request held until the Hot
-                # Reset or a Polling.Idle), end once both sides stay in U0 after the last one.
-                host_ltssm = phys["host"].ltssm
-                dev_u0     = Signal()
-                requesting = Signal()
-                hot_reset  = Signal()
-                resets     = Signal(8)
-                self.specials += MultiReg(phys["dev"].ltssm.u0, dev_u0)
-                self.sync += [
-                    host_ltssm.directed_recovery.eq(self.host_pm_recovery),
-                    hot_reset.eq(host_ltssm.hot_reset),
-                    If(host_model.done & ~requesting & host_ltssm.u0 & (resets < int(host_hot_reset)) &
-                        ~host_ltssm.hot_reset,
-                        Display("HOST directed to Hot Reset"),
-                        requesting.eq(1),
-                    ).Elif(requesting & (host_ltssm.hot_reset | host_ltssm.polling_idle),
-                        requesting.eq(0),
-                    ),
-                    If(host_ltssm.hot_reset & ~hot_reset, resets.eq(resets + 1)),
-                ]
-                # End once both sides are in U0 after the last Hot Reset (the Device Link Layer then
-                # requests Recoveries on PENDING_HP_TIMER: the finished host model does not run the
-                # Link initialization again after the Hot Reset).
-                self.comb += [
-                    host_ltssm.hot_reset_req.eq(requesting),
-                    end_timer.wait.eq(host_model.error |
-                        ((resets >= int(host_hot_reset)) & ~requesting & host_ltssm.u0 & dev_u0)),
-                ]
             # Device Recovery triggers in U0: TS1 received (LTSSM), Link Layer request (cause).
             dev_ltssm = phys["dev"].ltssm
             dev_link  = self.dev_usb3_core.link
@@ -910,8 +910,8 @@ def main():
     parser.add_argument("--host-burst-stream", default=0, help="Host model Bulk OUT DPs streamed as the device Type 2 credits allow (after the bursts).")
     parser.add_argument("--dev-loopback-depth", default=512, help="Device Bulk loopback FIFO depth (endpoint words).")
     parser.add_argument("--host-lbad-test", action="store_true", help="Host model Bulk OUT burst with a DPH CRC error: device LBAD, LRTY and retransmission.")
-    parser.add_argument("--host-recovery", action="store_true", help="Host directed to Recovery from U0 after the script (back to U0 on both sides).")
     parser.add_argument("--host-hot-reset", default=0, type=int, help="Host directed to N Hot Resets from U0 after the script, each one at the U0 entry after the previous one (back to U0 on both sides).")
+    parser.add_argument("--host-recovery", action="store_true", help="Host directed to Recovery from U0 after the script (back to U0 on both sides).")
     parser.add_argument("--host-deskew-clear", action="store_true", help="With --host-recovery --lanes 2: Host deskew cleared in Recovery.Idle (U0 entered without deskew).")
     parser.add_argument("--host-start-delay", default=0, help="Host PHY held in reset for N cycles (the Device trains alone first, ex: --timer-scale 100 --host-start-delay 600000: Device in Compliance).")
     parser.add_argument("--dev-x2-disable", action="store_true", help="--lanes 2: Device Gen 1x2 capability disabled at runtime (x2_enable = 0): Gen 1x1 negotiated.")

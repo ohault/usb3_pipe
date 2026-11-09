@@ -887,8 +887,8 @@ class USB3LTSSM(LiteXModule):
             # after the detection, own reset done. Exiting on the detection alone left a partner
             # entering HotReset.Active later than us (its Reset=1 window still running) without any
             # Reset=0 TS2 from us: partner stuck until tHotResetActiveTimeout (12ms), us until
-            # tHotResetExitTimeout (2ms), both to eSS.Inactive (two Acorn Minis, back to back Hot
-            # Resets).
+            # tHotResetExitTimeout (2ms), both to eSS.Inactive (ex: a Hot Reset directed right
+            # after a U0 entry, the HotReset.Active entries skewed by the Recovery).
             If(self.ts_tx_done,
                 NextValue(hr_tx_after, hr_rx_clear & ~hr_tx_reset),
             ),
