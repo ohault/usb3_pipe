@@ -646,7 +646,7 @@ class USB3HostScript(LiteXModule):
     Both scripts in the model ROM (SuperSpeedPlus, then SuperSpeed from step ss_start), the run
     starting on the one of the negotiated link (Gen 1x2: SuperSpeedPlus, Gen 1x1: SuperSpeed),
     latched at the run start (usb3_script_ssp)."""
-    def __init__(self, link, sys_clk_freq=125e6):
+    def __init__(self, link, sys_clk_freq=125e6, idle_delay=10e-3):
         from litex.soc.interconnect.csr import CSRStorage, CSRStatus, CSRField
         from litex.soc.interconnect import stream
         from usb3_pipe.framing  import WordsToPairs, PairsToWords
@@ -712,21 +712,30 @@ class USB3HostScript(LiteXModule):
         idle_done = Signal() # Idle link initialization done since the U0 entry.
         abort     = Signal() # Run kind no longer wanted (test run disabled, or idle run superseded).
         self.comb += abort.eq(Mux(test, ~enable, enable | ~idle_init))
+        # Idle link initialization after 10ms without a test run in U0 (not between two runs of a
+        # client toggling enable: an idle Hot Reset then superseded in Recovery left the two sides
+        # out of step, runs restarted).
+        idle_timer = WaitTimer(max(1, int(idle_delay*sys_clk_freq)))
+        self.submodules += idle_timer
         self.run_fsm = run_fsm = FSM(reset_state="IDLE")
+        self.comb += idle_timer.wait.eq(run_fsm.ongoing("IDLE") & link.u0 & ~enable & idle_init &
+            ~idle_done)
         run_fsm.act("IDLE",
             If(link.u0 & ~lup_busy,
                 If(enable,
                     NextValue(test, 1),
                     NextState("HOT-RESET")
-                ).Elif(idle_init & ~idle_done,
+                ).Elif(idle_timer.done,
                     NextValue(test, 0),
                     NextState("HOT-RESET")
                 )
             )
         )
         run_fsm.act("HOT-RESET",
+            # A Hot Reset once requested is not aborted (a request dropped in Recovery leaves the two
+            # sides out of step): only a disabled test run returns to IDLE here.
             link.hot_reset_req.eq(1),
-            If(abort,
+            If(test & ~enable,
                 NextState("IDLE")
             ).Elif(link.hot_reset | link.polling_idle,
                 NextState("WAIT-U0")

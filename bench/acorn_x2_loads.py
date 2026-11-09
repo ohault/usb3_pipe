@@ -231,9 +231,11 @@ def main():
                 lines  = [json.loads(l) for l in output.splitlines() if l.startswith("{")]
                 r["script"] = lines[-1] if lines else {"done": 0, "output": output[-500:]}
                 r["fail_sections"] = {}
+                r["fails"] = [] # (run, result, step, section) of the failed runs.
                 for l in lines[:-1]:
                     if l.get("result") in ["error", "timeout"]:
                         r["fail_sections"][l["section"]] = r["fail_sections"].get(l["section"], 0) + 1
+                        r["fails"].append((l["run"], l["result"], l["step"], l["section"]))
                 r["ident"] = {"host": idents[0], "device": idents[1]}
                 r["port_resets"] = port_resets(args.host_port, host_csr)
                 if [ident(args.host_port, host_csr), ident(args.device_port, device_csr)] != idents:

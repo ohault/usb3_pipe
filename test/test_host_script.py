@@ -196,7 +196,7 @@ class TestUSB3HostScript(unittest.TestCase):
         # initialization (first sends: Advertisements), not counted as a run; a test run enabled
         # later supersedes it (new Hot Reset, the test script, counted).
         link = FakeLink()
-        dut  = USB3HostScript(link, sys_clk_freq=10e6)
+        dut  = USB3HostScript(link, sys_clk_freq=10e6, idle_delay=2e-6) # Idle init after 20 cycles.
         idle_first = [s[1] for s in usb3_host_idle_script(ssp=True).steps if s[0] == OP_SEND][:4]
         test_first = [s[1] for s in usb3_host_script(ssp=True).steps if s[0] == OP_SEND][:4]
         tx      = []
@@ -231,7 +231,7 @@ class TestUSB3HostScript(unittest.TestCase):
             return any(words[i:i + len(seq)] == seq for i in range(len(words)))
         idle_tx = [w for c, w in tx if c < 450]
         test_tx = [w for c, w in tx if c > 450]
-        self.assertTrue(resets and resets[0] < 50)          # Idle: Hot Reset on the U0 entry.
+        self.assertTrue(resets and 20 <= resets[0] < 60)    # Idle: Hot Reset after idle_delay.
         self.assertTrue(contains(idle_tx, idle_first))      # Idle link initialization.
         self.assertTrue(any(c > 450 for c in resets))       # Test run: a new Hot Reset.
         self.assertTrue(contains(test_tx, test_first))      # Test script.
