@@ -484,7 +484,7 @@ Summary (latest builds, crossed cables, one Host and one Device bitstream for Ge
 | PHY, PRBS (tests 1-6) | Validated: 610MB/s per direction without errors, retrains, lanes swap, unplug/replug, 20/20 bitstream loads good. Single lane fallback (test 5): with both PHYs retrained together (a Device not x2 capable starting alone times out to Compliance: open). |
 | Device Core at Gen 1x2, scripted host (tests 7-9) | Validated: 400/400 runs over 20 bitstream loads (with `--lpm-hold rxeq`, the default with `--lanes 2`). |
 | Device Core at Gen 1x1 (test 10b) | Validated: 400/400 runs over 20 bitstream loads, same bitstreams (runtime Gen 1x2 control). |
-| Soak (test 10), Gen 1x2 (`daa2451`) | 10000/10000 runs on one load, no error/timeout (1 Warm Reset at the start, 207 runs restarted with a Hot Reset; Device Link Layer: 1189 Recovery requests, 1 LBAD, 0 retry during the runs). |
+| Soak (test 10, `--lpm-hold rxeq`, one load, 10000 runs) | Gen 1x2: 9999/10000 (1 script error in `link_init`, no timeout; Device Link Layer: 55 Recovery requests, 0 LBAD/retry during the runs). Gen 1x1 (`--x1`): 9998/10000 (2 errors in `link_init`; 0 Recovery request). One Warm Reset at the start of each (Device out of Compliance). |
 | USB hosts (tests 11-18) | Not run: SFP2USB adapter, dual SFP to USB-C breakout and Gen 1x2 host needed. |
 
 Results after each fix (two Acorn Minis, crossed cables, 20 loads x 20 scripted runs unless noted):
