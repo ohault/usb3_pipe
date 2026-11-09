@@ -482,7 +482,7 @@ Summary (latest builds, crossed cables, one Host and one Device bitstream for Ge
 | Part | Status |
 |------|--------|
 | PHY, PRBS (tests 1-6) | Validated: 610MB/s per direction without errors, retrains, lanes swap, unplug/replug, 20/20 bitstream loads good. Single lane fallback (test 5): with both PHYs retrained together (a Device not x2 capable starting alone times out to Compliance: open). |
-| Device Core at Gen 1x2, scripted host (tests 7-9) | Validated: 400/400 runs over 20 bitstream loads (with `--lpm-hold rxeq`, the default with `--lanes 2`). |
+| Device Core at Gen 1x2, scripted host (tests 7-9) | Validated: 400/400 runs over 20 bitstream loads (with `--lpm-hold rxeq`, the default with `--lanes 2`), again after the upstream merge (`cb7efab`). |
 | Device Core at Gen 1x1 (test 10b) | Validated: 400/400 runs over 20 bitstream loads, same bitstreams (runtime Gen 1x2 control). |
 | Soak (test 10, `--lpm-hold rxeq`, one load, 10000 runs) | Gen 1x2: 9999/10000 (1 script error in `link_init`, no timeout; Device Link Layer: 55 Recovery requests, 0 LBAD/retry during the runs). Gen 1x1 (`--x1`): 9998/10000 (2 errors in `link_init`; 0 Recovery request). One Warm Reset at the start of each (Device out of Compliance). |
 | USB hosts (tests 11-18) | Not run: SFP2USB adapter, dual SFP to USB-C breakout and Gen 1x2 host needed. |
@@ -501,6 +501,7 @@ Results after each fix (two Acorn Minis, crossed cables, 20 loads x 20 scripted 
 | GTP LPM adaptation hold (`--lpm-hold rxeq`, `885d9f1`) | **Gen 1x2: 400/400** runs (20/20 loads), **Gen 1x1 (`--x1`): 400/400** (20/20 loads, 20 Recoveries per load: the runs Hot Resets only). The receive quality changes from one load to the next came from the continuous GTP LPM adaptation (Host Lane 0): adaptation only in Polling.RxEQ, now the default with `--lanes 2`. |
 | Test 5 rerun, PRBS bitstreams `4d6d82d` (runtime Gen 1x2 control on the Device, Host port reset, LPM hold) | 10/10 loads: Gen 1x1 on both boards, Device SFP-1 (lanes swap), PRBS 303.9 MB/s per direction, 0 errors, 0 Recovery. |
 | Scripted host idle link initialization (Host `4d6d82d`, `edf05ce`; Device `885d9f1`) | Out of the runs: Host Recoveries per load 20-167 (40-3400 before), Device Recovery requests before the first run 0-8 (median 32-193 before). Runs: Host `4d6d82d` 399/400 (20 loads), soak 10000/10000; Host `edf05ce` 371/400 (2 loads with Hot Reset storms), soak 9987/10000 (11 LBAD). The idle initialization was off during these runs (`usb3_lanes.py script` cleared its control bit, fixed): the differences are Host build to build variations (open). |
+| Upstream merge (Host `cb7efab`, Device `32dd75c`: upstream RX idle filter with `rx_idle_min_burst=40e-9` on the Gen 1x2 builds) | **Gen 1x2: 400/400**, **Gen 1x1 (`--x1`): 400/400** (20 loads each, no failed run). The scripted host idle initialization is optional (off by default: an idle Hot Reset not completing blocked the runs on 4/20 Gen 1x2 loads with `84b4965`), a Hot Reset not completed in 20ms is abandoned. |
 
 The sections below are in chronological order: first results, what was found on hardware and fixed
 (each reproduced in simulation first), and the results after each fix.
