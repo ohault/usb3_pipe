@@ -14,8 +14,8 @@
 
 ![](doc/acorn_baseboard_sfp2usb_0.jpg)
 
-USB3-PIPE provides **USB 3.2 SuperSpeed (Gen 1x1, 5Gbps) and SuperSpeedPlus (Gen 2x1, 10Gbps) for
-FPGAs without any external USB chip**: the FPGA transceivers are directly connected to the USB3
+USB3-PIPE provides **USB 3.2 SuperSpeed (Gen 1x1, 5Gbps) and SuperSpeedPlus (Gen 2x1, 10Gbps, and
+Gen 1x2, 2x5Gbps, experimental) for FPGAs without any external USB chip**: the FPGA transceivers are directly connected to the USB3
 connector, the PHY (USB3 PIPE + LTSSM) and a complete USB3 Device Core (Link/Protocol layers,
 endpoints, device classes) are implemented in the fabric, in Migen/LiteX.
 
@@ -23,15 +23,16 @@ Other USB3 solutions for FPGAs rely on an external PHY ([TI TUSB1310A](http://ww
 or an external USB controller/FIFO ([FTDI FT60X](https://ftdichip.com/products/ft600q-b/), Infineon
 [FX3](https://www.infineon.com/cms/en/product/universal-serial-bus/usb-peripheral-controllers-for-superspeed/ez-usb-fx3-usb-5-gbps-peripheral-controller/)).
 
-**Status** (USB device, SFP2USB adapter, Linux xHCI host):
+**Status** (USB device, SFP2USB adapter, Linux xHCI host; Gen 1x2: experimental, two boards, see
+[doc/gen1x2-hardware-validation.md](doc/gen1x2-hardware-validation.md)):
 
-| | Gen 1x1 (5Gbps): Acorn CLE-215+ (Artix7 GTP) | Gen 2x1 (10Gbps): Alibaba XCKU3P (UltraScale+ GTY) | Gen 1x1 (5Gbps): Tang Mega 138K Pro (Gowin GW5AST GTR12) |
-|---|---|---|---|
-| Enumeration | SuperSpeed (5000M) | SuperSpeedPlus (10000M), SuperSpeedPlus BOS capability | SuperSpeed (5000M) |
-| Bulk IN/OUT | 446/449 MB/s (~90% of 5Gbps 8b/10b) | 426/466 MB/s (32-bit link), 744-785/~880 MB/s (64-bit link) | 372/433 MB/s (64-bit link at 62.5MHz) |
-| Full duplex | 376 + 400 MB/s | 325 + 430 MB/s (32-bit link), 619 + 736 MB/s (64-bit link) | 262 + 383 MB/s |
-| Stability | 139 GB full duplex, data checked: 0 errors, no retry/Recovery | 156 GB full duplex (64-bit link), data checked: 0 errors, 0 LBAD, 0 Recovery | 20s runs, data checked: 0 errors, 0 LBAD, 0 Recovery |
-| Suspend/Resume | Linux autosuspend (U3) and resume: 72/72 clean resumes (~0.6s) | | |
+| | Gen 1x1 (5Gbps): Acorn CLE-215+ (Artix7 GTP) | Gen 2x1 (10Gbps): Alibaba XCKU3P (UltraScale+ GTY) | Gen 1x1 (5Gbps): Tang Mega 138K Pro (Gowin GW5AST GTR12) | Gen 1x2 (2x5Gbps, experimental): two Acorn Baseboard Minis + CLE-215+ (Artix7 GTP), SFP DAC cables |
+|---|---|---|---|---|
+| Enumeration | SuperSpeed (5000M) | SuperSpeedPlus (10000M), SuperSpeedPlus BOS capability | SuperSpeed (5000M) | SuperSpeedPlus at Gen 1x2 with a scripted USB host in gateware on the other board (enumeration-like control transfers); not yet with a USB host |
+| Bulk IN/OUT | 446/449 MB/s (~90% of 5Gbps 8b/10b) | 426/466 MB/s (32-bit link), 744-785/~880 MB/s (64-bit link) | 372/433 MB/s (64-bit link at 62.5MHz) | Bulk loopback with the data checked by the scripted host (throughput not measured); PHY: 610 MB/s per direction (PRBS) |
+| Full duplex | 376 + 400 MB/s | 325 + 430 MB/s (32-bit link), 619 + 736 MB/s (64-bit link) | 262 + 383 MB/s | PHY: 610 + 610 MB/s (PRBS, both directions) |
+| Stability | 139 GB full duplex, data checked: 0 errors, no retry/Recovery | 156 GB full duplex (64-bit link), data checked: 0 errors, 0 LBAD, 0 Recovery | 20s runs, data checked: 0 errors, 0 LBAD, 0 Recovery | 400/400 scripted runs over 20 bitstream loads (Gen 1x2 and Gen 1x1); soak: 9999/10000 runs on one load, 0 LBAD/retry |
+| Suspend/Resume | Linux autosuspend (U3) and resume: 72/72 clean resumes (~0.6s) | | | |
 
 Standard Linux drivers (usbfs, cdc_acm, uvcvideo, usb-storage). Demos: Bulk loopback/benchmark, LiteX
 BIOS console (CDC-ACM), UVC camera up to 1080p60 (Bulk) or 1080p30 (Isochronous), Mass Storage RAM
@@ -47,9 +48,13 @@ disk (and DDR3 disk), composite camera + console.
   as a standalone Verilog core (`usb3_pipe_gen`, Gen 1, Artix7/Kintex7/UltraScale+). For slower
   fabrics (Gowin GW5A, Lattice ECP5), the PIPE can run in its own clock domain (`pipe_cd`, on the
   transceiver TX clock) with the LTSSM/Link Layer/Core at a lower frequency on 64/128-bit words (ex:
-  62.5MHz, 83.33MHz), Link Layer RX credits flow control.
+  62.5MHz, 83.33MHz), Link Layer RX credits flow control. **Gen 1x2** (`lanes=2`, experimental): two
+  SerDes lanes in lockstep, SuperSpeedPlus Polling with the x2 capability, data striping and lanes
+  deskew, Configuration Lane detection (lanes swap), single lane fallback, 64-bit link words
+  (`lanes.py`).
 - **USB3 Device Core** (`usb3_core/`): Link Layer (header flow control, retries, LMPs, timers,
-  SuperSpeedPlus operation: 4-bit sequence numbers, Type 1/Type 2 buffers and credits), Protocol
+  SuperSpeedPlus operation at Gen 2x1 and Gen 1x2: 4-bit sequence numbers, Type 1/Type 2 buffers
+  and credits), Protocol
   Layer, Control Endpoint (standard requests, alternate settings, class/vendor request handler,
   Wishbone bridge), Bulk IN/OUT endpoints with bursts (32 or 64-bit datapaths), Isochronous IN
   endpoints, U1/U2 Link Power Management (`with_lpm`, off by default), descriptors builder, Header
@@ -57,7 +62,8 @@ disk (and DDR3 disk), composite camera + console.
 - **Device classes**: vendor Bulk, CDC-ACM (serial port/LiteX console), UVC (video camera, Bulk or
   Isochronous), MSC (mass storage on block RAM or DRAM, ex: DDR3 through LiteDRAM), composite devices.
 - **Simulation**: Verilator Host model <-> PHYs <-> Device Core (`sim.py`, Gen 1 and Gen 2,
-  `pipe_cd`, two lanes), Migen unit/system tests with Python host models (`pytest`, [Tests](#-tests)).
+  `pipe_cd`, Gen 1x2 with `--lanes 2`), Migen unit/system tests with Python host models (`pytest`,
+  [Tests](#-tests)).
 
 ![USB3-PIPE architecture: Acorn reference design (Gen 1)](doc/images/architecture.png)
 
@@ -67,7 +73,9 @@ Gen 2x1 on UltraScale+ GTY and on Gowin GTR12 with 64/128-bit Link Layer words.*
 [> Hardware
 -----------
 - [LiteX Acorn Baseboard](https://github.com/enjoy-digital/litex-acorn-baseboard) (Mini) with an Acorn
-  CLE-215+ (`bench/acorn.py`, main development/validation target).
+  CLE-215+ (`bench/acorn.py`, main development/validation target). Gen 1x2: two Minis (both SFP
+  cages, `--lanes 2`, one board in each role) with two SFP DAC cables (`bench/acorn_ftdi.py`: several
+  boards on one host), then a dual SFP to USB-C breakout (in preparation).
 - Alibaba Cloud XCKU3P board (`bench/alibaba_xcku3p.py`, Kintex UltraScale+ GTY, SFP2USB adapter in
   the NIC1 SFP cage): validated on hardware at Gen 1 (IN 446MB/s, OUT 450MB/s) and at **Gen 2**
   (`--gen2-capable`, on a USB 3.2 Gen 2 host port), 0 errors. Main Gen 2 development target.
@@ -119,6 +127,7 @@ Simulation (Verilator): Host model <-> SerDes models <-> Device PHY + USB3 Devic
 ```sh
 $ ./sim.py                         # Gen 1: link training, enumeration, Bulk transfers.
 $ ./sim.py --gen2 --link-words 2   # Gen 2x1 (10Gbps) with the 64-bit Link Layer.
+$ ./sim.py --lanes 2 --lanes-core  # Gen 1x2 (2x5Gbps, experimental): SuperSpeedPlus on two lanes.
 $ ./sim.py --help                  # Host model scenarios, pipe_cd, two lanes, VCD trace.
 ```
 
@@ -199,7 +208,11 @@ See [doc/standalone-core.md](doc/standalone-core.md) for the YAML keys, interfac
   (`usb3_pipe_gen`), YAML examples in `examples/`.
 - [doc/debugging-guide.md](doc/debugging-guide.md): hardware debugging (CSRs, trace, LiteScope, soak).
 - [doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md): Gen 2x1 (10Gbps) bring-up milestones and results,
-  Gen 1x2 (2x5Gbps)/Gen 2x2 roadmap, Gowin Gen 2 status.
+  Gen 1x2 (2x5Gbps) status and milestones, Gen 2x2 roadmap, Gowin Gen 2 status.
+- [doc/gen1x2-hardware-validation.md](doc/gen1x2-hardware-validation.md): Gen 1x2 hardware validation
+  procedure and results (LiteX Acorn Baseboard Mini: two boards with SFP DAC cables, the PHY then the
+  Device Core with a scripted host; next: USB 3 host through the SFP2USB adapter, Gen 1x2 host through
+  the dual SFP to USB-C breakout).
 - [CONTRIBUTING.md](CONTRIBUTING.md): tests, CI, coding style, pull requests;
   [AGENTS.md](AGENTS.md): pointers for AI agents. `bench/99-usb3-pipe.rules`: udev rule of the test
   device.
