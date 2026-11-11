@@ -89,6 +89,12 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   ([doc/notes/gen2-x2-roadmap.md](doc/notes/gen2-x2-roadmap.md): throughput; any host packet placement done in
   simulation, `LanesPacketAligner`, `sim.py --lanes-tx-shift`).
 
+## User Preferences
+
+- Text the user will copy/paste to github.com (issue/PR comments, PR descriptions, reviews):
+  give it as raw Markdown in a fenced code block (four backticks when it contains code spans or
+  blocks), ready to paste, not rendered prose.
+
 ## Environment Notes (Claude Code cloud sessions)
 
 - No Vivado: elaborate (`test/test_targets.py` `elaborate()`), never claim a timing result.
