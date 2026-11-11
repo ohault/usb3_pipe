@@ -301,9 +301,10 @@ class USB3BulkOUT(USB3Endpoint):
     """Bulk OUT Endpoint (Host -> Device).
 
     source: received packets (data: data_width words, first byte on data[0:8], be: valid bytes,
-    last: end of packet). Zero-length packets are dropped.
+    last: end of packet). Zero-length packets are dropped, or with_zlp: one word without valid bytes
+    (be=0, last: end of transfer marker, ex: CDC-ECM frames of a multiple of the max packet size).
     """
-    def __init__(self, ept, max_burst=8, data_width=32):
+    def __init__(self, ept, max_burst=8, data_width=32, with_zlp=False):
         assert max_burst in [2, 4, 8, 16]
         USB3Endpoint.__init__(self, ept, direction=0, data_width=data_width)
         self.max_burst = max_burst
@@ -431,6 +432,8 @@ class USB3BulkOUT(USB3Endpoint):
         rd_be     = Signal(wb, reset_less=True)
         rd_issue  = Signal()
         rd_slot   = Signal(pbits - 1)
+        zlp_issue = Signal()
+        zlp_valid = Signal()
         self.comb += [
             rd_slot.eq(rd_ptr[0:pbits-1]),
             rd_len.eq(lengths[rd_slot]),
@@ -438,19 +441,24 @@ class USB3BulkOUT(USB3Endpoint):
             rd_port.adr.eq(slots.adr(rd_slot, rd_count)),
             rd_issue.eq(rd_active & (fifo.level < 12)),
             rd_port.re.eq(rd_issue),
+            # Zero-length packet: end of transfer marker word (with_zlp).
+            zlp_issue.eq(int(with_zlp) & ~rd_active & (rd_ptr != decide_ptr) & valids[rd_slot] &
+                (rd_len == 0) & (fifo.level < 12)),
         ]
         self.sync += [
-            rd_valid.eq(rd_issue),
-            rd_last.eq(rd_issue & (rd_count + 1 >= rd_words)),
-            rd_be.eq(Mux(rd_count + 1 >= rd_words,
-                bytes_to_be_n(rd_len[:log2_int(wb)], wb), 2**wb - 1)),
+            rd_valid.eq(rd_issue | zlp_issue),
+            zlp_valid.eq(zlp_issue),
+            rd_last.eq((rd_issue & (rd_count + 1 >= rd_words)) | zlp_issue),
+            rd_be.eq(Mux(zlp_issue, 0, Mux(rd_count + 1 >= rd_words,
+                bytes_to_be_n(rd_len[:log2_int(wb)], wb), 2**wb - 1))),
             If(~rd_active,
                 # Next decided slot: read it (valid, not empty) or skip it.
                 If(rd_ptr != decide_ptr,
                     If(valids[rd_slot] & (rd_len != 0),
                         rd_active.eq(1),
                         rd_count.eq(0),
-                    ).Else(
+                    ).Elif(~(int(with_zlp) & valids[rd_slot]) | zlp_issue,
+                        # Discarded or (with_zlp) zero-length packet marker issued.
                         rd_ptr.eq(rd_ptr + 1),
                     )
                 )
@@ -464,8 +472,97 @@ class USB3BulkOUT(USB3Endpoint):
         ]
         self.comb += [
             fifo.sink.valid.eq(rd_valid),
-            fifo.sink.data.eq(rd_port.dat_r),
+            fifo.sink.data.eq(Mux(zlp_valid, 0, rd_port.dat_r)),
             fifo.sink.last.eq(rd_last),
             fifo.sink.be.eq(rd_be),
             fifo.source.connect(source),
         ]
+
+# USB3 Endpoint Converters -------------------------------------------------------------------------
+
+class USB3EndpointDownConverter(LiteXModule):
+    """Endpoint user stream down converter: dw-bit words (64/128-bit Bulk OUT endpoint on a wide Link
+    Layer) -> 32-bit words (32-bit functions: MSC, CDC-ACM, ...). Words without valid bytes after
+    the last valid one of a packet are not emitted."""
+    def __init__(self, dw=64):
+        assert dw in [64, 128]
+        n = dw//32
+        self.sink   = sink   = stream.Endpoint(endpoint_layout(dw)) # i
+        self.source = source = stream.Endpoint(endpoint_layout(32)) # o
+
+        # # #
+
+        index = Signal(max=n) # 32-bit word of the dw-bit word.
+        more  = Signal()      # More valid bytes after this 32-bit word.
+        self.comb += [
+            Case(index, {i: [
+                source.data.eq(sink.data[32*i:32*(i + 1)]),
+                source.be.eq(sink.be[4*i:4*(i + 1)]),
+                more.eq(sink.be[4*(i + 1):] != 0) if i < (n - 1) else more.eq(0),
+            ] for i in range(n)}),
+            source.valid.eq(sink.valid),
+            source.last.eq(sink.last & ~more),
+            sink.ready.eq(source.ready & ~more),
+        ]
+        self.sync += If(source.valid & source.ready,
+            If(more, index.eq(index + 1)).Else(index.eq(0))
+        )
+
+class USB3EndpointUpConverter(LiteXModule):
+    """Endpoint user stream up converter: 32-bit words (32-bit functions: MSC, CDC-ACM, ...) ->
+    dw-bit words (64/128-bit Bulk IN endpoint on a wide Link Layer). A packet ending in the middle
+    of a dw-bit word ends it (upper bytes not valid)."""
+    def __init__(self, dw=64):
+        assert dw in [64, 128]
+        n = dw//32
+        self.sink   = sink   = stream.Endpoint(endpoint_layout(32)) # i
+        self.source = source = stream.Endpoint(endpoint_layout(dw)) # o
+
+        # # #
+
+        index = Signal(max=n)                                      # Next 32-bit word to fill.
+        data  = Array(Signal(32, reset_less=True) for _ in range(n - 1))
+        be    = Array(Signal(4) for _ in range(n - 1))
+        full  = Signal()
+        self.comb += [
+            full.eq(sink.last | (index == (n - 1))),
+            source.valid.eq(sink.valid & full),
+            source.last.eq(sink.last),
+            sink.ready.eq(~full | source.ready),
+        ]
+        # Output word: the stored words, the current one at index, nothing valid after it.
+        for i in range(n):
+            cur = (index == i)
+            if i < (n - 1):
+                self.comb += [
+                    source.data[32*i:32*(i + 1)].eq(Mux(cur, sink.data, data[i])),
+                    source.be[4*i:4*(i + 1)].eq(Mux(cur, sink.be, Mux(index > i, be[i], 0))),
+                ]
+            else:
+                self.comb += [
+                    source.data[32*i:32*(i + 1)].eq(sink.data),
+                    source.be[4*i:4*(i + 1)].eq(Mux(cur, sink.be, 0)),
+                ]
+        self.sync += If(sink.valid & sink.ready,
+            If(full,
+                index.eq(0)
+            ).Else(
+                data[index].eq(sink.data),
+                be[index].eq(sink.be),
+                index.eq(index + 1),
+            )
+        )
+
+def bulk_endpoint_32(module, ep):
+    """32-bit user side of a Bulk endpoint (ep itself when 32-bit, else through a converter added to
+    module): object with the sink (IN) or source (OUT) 32-bit user stream."""
+    if ep.data_width == 32:
+        return ep
+    if ep.direction == 1:
+        conv = USB3EndpointUpConverter(ep.data_width)
+        module.comb += conv.source.connect(ep.sink)
+    else:
+        conv = USB3EndpointDownConverter(ep.data_width)
+        module.comb += ep.source.connect(conv.sink)
+    module.submodules += conv
+    return conv

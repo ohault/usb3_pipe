@@ -1,0 +1,17 @@
+---
+# Project metadata of the manual (title page, headers, document properties). The theme (colours,
+# fonts, LaTeX options) is in theme.yaml; build.py merges both and replaces @DATE@.
+title: "USB 3.2 PHY & Core"
+project: "USB3-PIPE"
+subtitle: "USB3-PIPE: SuperSpeed PHY and Device Core for FPGA Transceivers. Design, Integration and Reference Manual"
+author: [Enjoy-Digital]
+date: "@DATE@"
+license: "Copyright © 2019-2026 Enjoy-Digital. Licensed under the BSD-2-Clause license."
+license-short: "BSD-2-Clause"
+contact: "hello@enjoy-digital.fr"
+website: "enjoy-digital.fr"
+subject: "USB3-PIPE"
+keywords: [USB 3.2, SuperSpeed, PIPE, LTSSM, FPGA, transceiver, LiteX]
+lang: en-US
+header-right: "USB 3.2 PHY \\& Core · BSD-2-Clause · \\href{mailto:hello@enjoy-digital.fr}{hello@enjoy-digital.fr}"
+---

@@ -2,7 +2,7 @@
 
 Hardware validation of the USB 3.2 Gen 1x2 PHY (`USB3PHY(lanes=2)`), first between two boards, one
 in the Host role and one in the Device role, without a Gen 1x2 USB host or a USB Type-C breakout
-([Gen 1x2 hardware milestones](gen2-x2-roadmap.md#gen-1x2-hardware-milestones), M0), then with USB hosts through
+([Gen 1x2 hardware milestones](notes/gen2-x2-roadmap.md#gen-1x2-hardware-milestones), M0), then with USB hosts through
 the SFP2USB adapter and the dual SFP to USB-C breakout. The two boards tests run in simulation with
 `sim.py --lanes 2` (`test/test_phy.py` `TestPHYX2`).
 
@@ -377,7 +377,7 @@ lsusb -t                                                         # 5000M.
 
 Pass: enumerated at 5000M, `ltssm_state` U0, `x2: 0`, `lane_swap: 0`, `rx_idle: [0, 1]` (SFP-1
 without signal), no IN/OUT data errors, `recovery_count` stable; rates in the range of the Gen 1x1
-Acorn build ([examples.md](examples.md): ~450MB/s IN/OUT).
+Acorn build ([Examples](manual/12_examples.md): ~450MB/s IN/OUT).
 
 ### 12. SFP2USB in SFP-1 (lanes swap)
 
@@ -653,14 +653,14 @@ status`: `deskew_lost_u0`, `lane_idle_u0`, `realign_u0`, per lane `rx_buferror`,
 | Single board: not enumerated, U0 not reached | `status`/`retrain` history, the same SFP2USB/host/cable with the Gen 1x1 build (`bench/acorn.py` without `--lanes`) for a reference. |
 | Single board: enumerated in one cage only | `lane_swap` and `rx_idle` per cage, `retrain` history in the failing cage. |
 | Gen 1x2 core: `x2: 0` with a x2 host | Host x2 support (port, `rx_lanes`), cable with both SuperSpeed pairs, Lane 1 signal (`rx_idle[1]`, `lane1_ts1`), the two boards part (tests 1-4) for the lanes themselves. |
-| Gen 1x2 core: U0 at x2 but not enumerated/transfer errors | `usb3_debug.py` Link Layer counters (LBAD/retries, recovery causes), `retrain` history; RX buffer overflow (`rx_overflow`/`rx_drop` in `usb3_lanes.py status`: dropped RX words, the Link Layer too slow); `rx_overflow` also set by a `LanesPacketAligner` symbols buffer overflow (host packets back to back right after short DPPs, [gen2-x2-roadmap.md](gen2-x2-roadmap.md)). |
+| Gen 1x2 core: U0 at x2 but not enumerated/transfer errors | `usb3_debug.py` Link Layer counters (LBAD/retries, recovery causes), `retrain` history; RX buffer overflow (`rx_overflow`/`rx_drop` in `usb3_lanes.py status`: dropped RX words, the Link Layer too slow); `rx_overflow` also set by a `LanesPacketAligner` symbols buffer overflow (host packets back to back right after short DPPs, [gen2-x2-roadmap.md](notes/gen2-x2-roadmap.md)). |
 | Gen 1x2 core: works in one plug orientation only | `lane_swap` per orientation, CC/lane routing of the breakout (TX1/RX1 on SFP-0). |
 
 ## References
 
-- [gen2-x2-roadmap.md](gen2-x2-roadmap.md): Gen 1x2 PHY (`USB3PHY(lanes=2)`), simulation coverage,
+- [gen2-x2-roadmap.md](notes/gen2-x2-roadmap.md): Gen 1x2 PHY (`USB3PHY(lanes=2)`), simulation coverage,
   hardware milestones.
-- [debugging-guide.md](debugging-guide.md): JTAG/`litex_server` setup, CSRs, LiteScope.
+- [Debugging](manual/14_debugging.md): JTAG/`litex_server` setup, CSRs, LiteScope.
 - `usb3_pipe/phy.py` (`USB3PHYX2Link`), `usb3_pipe/lanes.py` (`LanesTXPacker`,
   `LanesPacketAligner`): the Gen 1x2 Link interface.
 - `bench/acorn.py` (`--lanes 2`, `--role`, `--no-x2`, `--lanes-core`), `bench/usb3_soc.py` (`add_usb3_lanes_link`),

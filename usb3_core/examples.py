@@ -5,7 +5,7 @@
 # SPDX-License-Identifier: BSD-2-Clause
 
 """USB3 Device Core example designs, shared by the targets (bench/acorn.py, bench/kc705.py,
-bench/alibaba_xcku3p.py, bench/sipeed_tang_mega_138k_pro.py), see doc/examples.md.
+bench/alibaba_xcku3p.py, bench/sipeed_tang_mega_138k_pro.py), see doc/manual/12_examples.md.
 
 - loopback     : Vendor Bulk OUT (EP2) -> FIFO -> Bulk IN (EP1) (bench/usb3_bulk.py).
 - wishbone     : loopback + EP0 Wishbone bridge (litex_server --usb --usb-vid 0x1d50
@@ -72,9 +72,11 @@ def add_usb3_example(soc, usb3_phy, sys_clk_freq, example="loopback", with_lpm=F
     Management, max_burst: Bulk endpoints Max Burst (vendor Bulk examples), with_trace: core
     traces."""
     assert example in USB3_EXAMPLES
-    # Link Layer words (USB3PHY link_words): 64-bit Bulk endpoints in the vendor Bulk examples.
+    # Link Layer words (USB3PHY link_words): 64-bit Bulk endpoints in the vendor Bulk examples, and
+    # in the Mass Storage/CDC-ACM ones (32-bit functions through the endpoint converters).
     dw = 32*getattr(usb3_phy, "link_words", 1)
-    assert (dw == 32) or (example in ["loopback", "wishbone", "bench"])
+    assert (dw == 32) or (example in ["loopback", "wishbone", "bench", "cdc_uartbone", "console",
+        "msc", "msc_dram"])
     if example in ["console", "composite"]:
         assert soc.cpu_type is not None, f"{example} example requires a CPU (--cpu-type)."
     if example in ["msc_dram"]:

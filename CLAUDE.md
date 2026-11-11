@@ -69,7 +69,7 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   the fork only files (CLAUDE.md notes, GEN1X2_SUMMARY_DRAFT.md).
 - Next: the Device Core build
   with a USB 3 host through the SFP2USB adapter/the breakout, then a Gen 1x2 host
-  ([doc/gen2-x2-roadmap.md](doc/gen2-x2-roadmap.md): throughput; any host packet placement done in
+  ([doc/notes/gen2-x2-roadmap.md](doc/notes/gen2-x2-roadmap.md): throughput; any host packet placement done in
   simulation, `LanesPacketAligner`, `sim.py --lanes-tx-shift`).
 
 ## Environment Notes (Claude Code cloud sessions)
@@ -81,3 +81,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
 - `sim.py` needs `pythondata_misc_tapcfg` (only for the LiteX sim Ethernet modules): a local stub
   package on `PYTHONPATH` (header + functions returning -1) is enough.
 - Remote branch deletions are refused by the session git proxy: the user deletes/renames branches.
+- Upstream docs are in the manual (`doc/manual/`, checks: `python3 doc/manual/build.py --check`,
+  needs `pip install cairosvg`; `doc/manual/tools/csr_doc.py dump --check`/`generate --check`); the
+  Gen 1x2 material is in its PHY/core/boards/examples/simulation/debugging chapters and options
+  appendix, the procedure/results stay in `doc/gen1x2-hardware-validation.md` (path cited on issue
+  #140), the roadmap in `doc/notes/gen2-x2-roadmap.md`. Upstream remote: add
+  `https://github.com/enjoy-digital/usb3_pipe` as `upstream` (anonymous read).

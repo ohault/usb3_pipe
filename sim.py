@@ -6,7 +6,7 @@
 # Copyright (c) 2019-2026 Florent Kermarrec <florent@enjoy-digital.fr>
 # SPDX-License-Identifier: BSD-2-Clause
 
-"""USB3-PIPE Verilator simulation (doc/usb3-pipe.md "Simulation", ./sim.py --help).
+"""USB3-PIPE Verilator simulation (doc/manual/13_simulation.md, ./sim.py --help).
 
 Two USB3PHYs connected through SerDes models (USB3SerDesModel: 8b/10b, LFPS, polarity, RX word
 shift, ppm offset/SSC, SKP insertion):
@@ -288,9 +288,9 @@ class USB3PIPESim(SoCMini):
     - prbs_words:    Words to check on both sides before ending the simulation (without core).
     - prbs_gap_bits: Gaps of 0 to 2**prbs_gap_bits - 1 cycles (Logical Idle) between the PRBS packets.
 
-    Gen 1x2 (lanes=2, PRBS stand-ins on 64-bit link words, see doc/gen2-x2-roadmap.md): the PHYs
-    train to U0 through the SuperSpeedPlus Polling (SCD1/SCD2, LBPM), with lane-to-lane skew, per
-    lane polarity (Host Lane 1 TX inverted) and SKP Ordered Sets differences:
+    Gen 1x2 (lanes=2, PRBS stand-ins on 64-bit link words, see doc/notes/gen2-x2-roadmap.md): the
+    PHYs train to U0 through the SuperSpeedPlus Polling (SCD1/SCD2, LBPM), with lane-to-lane skew,
+    per lane polarity (Host Lane 1 TX inverted) and SKP Ordered Sets differences:
     - lane_delays:      Lane 0/1 delays (words of 4 symbols) from Host to Device (lanes skew).
     - lane1_word_shift: Lane 1 RX word shift (symbols) of the Device SerDes model.
     - lane_skp:         Extra SKP Ordered Sets (2 Symbols) on the Host Lane 1 then Lane 0 every
