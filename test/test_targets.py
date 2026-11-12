@@ -180,11 +180,19 @@ def test_target_lanes_host_script_analyzer(tmp_path):
 def test_target_tx_postcursor(args, postcursor, tmp_path):
     # GTP TX post-cursor pre-emphasis (--tx-postcursor, default 6 with --lanes 2) on every GTP.
     elaborate("acorn", tmp_path, args)
-    verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
+    assert gtp_tx_postcursors(tmp_path) == [postcursor]*(2 if "--lanes" in args else 1)
+
+def gtp_tx_postcursors(output_dir):
+    """TXPOSTCURSOR of the GTPE2_CHANNEL instances of an elaborated target (Verilog order)."""
+    verilog = next((output_dir / "gateware").glob("*.v")).read_text()
     values  = re.findall(r"\.TXPOSTCURSOR\s*\(([^)]*)\)", verilog)
     assert values, "TXPOSTCURSOR not found"
-    for v in values:
-        assert int(v.split("'d")[-1] if "'d" in v else v.split("'b")[-1], 10 if "'d" in v else 2) == postcursor, v
+    return [int(v.split("'d")[-1]) if "'d" in v else int(v.split("'b")[-1], 2) for v in values]
+
+def test_target_tx_postcursor_per_sfp(tmp_path):
+    # One value per SFP cage (SFP-0/SFP-1): both values on the two GTPs.
+    elaborate("acorn", tmp_path, ["--lanes", "2", "--tx-postcursor", "6,10"])
+    assert sorted(gtp_tx_postcursors(tmp_path)) == [6, 10]
 
 def test_target_lanes_args(tmp_path):
     # --role host/--no-x2/--lanes-core require --lanes 2, --lanes 2 requires the Mini, --lanes-core

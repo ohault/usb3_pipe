@@ -62,7 +62,7 @@ options.
 | `--rxcdr-cfg` | none | GTP clock recovery setting override (hexadecimal) |
 | `--gtp-param` | none | GTP parameter override `NAME=VALUE`, repeatable |
 | `--lpm-hold` | `none` | Hold the GTP equalizer adaptation: `none`, `rxeq` (adapt only in Polling.RxEQ), `always`; `rxeq` with `--lanes 2` |
-| `--tx-postcursor` | 0 | GTP transmit post-cursor pre-emphasis (0 to 31); 6 with `--lanes 2` |
+| `--tx-postcursor` | 0 | GTP transmit post-cursor pre-emphasis (0 to 31), one value or one per SFP cage (`6,10`); 6 with `--lanes 2` |
 | `--lanes` | 1 | 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2 on SFP-0 and SFP-1, Mini only, experimental) |
 | `--role` | `device` | PHY role with `--lanes 2`: `device` or `host` (one board in each role) |
 | `--no-x2` | off | With `--lanes 2`: not Gen 1x2 capable, Gen 1x1 on SFP-0 |
