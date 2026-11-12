@@ -311,6 +311,10 @@ class USB3PIPESim(SoCMini):
                         SuperSpeedPlus Polling: SuperSpeed fallback of the Host).
     - dev_x2_disable:   Device Gen 1x2 capability disabled at runtime (x2_enable = 0): Gen 1x1
                         negotiated with a Device PHY built x2 capable.
+    - host_script_delay: with_core (lanes=2): the hardware scripted host (bench/usb3_soc.py
+                        USB3HostScript: Hot Reset before the run, LUP keep-alive out of it) instead of
+                        the host model, its run enabled after host_script_delay cycles (idle before,
+                        as on the boards before the first run).
 
     gen2_capable (lanes=1): Host and Device advertise Gen 2x1 in the SuperSpeedPlus Polling
     (SCD1/SCD2, LBPM), Gen 2 negotiated (training continues at Gen 1 speed).
@@ -337,7 +341,7 @@ class USB3PIPESim(SoCMini):
         lanes_crossed=False, lanes_tx_shift=0, lanes_tx_inverted=False, gen2_capable=False, gen2=False,
         link_words=1, dev_pipe_cd=False, dev_u1u2=True, dev_ss=False, gen2_data_width=None,
         host_recovery=False, host_hot_reset=0, host_deskew_clear=False, host_start_delay=0,
-        host_port_reset=False, dev_x2_disable=False,
+        host_port_reset=False, dev_x2_disable=False, host_script_delay=None,
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
         host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None):
@@ -459,7 +463,32 @@ class USB3PIPESim(SoCMini):
                 else:
                     self.comb += serdes[1].tx_polarity.eq(name == "host") # Per lane polarity (6.13.7).
 
-            if with_core and (name == "host"):
+            if with_core and (name == "host") and (host_script_delay is not None):
+                # Hardware scripted host (bench/usb3_soc.py USB3HostScript on the USB3PHYX2Link: Hot
+                # Reset before each run, LUP keep-alive out of the runs), idle for host_script_delay
+                # cycles before its run is enabled (as on the boards before the first run).
+                import sys as _sys
+                _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench"))
+                from usb3_soc import USB3HostScript
+                script_enable = Signal()
+                script_timer  = Signal(32)
+                sync = getattr(self.sync, cds[name])
+                sync += If(script_timer != int(host_script_delay),
+                    script_timer.eq(script_timer + 1),
+                ).Else(
+                    script_enable.eq(1),
+                )
+                host_script = renamer(USB3HostScript(link_phy, sys_clk_freq=sys_clk_freq,
+                    enable=script_enable))
+                self.add_module(name="host_script", module=host_script)
+                host_model = host_script.model
+                script_enable_d = Signal()
+                sync += [
+                    script_enable_d.eq(script_enable),
+                    If(script_enable & ~script_enable_d,
+                        Display("[%08d] HOST script enabled", script_timer)),
+                ]
+            elif with_core and (name == "host"):
                 # Scripted host Link/Protocol Layer (link initialization, enumeration).
                 # Gen 2: no Gen 1 SKP Ordered Sets/packets offsets in the script (Gen 2 SKP Ordered
                 # Sets by the Gen2TX, packets re-aligned by the Gen 2 framing).
@@ -922,6 +951,7 @@ def main():
     parser.add_argument("--host-deskew-clear", action="store_true", help="With --host-recovery --lanes 2: Host deskew cleared in Recovery.Idle (U0 entered without deskew).")
     parser.add_argument("--host-start-delay", default=0, help="Host PHY held in reset for N cycles (the Device trains alone first, ex: --timer-scale 100 --host-start-delay 600000: Device in Compliance).")
     parser.add_argument("--dev-x2-disable", action="store_true", help="--lanes 2: Device Gen 1x2 capability disabled at runtime (x2_enable = 0): Gen 1x1 negotiated.")
+    parser.add_argument("--host-script",   default=None, type=int, help="--lanes 2 --lanes-core: hardware scripted host (bench/usb3_soc.py USB3HostScript), its run enabled after N cycles (idle before, as on the boards).")
     parser.add_argument("--host-port-reset", action="store_true", help="Host port reset policy: Warm Reset when U0 is not reached (bench/usb3_soc.py USB3HostPortReset).")
     parser.add_argument("--host-itp",      action="store_true", help="Host model Isochronous Timestamp Packets between the transfers.")
     parser.add_argument("--dev-pipe-cd",   action="store_true", help="Device LTSSM/Link Layer/Core at half the PIPE frequency (USB3PHY pipe_cd, 64-bit Link Layer words).")
@@ -973,6 +1003,7 @@ def main():
         host_start_delay      = int(args.host_start_delay),
         host_port_reset       = args.host_port_reset,
         dev_x2_disable        = args.dev_x2_disable,
+        host_script_delay     = args.host_script,
         host_burst_out        = int(args.host_burst_out),
         host_burst_len        = int(args.host_burst_len),
         host_burst_stream     = int(args.host_burst_stream),

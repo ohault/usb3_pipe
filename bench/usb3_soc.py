@@ -645,8 +645,10 @@ class USB3HostScript(LiteXModule):
 
     Both scripts in the model ROM (SuperSpeedPlus, then SuperSpeed from step ss_start), the run
     starting on the one of the negotiated link (Gen 1x2: SuperSpeedPlus, Gen 1x1: SuperSpeed),
-    latched at the run start (usb3_script_ssp)."""
-    def __init__(self, link, sys_clk_freq=125e6, idle_delay=10e-3):
+    latched at the run start (usb3_script_ssp).
+
+    enable: optional Signal replacing the enable control field (simulation without a CSR bus)."""
+    def __init__(self, link, sys_clk_freq=125e6, idle_delay=10e-3, enable=None):
         from litex.soc.interconnect.csr import CSRStorage, CSRStatus, CSRField
         from litex.soc.interconnect import stream
         from usb3_pipe.framing  import WordsToPairs, PairsToWords
@@ -707,7 +709,8 @@ class USB3HostScript(LiteXModule):
 
         # Runs: Hot Reset (Header Sequence Numbers reset on both sides), U0, script. Test runs when
         # enabled; out of them, an idle link initialization (idle_init, once per U0 entry).
-        enable    = self._control.fields.enable
+        # enable: the control CSR field, or a Signal (simulation: sim.py --host-script).
+        enable    = self._control.fields.enable if enable is None else enable
         idle_init = self._control.fields.idle_init
         idle_done = Signal() # Idle link initialization done since the U0 entry.
         abort     = Signal() # Run kind no longer wanted (test run disabled, or idle run superseded).
