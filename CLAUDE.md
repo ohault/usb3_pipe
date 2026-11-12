@@ -92,6 +92,19 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   acorn_x2_loads.py, the dated validation doc (condensed into doc/notes for upstream), CLAUDE.md,
   GEN1X2_SUMMARY_DRAFT.md, the README Gen 1x2 column. Verilog check (upstream vs branch, Acorn/
   KC705/XCKU3P Gen 1): only inputs tied to 0; XCKU3P --gen2-capable: the PR 1 changes + x2 timers.
+- Hardware session 2026-11-12 (user's NUC, run by the PC's Claude Code session, see Environment Notes):
+  the Device Link Layer Recovery requests of the soak are PENDING_HP_TIMER (`pending_hp`) following
+  the lanes events, not a Link Layer bug; the weak path is the SFP-1 transmitter channel of the Acorn
+  Mini, on both boards (cables exchanged, crossed/straight); GTP TX post-cursor pre-emphasis 6 on both
+  cages is now the `--lanes 2` default (`bench/acorn.py --tx-postcursor`, per cage possible: 6,10
+  tried, not adopted): 400/400 on 20 loads crossed; the Host Lane 0 (fed by the Device SFP-1) still
+  ~70-110k comma realignments per load (receive side open). Device Recovery cause counters 16-bit
+  (8-bit saturated). The scripted host idle link initialization is on by default (the idle host did
+  not acknowledge the Device: a Recovery every ~15us, reproduced with `sim.py --host-script N`,
+  `TestPHYX2Core.test_core_x2_host_script_idle`). Timing: register stages on the scripted host paths
+  (`5eefc1e`), `LanesPacketAligner` parser without the 8-step chain (to be measured on a build);
+  last hardware run with both host changes (before the aligner change): 398/400 on noisier loads.
+  Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build
   with a USB 3 host through the SFP2USB adapter/the breakout, then a Gen 1x2 host
   ([doc/notes/gen2-x2-roadmap.md](doc/notes/gen2-x2-roadmap.md): throughput; any host packet placement done in
@@ -112,6 +125,12 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
 - `sim.py` needs `pythondata_misc_tapcfg` (only for the LiteX sim Ethernet modules): a local stub
   package on `PYTHONPATH` (header + functions returning -1) is enough.
 - Remote branch deletions are refused by the session git proxy: the user deletes/renames branches.
+- Hardware from a cloud session: the user's NUC runs a Claude Code session through Remote Control
+  (`claude remote-control`, listed by list_sessions, title `ohault-nuc7i7dnhe-*`, tag
+  remote-control-cli). This session sends it tasks with send_message (allowed once by the user on a
+  trusted device) and reads its results with list_events (kinds result): its own send_message back is
+  refused. No computer folder is offered to cloud sessions on this account (list_computer_folders
+  empty). Self check-ins (send_later) fail with ACCESS_DENIED: the user asks "check again".
 - Upstream docs are in the manual (`doc/manual/`, checks: `python3 doc/manual/build.py --check`,
   needs `pip install cairosvg`; `doc/manual/tools/csr_doc.py dump --check`/`generate --check`); the
   Gen 1x2 material is in its PHY/core/boards/examples/simulation/debugging chapters and options
