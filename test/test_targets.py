@@ -171,6 +171,21 @@ def test_target_lanes_host_script_analyzer(tmp_path):
     for name in ["rx_realign", "rx_errors", "rx_idle"]:
         assert sum(bool(re.search(rf"_{name}\d*$", p)) for p in probes) >= 2, name
 
+@pytest.mark.parametrize("args, postcursor", [
+    ([],                                    0),  # Gen 1x1: no pre-emphasis (unchanged).
+    (["--lanes", "2"],                      6),  # Gen 1x2 default.
+    (["--lanes", "2", "--tx-postcursor", "0"], 0),
+    (["--tx-postcursor", "10"],             10),
+])
+def test_target_tx_postcursor(args, postcursor, tmp_path):
+    # GTP TX post-cursor pre-emphasis (--tx-postcursor, default 6 with --lanes 2) on every GTP.
+    elaborate("acorn", tmp_path, args)
+    verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
+    values  = re.findall(r"\.TXPOSTCURSOR\s*\(([^)]*)\)", verilog)
+    assert values, "TXPOSTCURSOR not found"
+    for v in values:
+        assert int(v.split("'d")[-1] if "'d" in v else v.split("'b")[-1], 10 if "'d" in v else 2) == postcursor, v
+
 def test_target_lanes_args(tmp_path):
     # --role host/--no-x2/--lanes-core require --lanes 2, --lanes 2 requires the Mini, --lanes-core
     # requires the core.

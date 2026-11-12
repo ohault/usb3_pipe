@@ -123,7 +123,7 @@ class _CRG(LiteXModule):
 
 class USB3SoC(USB3BaseSoC):
     def __init__(self, platform, cpu_type=None, with_dram=False,
-        gtp_params={}, rxcdr_cfg=None, lpm_hold="none", lanes=1, role="device", x2_capable=True,
+        gtp_params={}, rxcdr_cfg=None, lpm_hold="none", tx_postcursor=0, lanes=1, role="device", x2_capable=True,
         lanes_core=False,
         with_analyzer=False, analyzer_group="link", analyzer_csv="analyzer.csv",
         usb3_kwargs={}, **kwargs):
@@ -175,6 +175,9 @@ class USB3SoC(USB3BaseSoC):
                 # Gen 1x2 (two Acorn Minis): RX electrical idle detection spikes after the partner
                 # Polling LFPS bursts on some bitstream loads, rejected below the shortest LFPS burst.
                 rx_idle_min_burst = 40e-9 if lanes == 2 else None)
+            # TX post-cursor pre-emphasis (--tx-postcursor, UG482 TXPOSTCURSOR).
+            if tx_postcursor:
+                serdes.gtp.gtp_params.update(i_TXPOSTCURSOR=tx_postcursor)
             serdes.gtp.gtp_params.update(gtp_params) # Debug overrides (--gtp-param).
             usb3_serdes.append(serdes)
         # Fabric reference clock on GTGREFCLK0 (doc/manual: Transceivers): allowed as a warning.
@@ -234,6 +237,7 @@ def main():
     gtp_group = parser.add_argument_group(title="GTP bring-up/debug overrides")
     gtp_group.add_argument("--rxcdr-cfg", default=None,   help="GTP RXCDR_CFG override (hex).")
     gtp_group.add_argument("--gtp-param", default=[],     help="GTP parameter override NAME=VALUE (ex: p_RXCDR_HOLD_DURING_EIDLE=1).", action="append")
+    gtp_group.add_argument("--tx-postcursor", default=None, type=int, help="GTP TX post-cursor pre-emphasis (TXPOSTCURSOR 0-31; default: 6 with --lanes 2, else 0).")
     gtp_group.add_argument("--lpm-hold",  default=None,   help="GTP LPM adaptation hold (rxeq: adapt only in Polling.RxEQ; default: rxeq with --lanes 2, else none).", choices=["none", "rxeq", "always"])
     x2_group = parser.add_argument_group(title="Gen 1x2 (two lanes, SFP-0/SFP-1: two boards link tests with PRBS Link-Layer stand-ins, or dual SFP to USB-C breakout)")
     x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2, SFP-0/SFP-1, Mini only).", choices=[1, 2])
@@ -274,6 +278,10 @@ def main():
         # spikes, millions of comma realignments, links never trained on some loads): adaptation
         # only on the partner's TSEQ (Polling.RxEQ), 400/400 runs on 20 loads at Gen 1x2 and 1x1.
         lpm_hold    = args.lpm_hold or ("rxeq" if args.lanes == 2 else "none"),
+        # Gen 1x2 (two Acorn Minis, SFP DAC cables): the receivers fed by an SFP-1 transmitter were
+        # the weak ones on both boards (millions of comma realignments on some loads, 759/1000
+        # scripted runs on one cabling): TX post-cursor pre-emphasis 6 (~1.7dB), 998/1000.
+        tx_postcursor = args.tx_postcursor if args.tx_postcursor is not None else (6 if args.lanes == 2 else 0),
         lanes       = args.lanes,
         role        = args.role,
         x2_capable  = not args.no_x2,
