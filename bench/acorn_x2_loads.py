@@ -36,7 +36,7 @@ from common import ROOT # First: repository root on the path.
 BENCH = os.path.join(ROOT, "bench")
 
 CORE_COUNTERS = ["recovery_req", "rx_lbad", "tx_retry", "rx_errors"]
-CORE_CAUSES   = ["hp_seq", "lgood", "lcrd", "pending_hp", "credit_hp"] # usb3_core_recovery_cause bytes 1-5.
+CORE_CAUSES   = ["hp_seq", "lgood", "lcrd", "pending_hp", "credit_hp"] # usb3_core_recovery_cause counts 1-5.
 
 # Helpers ------------------------------------------------------------------------------------------
 
@@ -97,8 +97,11 @@ def core_counters(port, csr_csv):
         if hasattr(bus.regs, f"usb3_core_{name}"):
             r[name] = getattr(bus.regs, f"usb3_core_{name}").read()
     if hasattr(bus.regs, "usb3_core_recovery_cause"):
-        cause = bus.regs.usb3_core_recovery_cause.read()
-        r.update({c: (cause >> (8*(i + 1))) & 0xff for i, c in enumerate(CORE_CAUSES)})
+        reg   = bus.regs.usb3_core_recovery_cause
+        cause = reg.read()
+        # 16-bit counts (3 CSR words), 8-bit counts on older bitstreams (2 CSR words).
+        w = 16 if getattr(reg, "length", 3) >= 3 else 8
+        r.update({c: (cause >> (w*(i + 1))) & (2**w - 1) for i, c in enumerate(CORE_CAUSES)})
     bus.close()
     return r
 

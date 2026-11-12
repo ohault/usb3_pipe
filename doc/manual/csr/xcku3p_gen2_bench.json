@@ -576,55 +576,55 @@
      {
       "description": "hp_seq Recovery requests (saturating).",
       "name": "hp_seq",
-      "offset": 8,
+      "offset": 16,
       "reset": 0,
-      "size": 8,
+      "size": 16,
       "values": []
      },
      {
       "description": "lgood Recovery requests (saturating).",
       "name": "lgood",
-      "offset": 16,
+      "offset": 32,
       "reset": 0,
-      "size": 8,
+      "size": 16,
       "values": []
      },
      {
       "description": "lcrd Recovery requests (saturating).",
       "name": "lcrd",
-      "offset": 24,
+      "offset": 48,
       "reset": 0,
-      "size": 8,
+      "size": 16,
       "values": []
      },
      {
       "description": "pending_hp Recovery requests (saturating).",
       "name": "pending_hp",
-      "offset": 32,
+      "offset": 64,
       "reset": 0,
-      "size": 8,
+      "size": 16,
       "values": []
      },
      {
       "description": "credit_hp Recovery requests (saturating).",
       "name": "credit_hp",
-      "offset": 40,
+      "offset": 80,
       "reset": 0,
-      "size": 8,
+      "size": 16,
       "values": []
      }
     ],
     "name": "recovery_cause",
     "offset": 72,
     "reset": null,
-    "size": 48
+    "size": 96
    },
    {
     "access": "wo",
     "description": "",
     "fields": [],
     "name": "recovery_request",
-    "offset": 80,
+    "offset": 84,
     "reset": null,
     "size": 1
    },
@@ -650,7 +650,7 @@
      }
     ],
     "name": "rx_errors",
-    "offset": 84,
+    "offset": 88,
     "reset": null,
     "size": 32
    }

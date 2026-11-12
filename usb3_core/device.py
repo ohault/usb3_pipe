@@ -159,18 +159,18 @@ class USB3DeviceCore(LiteXModule):
         self._link_state   = CSRStatus(fields=[CSRField(name, size=size, description=description)
             for name, size, description in link_state_fields])
         # Recovery causes (link dbg_recovery_cause, sampled on the dbg_recovery pulse): last cause
-        # and 8-bit saturating counts per cause.
+        # and 16-bit saturating counts per cause (8-bit counts saturated on hardware soaks).
         causes = ["hp_seq", "lgood", "lcrd", "pending_hp", "credit_hp"]
         self._recovery_cause = CSRStatus(fields=
             [CSRField("last", size=len(causes),
                 description="Last Recovery cause: " + ", ".join(causes))] +
-            [CSRField(c, size=8, offset=8*(i + 1),
+            [CSRField(c, size=16, offset=16*(i + 1),
                 description=f"{c} Recovery requests (saturating).")
                 for i, c in enumerate(causes)])
         cause = self.link.dbg_recovery_cause
         self.sync += If(self.link.dbg_recovery,
             self._recovery_cause.fields.last.eq(cause),
-            *[If(cause[i] & (getattr(self._recovery_cause.fields, c) != 255),
+            *[If(cause[i] & (getattr(self._recovery_cause.fields, c) != (2**16 - 1)),
                 getattr(self._recovery_cause.fields, c).eq(
                     getattr(self._recovery_cause.fields, c) + 1))
                 for i, c in enumerate(causes)]

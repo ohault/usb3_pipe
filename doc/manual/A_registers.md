@@ -130,9 +130,9 @@ Bank `usb3_core`.
 | `tx_retry` | `0x003c` | 16 | ro | LBAD received (Header Packets resent). |
 | `recovery_req` | `0x0040` | 16 | ro | Recovery requests (timeouts, errors). |
 | `link_state` | `0x0044` | 31 | ro | See the fields below. |
-| `recovery_cause` | `0x0048` | 48 | ro | See the fields below. |
-| `recovery_` `request` | `0x0050` | 1 | wo | Write strobe. |
-| `rx_errors` | `0x0054` | 32 | ro | See the fields below. |
+| `recovery_cause` | `0x0048` | 96 | ro | See the fields below. |
+| `recovery_` `request` | `0x0054` | 1 | wo | Write strobe. |
+| `rx_errors` | `0x0058` | 32 | ro | See the fields below. |
 
 Fields of `trace_control`:
 
@@ -187,11 +187,11 @@ Fields of `recovery_cause`:
 | Field | Bits | Description |
 |------------------------|---------|------------------------------------------------------|
 | `last` | 4:0 | Last Recovery cause: hp_seq, lgood, lcrd, pending_hp, credit_hp |
-| `hp_seq` | 15:8 | hp_seq Recovery requests (saturating). |
-| `lgood` | 23:16 | lgood Recovery requests (saturating). |
-| `lcrd` | 31:24 | lcrd Recovery requests (saturating). |
-| `pending_hp` | 39:32 | pending_hp Recovery requests (saturating). |
-| `credit_hp` | 47:40 | credit_hp Recovery requests (saturating). |
+| `hp_seq` | 31:16 | hp_seq Recovery requests (saturating). |
+| `lgood` | 47:32 | lgood Recovery requests (saturating). |
+| `lcrd` | 63:48 | lcrd Recovery requests (saturating). |
+| `pending_hp` | 79:64 | pending_hp Recovery requests (saturating). |
+| `credit_hp` | 95:80 | credit_hp Recovery requests (saturating). |
 
 Fields of `rx_errors`:
 
