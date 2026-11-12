@@ -281,7 +281,8 @@ class LanesPacketAligner(LiteXModule):
 
     Not handled (as the Gen 1x1 path): a corrupted first framing symbol (the packet is then taken
     from the next symbol, misaligned: CRC error and retry by the Link Layer), a corrupted EPF at
-    the end of a DPP (the DPP ends at the next EPF)."""
+    the end of a DPP (the DPP ends at the next EPF), a K EPF symbol right after the framing of a DPP
+    starting in the same word (not its end; impossible in a valid DPP: data, CRC-32 and END first)."""
     def __init__(self, buffer_symbols=32):
         assert buffer_symbols % 4 == 0
         self.sink     = sink   = stream.Endpoint(link_layout())
@@ -317,48 +318,83 @@ class LanesPacketAligner(LiteXModule):
             for s in in_k:
                 self.sync += in_k[s][i].eq(sink.ctrl[i] & (sink.data[8*i:8*(i+1)] == s.value))
 
-        m, c = mode, count
+        # Parser without a chain of 8 dependent symbol steps (timing): a word holds at most the end
+        # of the current packet then the start of one packet (a packet is 8 symbols or more), the
+        # end found from the count (Header Packet/Link Command) or the first EPF (DPP), the start by
+        # a priority encoder after it. count: symbols of the current packet (FIXED) or of its DPP
+        # framing (DPP_FRAMING) from the word's symbol 0.
+        def first(bits):
+            """(found, index) of the first set bit (priority encoder)."""
+            found, index = Signal(), Signal(3)
+            self.comb += found.eq(Reduce("OR", bits))
+            for i in reversed(range(8)):
+                self.comb += If(bits[i], index.eq(i))
+            return found, index
+        is_start = [in_k[SHP][i] | in_k[SLC][i] | in_k[SDP][i] for i in range(8)]
+        # End of the current packet in this word (ended, e).
+        epf_from = Signal(4) # First symbol of the EPF search (DPP: 0, DPP_FRAMING: after it).
+        self.comb += epf_from.eq(Mux(mode == DPP_FRAMING, count, 0))
+        epf_found, epf_index = first([in_k[EPF][i] & (i >= epf_from) for i in range(8)])
+        ended = Signal()
+        e     = Signal(3)
+        self.comb += Case(mode, {
+            IDLE:        ended.eq(0),
+            FIXED:       [ended.eq(count <= 8), e.eq(count - 1)],
+            DPP_FRAMING: [ended.eq((count <= 8) & epf_found), e.eq(epf_index)],
+            DPP:         [ended.eq(epf_found), e.eq(epf_index)],
+        })
+        # Start of a packet after it (or from symbol 0 out of a packet): started, s, kind.
+        start_ok = [Signal(name=f"start_ok{i}") for i in range(8)]
+        for i in range(8):
+            self.comb += start_ok[i].eq(is_start[i] &
+                ((mode == IDLE) | (ended & (i > e))))
+        started, s_index = first(start_ok)
+        s_shp = Signal()
+        s_slc = Signal()
+        self.comb += [
+            s_shp.eq(Array(in_k[SHP])[s_index]),
+            s_slc.eq(Array(in_k[SLC])[s_index]),
+        ]
+        in_packet = Signal()
+        self.comb += in_packet.eq(mode != IDLE)
         for i in range(8):
             data, k = in_data[8*i:8*(i+1)], in_ctrl[i]
-            def is_k(symbol):
-                return in_k[symbol][i]
-            _keep, _last = Signal(), Signal()
-            nm, nc = Signal(2, name=f"mode{i}"), Signal(5, name=f"count{i}")
+            _keep = Signal(name=f"keep_c{i}")
+            _last = Signal(name=f"last_c{i}")
             self.comb += [
-                _keep.eq(1), _last.eq(0), nm.eq(m), nc.eq(c - 1),
-                Case(m, {
-                    IDLE: [
-                        _keep.eq(0),
-                        If(is_k(SHP),
-                            _keep.eq(1), nm.eq(FIXED), nc.eq(20 - 1),
-                        ).Elif(is_k(SLC),
-                            _keep.eq(1), nm.eq(FIXED), nc.eq(8 - 1),
-                        ).Elif(is_k(SDP),
-                            _keep.eq(1), nm.eq(DPP_FRAMING), nc.eq(4 - 1),
-                        ),
-                    ],
-                    FIXED: If(c == 1,
-                        _last.eq(1), nm.eq(IDLE),
-                    ),
-                    DPP_FRAMING: If(c == 1,
-                        nm.eq(DPP),
-                    ),
-                    DPP: If(is_k(EPF),
-                        _last.eq(1), nm.eq(IDLE),
-                    ),
-                }),
+                _keep.eq((in_packet & (~ended | (i <= e))) | (started & (i >= s_index))),
+                # Last symbol: end of the current packet, or of a Link Command starting at symbol 0.
+                _last.eq((ended & (e == i)) | ((i == 7) & started & s_slc & (s_index == 0))),
             ]
             self.sync += [
                 sym[i].eq(Cat(data, k)),
                 keep[i].eq(in_valid & _keep),
                 last[i].eq(in_valid & _last),
             ]
-            m, c = nm, nc
+        # State at the end of the word.
+        nm = Signal(2)
+        nc = Signal(5)
+        self.comb += [
+            nm.eq(mode), nc.eq(count - 8),
+            If(started,
+                If(s_shp,
+                    nm.eq(FIXED), nc.eq(12 + s_index),       # 20 symbols from s.
+                ).Elif(s_slc,
+                    nm.eq(Mux(s_index == 0, IDLE, FIXED)), nc.eq(s_index), # 8 symbols from s.
+                ).Else(
+                    nm.eq(Mux(s_index > 4, DPP_FRAMING, DPP)), nc.eq(s_index - 4), # Framing: 4.
+                )
+            ).Elif(ended | (mode == IDLE),
+                nm.eq(IDLE),
+            ).Elif(mode == DPP_FRAMING,
+                nm.eq(DPP), # Framing (3 symbols at most) ended in this word.
+            ),
+        ]
         self.sync += [
             valid.eq(in_valid),
             If(in_valid,
-                mode.eq(m),
-                count.eq(c),
+                mode.eq(nm),
+                count.eq(nc),
             )
         ]
 
