@@ -359,6 +359,8 @@ class USB3HostModel(LiteXModule):
         credits1   = Signal(8)
         rx_lcrd1   = Signal()
         tx_hp      = Signal()   # Host Header Packet sent (HPSTART).
+        tx_hp_d    = Signal()   # tx_hp registered (timing: script ROM -> credits, the credit taken a
+                                # cycle later, a Header Packet takes 5 words).
         credits_ok = Signal()
         rx_lc      = Signal()   # Word after LCSTART (Link Command Word) expected.
         rx_lcrd2   = Signal()
@@ -409,11 +411,12 @@ class USB3HostModel(LiteXModule):
             ).Elif(u0_d & ~self.u0,
                 credits1.eq(0)
             ).Else(
-                credits1.eq(credits1 + rx_lcrd1 - tx_hp)
+                credits1.eq(credits1 + rx_lcrd1 - tx_hp_d)
             ),
         ]
         # Gen 1 (not SuperSpeedPlus): OP_WAITCRED waits a Rx Header Buffer credit (LCRD_x), consumed
         # by any Header Packet sent.
+        self.sync += tx_hp_d.eq(tx_hp)
         self.comb += [
             rx_lcrd1.eq(ack_enable & sink.valid & rx_lc & ((lc_rx_info & 0x7fc) == 0x080)),
             tx_hp.eq(source.valid & source.ready & (source.ctrl == 0b1111) &
