@@ -373,12 +373,15 @@ class USB3PHY(LiteXModule):
         # it on each training failure (and Warm Reset), when the LTSSM exits to Rx.Detect, or when
         # requested (serdes_rx_reset, ex: debug).
         self.serdes_rx_reset = Signal() # i
-        rx_errors_reinit = [Constant(0)]*len(serdes)
+        rx_errors_reinit = [None]*len(serdes)
         if lanes == 2:
             rx_errors_reinit = self.add_rx_errors_monitors(serdes, sys_clk_freq, timer_scale)
         for s, reinit in zip(serdes, rx_errors_reinit):
+            rx_reset = ltssm.exit_to_rx_detect | self.serdes_rx_reset
+            if reinit is not None:
+                rx_reset = rx_reset | reinit # Gen 1x2: RX re-initialization on continuous errors.
             if pipe_cd is None:
-                self.comb += s.rx_reset.eq(ltssm.exit_to_rx_detect | self.serdes_rx_reset | reinit)
+                self.comb += s.rx_reset.eq(rx_reset)
             else:
                 self.specials += MultiReg(ltssm.exit_to_rx_detect | self.serdes_rx_reset,
                     s.rx_reset, pipe_cd)
@@ -525,7 +528,8 @@ class USB3PHY(LiteXModule):
                 ssp                  = (lane == 0))
             self.add_module(name=f"pipe{lane}", module=pipe)
             pipes.append(pipe)
-        self.ltssm = ltssm = USB3LTSSM(sys_clk_freq=sys_clk_freq, timer_scale=timer_scale, ssp=True)
+        self.ltssm = ltssm = USB3LTSSM(sys_clk_freq=sys_clk_freq, timer_scale=timer_scale, ssp=True,
+            lanes=2)
         self.comb += ltssm.ds_port.eq(role == "host")
         # Configuration Lane detection in the SuperSpeedPlus Polling, and in Compliance: a Device
         # timed out to Compliance before receiving the partner's Polling.LFPS (partner not started
@@ -579,10 +583,12 @@ class USB3PHY(LiteXModule):
         self.ssp  = ssp = SSPPolling(sys_clk_freq, timer_scale=timer_scale,
             x2_capable   = x2_capable,
             gen2_capable = gen2_capable)
-        # Gen 1x2 advertised (runtime: 0 forces Gen 1x1 from the next SuperSpeedPlus Polling, ex:
-        # tests of the Gen 1x1 operation with a partner x2 capable; x2_capable is the maximum).
-        self.x2_enable = Signal(reset=1) # i
-        self.comb += ssp.x2_capable.eq(int(x2_capable) & self.x2_enable)
+        # Gen 1x2 advertised (lanes=2, runtime: 0 forces Gen 1x1 from the next SuperSpeedPlus
+        # Polling, ex: tests of the Gen 1x1 operation with a partner x2 capable; x2_capable is the
+        # maximum).
+        if len(self.pipes) == 2:
+            self.x2_enable = Signal(reset=1) # i
+            self.comb += ssp.x2_capable.eq(int(x2_capable) & self.x2_enable)
         self.x2   = Signal() # o: Gen X2 (two lanes) negotiated.
         self.gen2 = Signal() # o: Gen 2 (10Gbps) negotiated.
         self.comb += [

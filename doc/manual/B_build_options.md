@@ -157,7 +157,7 @@ Numbers are in cycles of the 133 MHz simulation clock unless stated.
 | `--lanes` | 1 | 1 (Gen 1x1) or 2 (Gen 1x2, PRBS stand-ins) |
 | `--lanes-core` | off | Two lanes: host script and device core instead of the PRBS stand-ins |
 | `--dev-mode` | `x2` | Two lanes: device `x2` (Gen 1x2), `x1` (not x2 capable) or `ss` (SuperSpeed device) |
-| `--dev-x2-disable` | off | Two lanes: device Gen 1x2 capability disabled by its register (Gen 1x1) |
+| `--dev-x2-disable` | off | Two lanes: device Gen 1x2 capability withdrawn at runtime (Gen 1x1) |
 | `--lanes-crossed` | off | Two lanes: host lane 0 on device lane 1 (flipped USB Type-C plug) |
 | `--lanes-tx-inverted` | off | Two lanes: transmit polarity of every lane inverted on both sides |
 | `--lanes-tx-shift` | 0 | Two lanes with the core: packets delayed by 1 to 7 symbols |

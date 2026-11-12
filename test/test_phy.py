@@ -646,6 +646,17 @@ class TestPHYX2(unittest.TestCase):
         # Flipped plug, Gen 1x1 negotiated: single lane on the Device SerDes 1.
         self.run_sim("crossed_x1", ["--lanes-crossed", "--dev-mode", "x1"], mode="x1", swap=True)
 
+    def test_phy_x2_tx_inverted(self):
+        # All the lanes TX inverted on both PHYs (as the LiteX Acorn Baseboard Mini SFP lanes): the
+        # four RX polarities flipped in Polling.Active (Lane 1 polarity from its TS1, 6.13.7).
+        self.run_sim("tx_inverted", ["--lanes-tx-inverted"])
+
+    def test_phy_x2_x1_runtime(self):
+        # Device built Gen 1x2 capable, Gen 1x2 disabled at runtime (x2_enable = 0): Gen 1x1
+        # negotiated, single lane on Lane 0, flipped plug and inverted lanes.
+        self.run_sim("x1_runtime", ["--dev-x2-disable", "--lanes-crossed", "--lanes-tx-inverted"],
+            mode="x1", swap=True)
+
     def test_phy_x2_fallback_ss(self):
         # Gen 1x1 SuperSpeed Device (no SCD): SuperSpeed fallback of the Host, Lane 0 only.
         self.run_sim("fallback_ss", ["--dev-mode", "ss"], mode="ss")

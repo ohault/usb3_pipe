@@ -309,6 +309,8 @@ class USB3PIPESim(SoCMini):
     - dev_mode:         Device x2 (Gen 1x2), x1 (two lanes, not x2 capable: Gen 1x1 negotiated, single
                         lane fallback on Lane 0) or ss (Gen 1x1 SuperSpeed Device on Lane 0, no
                         SuperSpeedPlus Polling: SuperSpeed fallback of the Host).
+    - dev_x2_disable:   Device Gen 1x2 capability disabled at runtime (x2_enable = 0): Gen 1x1
+                        negotiated with a Device PHY built x2 capable.
 
     gen2_capable (lanes=1): Host and Device advertise Gen 2x1 in the SuperSpeedPlus Polling
     (SCD1/SCD2, LBPM), Gen 2 negotiated (training continues at Gen 1 speed).

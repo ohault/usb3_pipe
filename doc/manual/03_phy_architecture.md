@@ -71,7 +71,7 @@ transceiver files are described in [Datapath](#datapath) and [Transceivers](#tra
 | `lanes.py`       | `LaneStriper`, `LaneDeskew`, `LanesPacketAligner`  | Gen 1x2 lane striping, deskew, lanes swap, packet alignment |
 | `serdes.py`      | `USB3SerDes`, `GW5USB3SerDes`, `ECP5USB3SerDes`    | Transceiver wrappers: AMD, Gowin and Lattice                |
 | `gw5/`           | TOML files, `gen_toml.py`                          | Gowin GTR12 register configurations                         |
-| `debug.py`       | `USB3PHYDebug`, `USB3SerDesDebug`                  | Debug registers and LiteScope groups                        |
+| `debug.py`       | `USB3PHYDebug`, `USB3LanesDebug`                   | Debug registers and LiteScope groups                        |
 | `gen.py`         | `USB3PIPECore`                                     | Standalone Verilog core generator `usb3_pipe_gen`           |
 
 The standalone generator wraps the PHY in a Verilog module for designs outside LiteX; it is
@@ -320,19 +320,21 @@ its own PIPE under a single LTSSM. Lane 0 is the configuration lane: it alone ca
 and the SuperSpeedPlus Polling, while lane 1 stays in electrical idle.
 
 The link words are 64-bit and split symbol by symbol: even symbols on lane 0, odd symbols on
-lane 1 (`LaneStriper`). On receive, `LaneDeskew` aligns the lanes on the Ordered Sets, which both
-lanes send at the same time, and `LaneDestriper` rebuilds the words. Each lane has its own
-scrambler seed and its own polarity.
+lane 1 (`LaneStriper`). Both lanes transmit in lockstep: the Logical Idle is striped with the data,
+so a lane never sends a word the other lane does not send. Each lane has its own scrambler seed
+and its own polarity.
 
-Both lanes transmit in lockstep: the Logical Idle is striped with the data, so a lane never sends a
-word the other lane does not send. The receiver pairs the lanes on the first Ordered Sets after a
-gap, and goes to Recovery when the lanes lose their deskew, when a lane goes to electrical idle or
-when a lane realigns in U0.
+On receive, the deskew pairs the first COM symbols of each lane after a gap, the TSEQ before the
+TS1 or the Logical Idle before a Recovery, whatever the lanes latencies (`LaneDeskew`). The
+destriper then rebuilds the words (`LaneDestriper`). In U0 the PHY goes to Recovery when the
+deskew is lost, when a lane stays in electrical idle for 10 µs, or when a lane realigns its words.
+A lane that keeps decoding errors is re-initialized.
 
-The device detects which receiver gets the configuration lane from the partner's Polling LFPS and
+The device finds which receiver gets the configuration lane from the partner's Polling LFPS and
 swaps the lanes, as a flipped USB Type-C plug needs (`LaneSwap`). When the partner is not Gen 1x2
-capable, the link trains at Gen 1x1 on lane 0 and the 32-bit words of that lane are on
-`sink_x1` and `source_x1`.
+capable, the link trains at Gen 1x1 on lane 0, and the 32-bit words of that lane are on
+`sink_x1` and `source_x1`. The `x2_enable` input withdraws the Gen 1x2 capability for the next
+training.
 
 Two adapters give the device core its link interface. `USB3PHYX2Link` runs the SuperSpeedPlus
 link layer on 64-bit word pairs at Gen 1x2 and the SuperSpeed one on lane 0 at Gen 1x1.

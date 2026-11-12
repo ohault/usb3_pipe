@@ -198,6 +198,9 @@ milestones](#gen-2x1-hardware-milestones)); the Gen 1x2 ones between two Acorn B
 - `lanes.py`: `LaneDeskew` pairs the first markers after a gap on both lanes (periodic COM words
   received 2 words apart, half the TS period, with a Lane 0 delay and a Lane 1 word shift: ambiguous
   by arrival time), `LaneSwap` (lanes mux, Configuration Lane detection).
+- `prbs.py`: PRBS Link-Layer stand-ins (`PRBSPacketGenerator`/`PRBSPacketChecker`, `PRBSLinkTester`
+  with CSRs for hardware link tests), `debug.py` `USB3LanesDebug` (lanes status and counters, U0
+  exits requested by the lanes), LiteScope groups `lanes`/`realign`.
 - `sim.py --lanes 2` (Verilator): Host and Device `USB3PHY(lanes=2)` (4 SerDes models) negotiate
   Gen 1x2 (SCD1/SCD2, LBPM), train to U0 and exchange 64-bit PRBS packets (Logical Idle gaps of
   0-15 cycles) without errors with lane-to-lane skew (Lane 0 or Lane 1 late, word shifts), Lane 1 TX
@@ -208,8 +211,8 @@ milestones](#gen-2x1-hardware-milestones)); the Gen 1x2 ones between two Acorn B
   (flipped USB Type-C plug: Host Lane i on the Device SerDes 1 - i): lanes swap detected by the
   Device, Gen 1x2/Gen 1x1 without errors.
 - Unit tests: `test/test_lfps_ssp.py` (SCD, LBPM), `test/test_ltssm_ssp.py` (x2/x2 -> Gen 1x2,
-  x2/x1 -> Gen 1x1, SS partner fallback), `test/test_lanes.py` (periodic marker deskew in both skew
-  directions).
+  x2/x1 -> Gen 1x1, SS partner fallback), `test/test_lanes.py` (striping lockstep, deskew after a
+  gap in both skew directions, lanes swap), `test/test_prbs.py`, `test/test_debug.py`.
 
 ### Approximated / not verified
 
