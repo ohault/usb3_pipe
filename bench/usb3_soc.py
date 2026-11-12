@@ -655,7 +655,7 @@ class USB3HostScript(LiteXModule):
         from usb3_core.host_model import USB3HostModel
         self._control = CSRStorage(fields=[
             CSRField("enable", size=1, offset=0, reset=0, description="Run the script (in U0, restarted on 0 -> 1)."),
-            CSRField("idle_init", size=1, offset=1, reset=0, description="Out of the runs, link initialization and acknowledges of the Device Header Packets (after a Hot Reset, on each U0 entry): no Device Recovery out of the runs (counters), optional."),
+            CSRField("idle_init", size=1, offset=1, reset=1, description="Out of the runs, link initialization and acknowledges of the Device Header Packets (after a Hot Reset, on each U0 entry): no Device Recovery out of the runs (without it, the Device requests a Recovery every PENDING_HP_TIMER while the host is idle)."),
         ])
         self._status = CSRStatus(fields=[
             CSRField("done",    size=1, offset=0, description="Script done (all the steps matched)."),

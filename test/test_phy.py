@@ -530,6 +530,17 @@ class TestPHYX2Core(unittest.TestCase):
         out = self.check_compliance_exit("core_x1_compliance", ["--dev-mode", "x1"])
         self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 0, gen2: 0\)")
 
+    def test_core_x2_host_script_idle(self):
+        # Hardware scripted host (bench/usb3_soc.py USB3HostScript) idle before its run, as on the
+        # boards (two Acorn Minis lanes): idle link initialization (Hot Reset, link init, reactive
+        # acknowledges), no Device Recovery request while the host is idle (without it: one every
+        # PENDING_HP_TIMER), then the run (Hot Reset) done.
+        out = self.run_sim("core_x2_host_script_idle", ["--dev-mode", "x2", "--lanes-crossed",
+            "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000"])
+        self.assertIn("HOST script enabled", out)
+        self.assertNotIn("DEV  Link Layer Recovery request", out)
+        self.assertEqual(len(re.findall(r"HOST\s*entering HotReset.Active state", out)), 2)
+
     def test_core_x2_tx_shift(self):
         # Gen 1x2 with the Host/Device TX packets delayed by 3 symbols: packets starting on Lane 1,
         # at any symbol position of the 64-bit words (LanesPacketAligner).

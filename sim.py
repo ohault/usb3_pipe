@@ -478,10 +478,14 @@ class USB3PIPESim(SoCMini):
                 ).Else(
                     script_enable.eq(1),
                 )
+                # Idle link initialization after 0.5ms without a run (10ms on the boards).
                 host_script = renamer(USB3HostScript(link_phy, sys_clk_freq=sys_clk_freq,
-                    enable=script_enable))
+                    idle_delay=0.5e-3, enable=script_enable))
                 self.add_module(name="host_script", module=host_script)
                 host_model = host_script.model
+                # Test run result (not the idle link initialization of the model).
+                self.host_script_done  = host_script._status.fields.done
+                self.host_script_error = host_script._status.fields.error
                 script_enable_d = Signal()
                 sync += [
                     script_enable_d.eq(script_enable),
@@ -668,7 +672,8 @@ class USB3PIPESim(SoCMini):
             self.submodules += end_timer
             script_end = Signal()
             self.comb += [
-                script_end.eq(host_model.done | host_model.error),
+                script_end.eq(getattr(self, "host_script_done", host_model.done) |
+                    getattr(self, "host_script_error", host_model.error)),
                 end_timer.wait.eq(script_end),
                 done.eq(end_timer.done),
             ]
@@ -800,7 +805,7 @@ class USB3PIPESim(SoCMini):
                 If(dev_tx_hp_s != dev_tx_hp_d, Display("DEV_HPTX %d", host_cycles)),
             ]
             self.sync += If(done & ~report,
-                If(host_model.error,
+                If(getattr(self, "host_script_error", host_model.error),
                     Display("HOST script error")
                 ).Else(
                     Display("HOST script done")
