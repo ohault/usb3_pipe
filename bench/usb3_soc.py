@@ -692,13 +692,8 @@ class USB3HostScript(LiteXModule):
         ]
         self.pairs = pairs = WordsToPairs()
         self.words = words = PairsToWords()
-        # RX words registered before the model (timing: the script steps compare them), and the
-        # Link words pairs registered before the words unpacking (timing: PHY state -> RX words) and
-        # the script TX words pairs before the Link (timing: script ROM -> PHY Idle detection).
+        # RX words registered before the model (timing: the script steps compare them).
         self.rx_buffer = rx_buffer = stream.Buffer([("data", 32), ("ctrl", 4)], pipe_valid=True)
-        from usb3_pipe.lanes import link_pairs_layout
-        self.rx_pairs_buffer = rx_pairs_buffer = stream.Buffer(link_pairs_layout(), pipe_valid=True)
-        self.tx_pairs_buffer = tx_pairs_buffer = stream.Buffer(link_pairs_layout(), pipe_valid=True)
 
         # LUP keep-alive (out of the script runs).
         lup       = link_command(LUP())
@@ -819,10 +814,8 @@ class USB3HostScript(LiteXModule):
             ),
         ]
         self.comb += [
-            pairs.source.connect(tx_pairs_buffer.sink),
-            tx_pairs_buffer.source.connect(link.sink),
-            link.source.connect(rx_pairs_buffer.sink),
-            rx_pairs_buffer.source.connect(words.sink),
+            pairs.source.connect(link.sink),
+            link.source.connect(words.sink),
             words.source.connect(rx_buffer.sink),
             rx_buffer.source.connect(model.sink),
             model.enable.eq(run),
