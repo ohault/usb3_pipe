@@ -118,7 +118,10 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   `link_init` (received before its OP_WAIT), C = no Host Advertisement on U0 re-entries out of the test runs
   (idle run left on a U0 exit, next idle init 10ms later: a Recovery every 12.18us); scripted host fixed
   (`OP_WAITHP` in `link_init`, idle run kept through Recoveries; `test_link_init_device_lmp_early`,
-  `test_core_x2_host_script_idle_recovery`), hardware run pending. Open: Host Advertisement lost when the
+  `test_core_x2_host_script_idle_recovery`); t5 (99ba623, 20x20 crossed): 387/400, C confirmed (Device
+  Recoveries before the runs max 16, idle 0), looping loads remain ~1 in 20 (t5 load 14: 12 link_init
+  timeouts): the Host receives nothing usable after the U0 entry (Host lane 0 realign/deskew_lost), Device LMP
+  never acknowledged; next: Host LiteScope `lanes` capture of a U0 period ending in Recovery. Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build
