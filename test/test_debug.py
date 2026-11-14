@@ -207,6 +207,16 @@ class LanesReinitDUT(Module):
         self.phy, self.serdes = fake_lanes_phy()
         self.submodules.debug = USB3LanesDebug(self.phy, self.serdes, reinit_cycles=5)
 
+class LanesXcvrDUT(Module):
+    def __init__(self):
+        self.phy, self.serdes = fake_lanes_phy()
+        for s in self.serdes:
+            s.lock        = Signal()
+            s.bufstatus   = Signal(2)
+            s.xcvr_status = [("qpll_lock", s.lock), ("tx_bufstatus", s.bufstatus)]
+            s.xcvr_events = [("qpll_lock_lost", ~s.lock, 1)]
+        self.submodules.debug = USB3LanesDebug(self.phy, self.serdes)
+
 class LanesLinkDUT(Module):
     def __init__(self):
         self.phy, self.serdes = fake_lanes_phy()
@@ -214,6 +224,28 @@ class LanesLinkDUT(Module):
         self.submodules.debug = USB3LanesDebug(self.phy, self.serdes, link=self.link)
 
 class TestUSB3LanesDebug(unittest.TestCase):
+    def test_xcvr_status(self):
+        # Per SerDes transceiver status fields and events (A7USB3SerDes xcvr_status/xcvr_events).
+        dut = LanesXcvrDUT()
+        dbg = dut.debug
+        def generator():
+            yield dut.serdes[1].lock.eq(1)
+            yield dut.serdes[1].bufstatus.eq(0b10)
+            yield
+            yield
+            self.assertEqual((yield dbg._lane0_xcvr_status.fields.qpll_lock), 0)
+            self.assertEqual((yield dbg._lane1_xcvr_status.fields.qpll_lock), 1)
+            self.assertEqual((yield dbg._lane1_xcvr_status.fields.tx_bufstatus), 0b10)
+            yield dbg._clear.re.eq(1)
+            yield
+            yield dbg._clear.re.eq(0)
+            for v in [0, 1, 0, 1]: # Two lock losses.
+                yield dut.serdes[1].lock.eq(v)
+                yield
+            yield
+            self.assertEqual((yield dbg._lane1_qpll_lock_lost_count.status), 2)
+        run_simulation(dut, generator())
+
     def test_xcvr_reinit(self):
         # Transceivers re-initialization: both SerDes reinit held reinit_cycles from the write.
         dut = LanesReinitDUT()

@@ -313,6 +313,9 @@ class USB3LanesDebug(LiteXModule):
                 events += [(f"lane{lane}_rx_errors_reinit", phy.rx_errors_reinit[lane], 0)]
             if hasattr(phy, "lanes_com_partial"):
                 events += [(f"lane{lane}_rx_com_partial", phy.lanes_com_partial[lane], 0)]
+            # Transceiver events (A7USB3SerDes: Quad PLL lock losses, TX buffer errors).
+            for name, signal, edge in getattr(s, "xcvr_events", []):
+                events += [(f"lane{lane}_{name}", signal, edge)]
         # Per lane RX 8b/10b errors by type (USB3SerDes, counted in the SerDes RX clock domain,
         # accumulated in sys): only with the LTSSM in a state receiving symbols (Polling.RxEQ to U0,
         # Recovery, Hot Reset) and the lane RX not idle (not the LFPS/electrical idle: no symbols);
@@ -370,6 +373,29 @@ class USB3LanesDebug(LiteXModule):
             reinit.eq(reinit - 1)
         )
         self.comb += [s.reinit.eq(reinit != 0) for s in serdes if hasattr(s, "reinit")]
+
+        # Per SerDes transceiver status (A7USB3SerDes: ready, Quad PLL lock/reference clock lost,
+        # TX/RX buffer status, CDR lock) and DRP access (channel attributes/status read back between
+        # the transceivers start-up draws; selected on the transceiver DRP mux during the accesses).
+        for lane, s in enumerate(serdes):
+            if hasattr(s, "xcvr_status"):
+                fields, offset = [], 0
+                for name, signal in s.xcvr_status:
+                    fields.append(CSRField(name, size=len(signal), offset=offset))
+                    offset += len(signal)
+                csr = CSRStatus(fields=fields, name=f"lane{lane}_xcvr_status",
+                    description=f"SerDes {lane} transceiver status.")
+                setattr(self, f"_lane{lane}_xcvr_status", csr)
+                self.comb += [getattr(csr.fields, name).eq(signal) for name, signal in s.xcvr_status]
+            xcvr = getattr(s, s.xcvr_name, None) if getattr(s, "xcvr_name", None) else None
+            if hasattr(xcvr, "drp_mux") and hasattr(xcvr, "drp"):
+                drp_sel = CSRStorage(name=f"lane{lane}_drp_sel",
+                    description=f"SerDes {lane}: select DRP access on the transceiver DRP mux.")
+                drp     = DRPControl(xcvr.drp)
+                setattr(self, f"_lane{lane}_drp_sel", drp_sel)
+                setattr(self, f"lane{lane}_drp", drp)
+                drp_index = xcvr.drp_mux.interfaces.index(xcvr.drp)
+                self.comb += xcvr.drp_mux.sel.eq(Mux(drp_sel.storage, drp_index, 0))
 
 # USB3 RX Errors Debug -----------------------------------------------------------------------------
 

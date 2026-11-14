@@ -19,6 +19,14 @@ cleared, Device Core counters read before and after the runs (deltas: Recoveries
       --loads 20 --runs 20 --out build/hw_runs/my_change/loads.jsonl
   ./bench/acorn_x2_loads.py --summary build/hw_runs/my_change/loads.jsonl
 
+With --reinit-until-clean N, each load first checks its transceivers start-up draw (the line noise
+of a Gen 1x2 load is drawn at the transceivers start-up, doc/gen1x2-hardware-validation.md t12): a
+check burst of --check-runs scripted host runs, clean when the Host port resets and the RX disparity
+errors per reset of every lane are under --clean-resets/--clean-disparity; else both boards
+transceivers re-initialized (`usb3_lanes.py xcvr-reinit`, Device then Host) and checked again, up to
+N times (the first clean draw kept, or the last one). The draws (check results, transceivers status,
+optional DRP dumps: --drp-addrs) are in the load results (`draws`).
+
 A load is bad when no run was done (link down) or on an error (ex: a board reconfigured from its
 flash during the runs): reported apart from the runs done on the good loads.
 """
@@ -105,6 +113,47 @@ def core_counters(port, csr_csv):
     bus.close()
     return r
 
+def lanes_status(lanes, args):
+    return last_json(run(lanes + args + ["status"], timeout=30)[1]) or {}
+
+def wait_u0_x2(lanes, host_args, dev_args, timeout=3.0):
+    """Both boards in U0 at Gen 1x2 within timeout (s), else both retrained once; True when in U0 x2."""
+    def ok():
+        h, d = lanes_status(lanes, host_args), lanes_status(lanes, dev_args)
+        return all(x.get("ltssm_state") == "U0" and x.get("x2") == 1 for x in [h, d])
+    start = time.time()
+    while time.time() - start < timeout:
+        if ok():
+            return True
+        time.sleep(0.2)
+    run(lanes + dev_args  + ["retrain"], timeout=30)
+    run(lanes + host_args + ["retrain"], timeout=30)
+    time.sleep(1.0)
+    return ok()
+
+def check_draw(lanes, host_args, dev_args, host_port, host_csr, check_runs, drp_addrs=None):
+    """Transceivers start-up draw check: check_runs scripted host runs, Host port resets and RX
+    disparity errors per reset per lane (both boards), transceivers status (and DRP dumps)."""
+    run(lanes + host_args + ["clear"])
+    run(lanes + dev_args  + ["clear"])
+    before = port_resets(host_port, host_csr) or 0
+    code, output = run(lanes + host_args + ["script", "--runs", str(check_runs)])
+    lines  = [json.loads(l) for l in output.splitlines() if l.startswith("{")]
+    resets = (port_resets(host_port, host_csr) or 0) - before
+    status = {"host": lanes_status(lanes, host_args), "device": lanes_status(lanes, dev_args)}
+    r = {"done": lines[-1].get("done", 0) if lines else 0, "resets": resets, "disparity_per_reset": {},
+        "xcvr": {side: status[side].get("xcvr") for side in status}}
+    for side in status:
+        for lane in range(2):
+            r["disparity_per_reset"][f"{side}{lane}"] = (
+                status[side].get(f"lane{lane}_rx_disparity_errors", 0)/max(resets, 1))
+        r[f"{side}_recovery_count"] = status[side].get("recovery_count")
+    if drp_addrs:
+        for side, args in [("host", host_args), ("device", dev_args)]:
+            r.setdefault("drp", {})[side] = last_json(run(lanes + args + ["drp-dump", "--addrs", drp_addrs],
+                timeout=300)[1])
+    return r
+
 class Servers:
     """litex_servers of the two boards (bench/acorn_ftdi.py server)."""
     def __init__(self, boards, log):
@@ -169,6 +218,11 @@ def summary(loads):
             f"lane{lane}_{name}" for lane in range(2) for name in ["rx_decode_errors", "rx_disparity_errors",
             "rx_com_decode_errors", "rx_com_disparity_errors"]]:
             r[f"{side}_{k}_median"] = median([d[side][k] for d in good if k in d[side]])
+    draws = [d for d in good if "draws" in d]
+    if draws:
+        r["draws_loads_clean"]   = f"{sum(d['draws'][-1]['clean'] for d in draws)}/{len(draws)}"
+        r["draws_first_clean"]   = f"{sum(d['draws'][0]['clean'] for d in draws)}/{len(draws)}"
+        r["draws_reinits_median"] = median([len(d["draws"]) - 1 for d in draws])
     for k in CORE_COUNTERS + CORE_CAUSES:
         for when in ["before", "runs"]:
             values = [d["core"][when][k] for d in good if d.get("core", {}).get(when) and k in d["core"][when]]
@@ -188,6 +242,11 @@ def main():
     parser.add_argument("--loads",           default=20,     type=int, help="Bitstream loads.")
     parser.add_argument("--runs",            default=20,     type=int, help="Scripted host runs per load.")
     parser.add_argument("--x1",              action="store_true", help="Gen 1x1: Gen 1x2 not advertised on both boards after each load (runtime control), both retrained.")
+    parser.add_argument("--reinit-until-clean", default=0,   type=int, help="Transceivers start-up draws: up to N re-initializations of both boards per load until a clean check (0: disabled).")
+    parser.add_argument("--check-runs",      default=5,      type=int, help="--reinit-until-clean: scripted host runs per check.")
+    parser.add_argument("--clean-resets",    default=1.5,    type=float, help="--reinit-until-clean: max Host port resets per check run of a clean draw.")
+    parser.add_argument("--clean-disparity", default=100,    type=float, help="--reinit-until-clean: max RX disparity errors per reset on every lane of a clean draw.")
+    parser.add_argument("--drp-addrs",       default=None,   help="--reinit-until-clean: transceivers DRP addresses dumped per draw (usb3_lanes.py drp-dump --addrs).")
     parser.add_argument("--settle",          default=2.0,    type=float, help="Time (s) after the servers start.")
     parser.add_argument("--out",             default=None,   help="Results (JSON lines, appended; default: build/hw_runs/<time>/loads.jsonl).")
     parser.add_argument("--summary",         default=None,   help="Only print the summary of a results file.")
@@ -229,6 +288,24 @@ def main():
                     x1_retrain([(args.host_port, host_csr), (args.device_port, device_csr)])
                     time.sleep(args.settle)
                 idents = [ident(args.host_port, host_csr), ident(args.device_port, device_csr)]
+                if args.reinit_until_clean:
+                    r["draws"] = []
+                    for draw in range(args.reinit_until_clean + 1):
+                        if draw:
+                            run(lanes + dev_args  + ["xcvr-reinit", "--wait", "0"])
+                            run(lanes + host_args + ["xcvr-reinit", "--wait", "0"])
+                        d = {"draw": draw, "u0_x2": wait_u0_x2(lanes, host_args, dev_args)}
+                        d.update(check_draw(lanes, host_args, dev_args, args.host_port, host_csr,
+                            args.check_runs, args.drp_addrs))
+                        d["clean"] = (d["u0_x2"] and d["done"] == args.check_runs and
+                            d["resets"] <= args.clean_resets*args.check_runs and
+                            max(d["disparity_per_reset"].values()) <= args.clean_disparity)
+                        r["draws"].append(d)
+                        print(f"load {load} draw {draw}: clean {int(d['clean'])} resets {d['resets']} "
+                            f"disparity/reset {json.dumps({k: round(v, 1) for k, v in d['disparity_per_reset'].items()})}",
+                            flush=True)
+                        if d["clean"]:
+                            break
                 run(lanes + host_args + ["clear"])
                 run(lanes + dev_args  + ["clear"])
                 before = core_counters(args.device_port, device_csr)

@@ -91,6 +91,14 @@ class USB3LanesClient:
             r["x2_enable"]        = (control >> 3) & 0x1
             r["skp_recovery"]     = (control >> 4) & 0x1
             r["com_recovery"]     = (control >> 5) & 0x1
+        # Per SerDes transceiver status/events (A7USB3SerDes builds since 93ea941+1).
+        if hasattr(self.bus.regs, "usb3_lanes_debug_lane0_xcvr_status"):
+            r["xcvr"] = [self.xcvr_status(lane) for lane in range(2)]
+        for lane in range(2):
+            for name in ["qpll_lock_lost", "tx_buferror"]:
+                reg = f"usb3_lanes_debug_lane{lane}_{name}_count"
+                if hasattr(self.bus.regs, reg):
+                    r[f"lane{lane}_{name}"] = self.reg(reg).read()
         if hasattr(self.bus.regs, "usb3_lanes_debug_rx_drop_count"):
             r["rx_drop"] = self.reg("usb3_lanes_debug_rx_drop_count").read()
         if hasattr(self.bus.regs, "usb3_lanes_debug_lane0_tx_postcursor"):
@@ -138,6 +146,35 @@ class USB3LanesClient:
         # held 10us): the link retrains (Recovery, or Rx.Detect and a full training).
         self.reg("usb3_lanes_debug_xcvr_reinit").write(1)
 
+    def xcvr_status(self, lane):
+        # SerDes transceiver status (USB3LanesDebug lane{n}_xcvr_status fields).
+        v = self.reg(f"usb3_lanes_debug_lane{lane}_xcvr_status").read()
+        r, offset = {}, 0
+        for name, size in XCVR_STATUS_FIELDS:
+            r[name] = (v >> offset) & (2**size - 1)
+            offset += size
+        return r
+
+    def drp_read(self, lane, addr, timeout=1.0):
+        # Transceiver DRP read (lane{n}_drp, selected on the DRP mux during the access: only with the
+        # transceiver initialized, the GTP RX initialization uses the DRP).
+        prefix = f"usb3_lanes_debug_lane{lane}_drp"
+        self.reg(f"{prefix}_sel").write(1)
+        try:
+            self.reg(f"{prefix}_addr").write(addr)
+            self.reg(f"{prefix}_we").write(0)
+            self.reg(f"{prefix}_start").write(1)
+            start = time.time()
+            while not self.reg(f"{prefix}_done").read():
+                if time.time() - start > timeout:
+                    raise TimeoutError(f"DRP read lane {lane} addr 0x{addr:03x}")
+            return self.reg(f"{prefix}_do").read()
+        finally:
+            self.reg(f"{prefix}_sel").write(0)
+
+    def drp_dump(self, lane, addrs):
+        return {f"0x{a:03x}": self.drp_read(lane, a) for a in addrs}
+
     def x2_enable(self, enable=True):
         # Gen 1x2 advertised in the SuperSpeedPlus Polling (0: Gen 1x1 only), from the next training.
         control = self.reg("usb3_lanes_debug_control").read()
@@ -145,6 +182,10 @@ class USB3LanesClient:
 
     def prbs_enable(self, enable=True):
         self.reg("usb3_prbs_control").write(int(enable))
+
+# USB3LanesDebug lane{n}_xcvr_status fields (A7USB3SerDes xcvr_status order): name, size.
+XCVR_STATUS_FIELDS = [("tx_ready", 1), ("rx_ready", 1), ("qpll_lock", 1), ("qpll_refclk_lost", 1),
+    ("tx_bufstatus", 2), ("rx_bufstatus", 3), ("rx_cdrlock", 1)]
 
 def counters_delta(new, old):
     """32-bit wrapping counters differences."""
@@ -160,12 +201,14 @@ def main():
     parser.add_argument("--duration", default=10.0, type=float, help="prbs: test duration (s).")
     parser.add_argument("--runs",     default=1,    type=int,   help="script: runs of the scripted host.")
     parser.add_argument("--timeout",  default=2.0,  type=float, help="script: run timeout (s).")
+    parser.add_argument("--lane",     default=None,             help="drp-dump: SerDes (0/1, default both).")
+    parser.add_argument("--addrs",    default="0x000-0x0ff",    help="drp-dump: DRP addresses (START-END and/or A,B,...).")
     parser.add_argument("--value",    default=None,             help="tx-postcursor: TXPOSTCURSOR (0-31), one value or one per SerDes (ex: 6,10 for SFP-0/SFP-1).")
     parser.add_argument("command",    choices=["status", "clear", "retrain", "watch", "prbs",
         "prbs-enable", "prbs-disable", "script",
         "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable",
         "x2-enable", "x2-disable", "skp-recovery-enable", "skp-recovery-disable",
-        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit"])
+        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit", "drp-dump"])
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -203,6 +246,17 @@ def main():
         lanes.reg("usb3_lanes_debug_clear").write(1)
         time.sleep(args.wait)
         print(json.dumps(lanes.status()))
+    elif args.command == "drp-dump":
+        # Transceiver DRP registers (JSON: {lane: {addr: value}}), to compare start-up draws.
+        addrs = []
+        for part in args.addrs.split(","):
+            if "-" in part:
+                a, b = (int(v, 0) for v in part.split("-"))
+                addrs += list(range(a, b + 1))
+            else:
+                addrs.append(int(part, 0))
+        lanes_list = [int(args.lane)] if args.lane is not None else [0, 1]
+        print(json.dumps({lane: lanes.drp_dump(lane, addrs) for lane in lanes_list}))
     elif args.command == "retrain":
         lanes.dbg.retrain()
         lanes.reg("usb3_lanes_debug_clear").write(1)

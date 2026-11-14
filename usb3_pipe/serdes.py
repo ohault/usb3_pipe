@@ -364,6 +364,44 @@ class A7USB3SerDes(USB3SerDes):
             self.rx_buferror.eq(buferror_ps.o),
         ]
 
+        # Transceiver status (debug: transceivers start-up draws), synchronized to sys -------------
+        # xcvr_status: (name, sys signal) levels; xcvr_events: (name, sys signal, edge) events.
+        tx_bufstatus = Signal(2)
+        rx_cdrlock   = Signal()
+        gtp.gtp_params.update(
+            o_TXBUFSTATUS = tx_bufstatus,
+            o_RXCDRLOCK   = rx_cdrlock,
+        )
+        refclk_lost = Signal()
+        if not external_pll:
+            # Quad PLL reference clock lost (GTPE2_COMMON output, not exposed by GTPQuadPLL).
+            for special in pll._fragment.specials:
+                if isinstance(special, Instance) and special.of == "GTPE2_COMMON":
+                    special.items.append(Instance.Output(f"PLL{pll.channel}REFCLKLOST", refclk_lost))
+        status = {name: Signal(len(sig), name=f"xcvr_{name}") for name, sig in [
+            ("qpll_lock", pll.lock), ("qpll_refclk_lost", refclk_lost), ("tx_bufstatus", tx_bufstatus),
+            ("rx_bufstatus", rx_bufstatus), ("rx_cdrlock", rx_cdrlock)]}
+        self.specials += [
+            MultiReg(pll.lock,     status["qpll_lock"]),
+            MultiReg(refclk_lost,  status["qpll_refclk_lost"]),
+            MultiReg(tx_bufstatus, status["tx_bufstatus"]),
+            MultiReg(rx_bufstatus, status["rx_bufstatus"]),
+            MultiReg(rx_cdrlock,   status["rx_cdrlock"]),
+        ]
+        self.xcvr_status = [
+            ("tx_ready",         gtp.tx_ready),
+            ("rx_ready",         gtp.rx_ready),
+            ("qpll_lock",        status["qpll_lock"]),
+            ("qpll_refclk_lost", status["qpll_refclk_lost"]),
+            ("tx_bufstatus",     status["tx_bufstatus"]),     # [1]: TX buffer over/underflow, [0]: half full.
+            ("rx_bufstatus",     status["rx_bufstatus"]),
+            ("rx_cdrlock",       status["rx_cdrlock"]),
+        ]
+        self.xcvr_events = [
+            ("qpll_lock_lost", ~status["qpll_lock"],       1), # Quad PLL lock losses.
+            ("tx_buferror",    status["tx_bufstatus"][1],  1), # TX buffer over/underflows.
+        ]
+
         # Timing constraints -----------------------------------------------------------------------
         self.add_timing_constraints(platform, sys_clk, gtp, with_tx=tx_clk is None)
 
