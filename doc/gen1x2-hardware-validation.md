@@ -514,6 +514,7 @@ Results after each fix (two Acorn Minis, crossed cables, 20 loads x 20 scripted 
 | SKP run parity Recovery (t4: Host + Device built at `047511e`; Host sys WNS +0.316ns, design +0.247ns, Device sys +0.513ns, design +0.361ns, both in `usb3_serdes1_tx_clk`; the parity check reset fan-out is the Host `serdes_rx` worst path, +0.344ns), crossed cables, 20 loads x 20 runs | **386/400** runs: loads 2-20 380/380, load 1 never recovered (6/20, 14 `link_init` timeouts, ~1.9M Recoveries, 1.19M of them Host `deskew_lost_u0`, ended in Recovery.Configuration; `skp_odd_u0` 8562 Host/3557 Device, <1% of them). Loads 2-20: resets median 20 (11 loads at 20), Recoveries median 40/40, Host Lane 0 realign median 5, Device `pending_hp` during the runs median 0 (15-38 on the noisy loads 3, 7, 13, 20). `skp_odd_u0` 0 on the Device for every load but load 1, 0-2 on the Host: the odd SKP runs counted per lane (hundreds to tens of thousands on the noisy loads) are almost all out of U0. A/B on one noisy load (20 runs each): `pending_hp` 915 with the SKP Recovery, 664 without, Device `skp_odd_u0` 0 in both. The SKP slip is real (simulation) but rare on hardware: not the cause of the `pending_hp`; the lower median is load to load variation (Host Lane 0 realign also fell, which the check cannot change). Device `pending_hp` before the runs 109-365 on 4 clean loads (t3: 12 max), not explained. |
 | Scripted host fixes (t5: Host `99ba623`, sys WNS +0.244ns, design +0.205ns in `usb3_serdes1_tx_clk`; Device: the t4 bitstream, its Verilog identical at `99ba623`), crossed cables, 20 loads x 20 runs | **387/400** runs: 12 `link_init` timeouts on load 14 (looping: 3725 resets, Host `deskew_lost_u0` 2749, Host ended in Recovery.Active), 1 `ss:end` error on load 18. Device Recoveries before the runs median 4, max 16 outside load 14 (t4: 109-365 on 4 loads): the Advertisement on the U0 re-entries works; idle 60s on 9 loads: 0 Device Recoveries. In-run Device `pending_hp` median 2 (0-16, 1566 on load 14), resets median 27. Looping loads remain about 1 in 20 (t4 load 1, t5 load 14, a probe load): Device Link trace on a probe looping load (3 captures): Device LMP sent after the Host Advertisement, Host LMP received and acknowledged by the Device, then nothing from the Host for 12.18us (Device LMP never acknowledged) with Host lane 0 ~255-299k comma realignments and Host `deskew_lost_u0` 103-157 per run: the Host receive path, not the `link_init` race. |
 | Lane slip/TX flush/RX keep fixes (t6: Host + Device built at `30aab10`; Host design WNS +0.064ns in `serdes1_tx` (multireg -> GTP TXDATA), sys +0.239ns; Device design +0.309ns, sys +0.343ns), crossed cables, 20 loads x 20 runs | **314/400** runs (63 `link_init`, 23 `ss:end` errors, 10 loads with failures, loads 3 and 14 0/20): a regression, every load storms (resets median 848.5, t5 27; Host Recoveries median 1254, Device in-run `pending_hp` median 177). Cause: the new `com_slip` deskew clear fires on nearly every TS burst (median 1636 Host, 1307 Device per load); A/B on one load, `com-recovery-disable`: 20/20, 20 resets, Recoveries 40/40 (the minimum), 0 Device Recovery requests (19/20, 682 resets with it). LiteScope: see "Looping loads" (the first COM Symbols of an Ordered Set received as K28.4, the word aligner moved to the first intact COM). |
+| Word aligner kept on K28.4 before a COM run, `com_slip` on lanes disagreement (t7: Host + Device built at `ec85995`; Host design WNS +0.250ns, `serdes1_tx` +0.421ns; Device design +0.239ns in `serdes1_rx`, sys +0.291ns), crossed cables, screen 1 load x 20 runs | **20/20** runs but 258 resets, Host/Device `com_slip` 118/320, Host Recoveries 477: over the screen limits, no 20x20. A/B on the same load: `com-recovery-enable` 19/20, 248 resets, 21 Device `pending_hp`, Recoveries 429/286; `-disable` 20/20, 29 resets, 7 `pending_hp`, Recoveries 55/67, Host `com_slip` 343000 (counted: the TSEQ words, one COM, with a deskew left aligned from before the Polling). t6 captures: no SKP removal before the corrupted COM words (0/38); 25/38 without a decoder `invalid` (most likely running disparity errors), 13 inconclusive. |
 
 The sections below are in chronological order: first results, what was found on hardware and fixed
 (each reproduced in simulation first), and the results after each fix.
@@ -793,6 +794,32 @@ Fixes (t7):
   `--lane-com-error CYCLE,LANE` (the first 2 COM Symbols of the next Host lane word with COM
   Symbols as K28.4): on the last TS2 of the run's Hot Reset (`900649,1`), `30aab10` shows the
   partial COM word and the Recoveries, now nothing (`TestPHYX2Core.test_core_x2_lane_com_error`).
+
+t7 (2026-11-14, `ec85995`, row above): the storm is about 3 times smaller than t6 but still there
+(screen load: 258 resets). Two findings:
+- With `com-recovery-disable`, the Host counted 343000 `com_slip` in 20 runs: the TSEQ words (COM
+  then 3 data Symbols, 65536 TSEQ per Polling.RxEQ) are partial COM words, counted with a deskew
+  left aligned from before the Polling (about 5 RxEQ x 65536).
+- The corrupted first COM Symbols are mostly not decoder `invalid` codes (25/38 events: `rx_errors`
+  stays 0), so most likely running disparity errors: a single bit error on the first COM after the
+  TS body (D10.2/D5.2, alternating bits, then the 5 identical bits of the comma) giving a valid code
+  in the other running disparity column. Such an error can also give a valid data Symbol in the
+  right column (no substitution at all): the K28.4 rule of `ec85995` does not cover it. Not
+  proven (no separate decode/disparity probe); the rate is a receive quality figure (equalization,
+  pre-emphasis) of these boards.
+
+Fixes (t8):
+- `RXWordAligner` (COM markers): a marker run of 2 or more starting later than the current
+  alignment (or earlier, in the next word) only moves the alignment when it covers the Symbol where
+  a 4 COM run on the current alignment ends; a run starting late and ending there is an Ordered Set
+  whose first COM Symbols were received with errors, whatever they decode to (K28.4 or another
+  Symbol). Single marker runs (TSEQ) move the alignment as before. A real shift (full 4 COM runs)
+  always covers that Symbol (`test_rx_word_aligner_follows_shift`,
+  `test_rx_word_aligner_keeps_alignment_on_com_errors` with K28.4 and data Symbols).
+- `com_slip`/`rx_com_partial`: only words starting with 2-3 COM Symbols then other Symbols (a lane
+  that lost Symbols; not the TSEQ, not a TS1/TS2 whose first COM Symbols were corrupted).
+- `sim.py --lane-com-error CYCLE,LANE,data` (the COM Symbols received as D10.2):
+  `TestPHYX2Core.test_core_x2_lane_com_error_data`.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

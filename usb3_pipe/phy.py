@@ -1052,25 +1052,33 @@ class USB3PHY(LiteXModule):
         self.lanes_com_recovery = Signal(reset=1) # i: Deskew cleared on a partial COM word (debug).
         self.lanes_com_partial  = Signal(2)       # o: Partial COM word per lane (any state).
         self.lanes_com_slip     = Signal()        # o: Partial COM word, lanes deskewed and disagreeing (x2).
+        # A lane that lost Symbols at the start of a TS1/TS2 keeps its word alignment (the remaining
+        # COM Symbols start on it) and receives a word starting with 2-3 COM Symbols then other
+        # Symbols. Not counted: words with a single COM Symbol (TSEQ: one COM per 32 Symbols, 65536
+        # TSEQ in Polling.RxEQ: t7 on two Acorn Minis, a deskew left aligned from before the Polling
+        # counted each TSEQ), words ending with COM Symbols (the first COM Symbols received with
+        # errors as other Symbols, the word alignment kept by RXWordAligner: no lane shifted).
         def com_masks(d):
-            com = Signal(4)
-            sub = Signal(4)
+            com  = Signal(4)
+            sub  = Signal(4)
+            com_head = Signal()
             self.comb += [
                 com.eq(Cat(*[d.ctrl[i] & (d.data[8*i:8*(i+1)] == COM.value) for i in range(4)])),
                 sub.eq(Cat(*[d.ctrl[i] & (d.data[8*i:8*(i+1)] == SUB.value) for i in range(4)])),
+                com_head.eq(com[0] & com[1]),
             ]
-            return com, sub
+            return com, sub, com_head
         for lane in range(2):
-            com, sub = com_masks(deskew.sinks[lane])
-            self.comb += self.lanes_com_partial[lane].eq(deskew.sinks[lane].valid & (com != 0) &
+            com, sub, com_head = com_masks(deskew.sinks[lane])
+            self.comb += self.lanes_com_partial[lane].eq(deskew.sinks[lane].valid & com_head &
                 ((com | sub) != 0b1111))
         out_partial = Signal(2)
         out_mask    = [Signal(4) for _ in range(2)]
         for lane in range(2):
-            com, sub = com_masks(deskew.sources[lane])
+            com, sub, com_head = com_masks(deskew.sources[lane])
             self.comb += [
                 out_mask[lane].eq(com | sub),
-                out_partial[lane].eq(deskew.sources[lane].valid & (com != 0) & ((com | sub) != 0b1111)),
+                out_partial[lane].eq(deskew.sources[lane].valid & com_head & ((com | sub) != 0b1111)),
             ]
         self.comb += self.lanes_com_slip.eq(x2 & deskew.aligned & (out_partial != 0) &
             (out_mask[0] != out_mask[1]))

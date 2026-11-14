@@ -135,7 +135,13 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   TX lane words correct (COM errors after them: Device TX SerDes/channel/Host GTP, open). t7 fixes:
   `RXWordAligner` keeps the alignment on K28.4 before a COM run, `com_slip` only when the deskewed lanes
   disagree, sim SerDes model word aligner always enabled (as the hardware), `sim.py --lane-com-error`
-  (`test_core_x2_lane_com_error`); hardware run pending. Open: Host Advertisement lost when the
+  (`test_core_x2_lane_com_error`); t7 (ec85995, screen 1 load): 20/20 but 258 resets (stopped before the
+  20x20), A/B com-recovery-disable 29 resets; Host com_slip 343000 with it disabled = the TSEQ words (1 COM)
+  on a stale deskew; corrupted COMs mostly not decoder invalid (likely disparity: a bit error on the first COM
+  after the TS body, can also decode as a valid data Symbol). t8 fixes: `RXWordAligner` keeps the alignment
+  on any 2+ COM run ending where a 4 COM run on the current alignment ends (any corruption; single COM runs
+  as before), com_slip/rx_com_partial only on words starting with 2-3 COMs, `--lane-com-error ...,data`
+  (`test_core_x2_lane_com_error_data`); hardware run pending. Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build

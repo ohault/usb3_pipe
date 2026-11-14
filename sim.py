@@ -130,8 +130,10 @@ class USB3SerDesModel(USB3SerDes):
         self.comb += rx_datapath.sink.valid.eq(1)
         # RX COM errors (sim.py --lane-com-error): on rx_com_error (rx clock domain pulse), the first
         # 2 COM Symbols of the next RX word with COM Symbols substituted by K28.4 (decode errors, as
-        # the first COM Symbols of a TS1/TS2 on two Acorn Minis).
-        self.rx_com_error = Signal()
+        # the first COM Symbols of a TS1/TS2 on two Acorn Minis), or by D10.2 with rx_com_error_data
+        # (a COM received as a valid data Symbol).
+        self.rx_com_error      = Signal()
+        self.rx_com_error_data = Signal()
         com_armed = Signal()
         com       = Signal(nwords)
         com_hit   = Signal()
@@ -144,8 +146,9 @@ class USB3SerDesModel(USB3SerDes):
             before = [com[a] & com[b] for a in range(i) for b in range(a + 1, i)]
             sub_i  = com_hit & com[i] & ~(Reduce("OR", before) if before else 0)
             self.comb += [
-                rx_datapath.sink.ctrl[i].eq(decoders[i].k | sub_i),
-                rx_datapath.sink.data[8*i:8*(i+1)].eq(Mux(sub_i, K(28, 4), decoders[i].d)),
+                rx_datapath.sink.ctrl[i].eq(Mux(sub_i, ~self.rx_com_error_data, decoders[i].k)),
+                rx_datapath.sink.data[8*i:8*(i+1)].eq(Mux(sub_i,
+                    Mux(self.rx_com_error_data, 0x4a, K(28, 4)), decoders[i].d)),
             ]
 
         # TX symbols with SKP Ordered Set insertion (as transmitted by a host: a single SKP Ordered
@@ -965,9 +968,10 @@ class USB3PIPESim(SoCMini):
         lane_com_error=None):
         """Host lanes RX debug (0 ppm: one clock domain, cycles of the simulation timer):
         lane_slip: (cycle, lane): 2 Symbols dropped by the Host lane SerDes RX at cycle (a 16-bit
-        transceiver word lost). lane_com_error: (cycle, lane): the first 2 COM Symbols of the next
-        Host lane RX word with COM Symbols after cycle received as decode errors (K28.4 substituted:
-        two Acorn Minis, ex: at the start of the last TS2 before the Logical Idle). lane_rx_log:
+        transceiver word lost). lane_com_error: (cycle, lane[, kind]): the first 2 COM Symbols of the
+        next Host lane RX word with COM Symbols after cycle received with errors (kind "sub": K28.4
+        substituted decode errors, "data": D10.2 data Symbols; two Acorn Minis, ex: at the start of
+        the last TS2 before the Logical Idle). lane_rx_log:
         (start, end): the Host and Device lanes decoded RX words displayed."""
         if (lane_slip is None) and (lane_rx_log is None) and (lane_com_error is None):
             return
@@ -981,11 +985,15 @@ class USB3PIPESim(SoCMini):
             self.sync += If(timer == cycle,
                 Display("[%08d] HOST LANE %d RX SLIP (2 Symbols dropped)", timer, lane))
         if lane_com_error is not None:
-            cycle, lane = lane_com_error
+            cycle, lane, kind = (tuple(lane_com_error) + ("sub",))[:3]
             s = serdeses["host"][lane]
-            self.comb += s.rx_com_error.eq(timer == cycle)
+            self.comb += [
+                s.rx_com_error.eq(timer == cycle),
+                s.rx_com_error_data.eq(int(kind == "data")),
+            ]
             self.sync += If(timer == cycle,
-                Display("[%08d] HOST LANE %d RX COM ERRORS (next COM Symbols as K28.4)", timer, lane))
+                Display("[%08d] HOST LANE %d RX COM ERRORS (next COM Symbols as {})".format(
+                    {"sub": "K28.4", "data": "D10.2"}[kind]), timer, lane))
         if lane_rx_log is not None:
             start, end = lane_rx_log
             for name in ["host", "dev"]:
@@ -1058,7 +1066,7 @@ def main():
     parser.add_argument("--lanes-tx-shift", default=0,          help="--lanes 2 --lanes-core: Gen 1x2 TX packets delayed by 1-7 symbols (packets at any symbol position).")
     parser.add_argument("--prbs-gap-bits", default=4,           help="Gaps of 0 to 2**N - 1 cycles between the PRBS packets (--no-core/--lanes 2).")
     parser.add_argument("--lane-skp-error", default=None, help="--lanes 2: CYCLES,DIR,LANE: one SKP Symbol error on Host Lane LANE (DIR h2d: Host -> Device, d2h: Device -> Host), CYCLES after the Host U0 entry.")
-    parser.add_argument("--lane-com-error", default=None, help="--lanes 2, 0 ppm: CYCLE,LANE: the first 2 COM Symbols of the next Host Lane LANE RX word with COM Symbols after CYCLE received as decode errors (K28.4).")
+    parser.add_argument("--lane-com-error", default=None, help="--lanes 2, 0 ppm: CYCLE,LANE[,KIND]: the first 2 COM Symbols of the next Host Lane LANE RX word with COM Symbols after CYCLE received with errors (KIND sub: K28.4 decode errors, default; data: D10.2 data Symbols).")
     parser.add_argument("--lane-slip",     default=None, help="--lanes 2, 0 ppm: CYCLE,LANE: 2 Symbols dropped by the Host Lane LANE SerDes RX at CYCLE (a 16-bit transceiver word lost).")
     parser.add_argument("--lane-rx-log",   default=None, help="--lanes 2, 0 ppm: START,END: Host and Device lanes decoded RX words displayed between the cycles START and END.")
     parser.add_argument("--lane-skp",      default=4096,        help="Extra Host Lane 1/Lane 0 SKP Ordered Sets period (cycles, 0: disabled, --lanes 2).")
@@ -1115,7 +1123,7 @@ def main():
         lane1_word_shift      = int(args.lane1_word_shift),
         lane_skp              = int(args.lane_skp),
         lane_slip             = None if args.lane_slip is None else tuple(int(v) for v in args.lane_slip.split(",")),
-        lane_com_error        = None if args.lane_com_error is None else tuple(int(v) for v in args.lane_com_error.split(",")),
+        lane_com_error        = None if args.lane_com_error is None else tuple(int(v) if i < 2 else v for i, v in enumerate(args.lane_com_error.split(","))),
         lane_rx_log           = None if args.lane_rx_log is None else tuple(int(v) for v in args.lane_rx_log.split(",")),
         lane_skp_error        = None if args.lane_skp_error is None else (lambda c, d, l: (int(c), d, int(l)))(*args.lane_skp_error.split(",")),
         dev_mode              = args.dev_mode,

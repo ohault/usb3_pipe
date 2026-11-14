@@ -572,9 +572,18 @@ class TestPHYX2Core(unittest.TestCase):
         # errors (K28.4, t6 on two Acorn Minis: the first COM Symbols of a TS1/TS2, often on both
         # lanes): the word aligner keeps its alignment (it moved 2 Symbols later on the first intact
         # COM: Lane 1 2 Symbols off in U0, partial COM words, Recoveries), no lane shifted.
-        out = self.run_sim("core_x2_lane_com_error", ["--dev-mode", "x2", "--lanes-crossed",
+        self.check_lane_com_error("core_x2_lane_com_error", "900649,1")
+
+    def test_core_x2_lane_com_error_data(self):
+        # Same, the first 2 COM Symbols received as valid data Symbols (a bit error giving another
+        # valid code in the running disparity: no substitution): the alignment kept as well (the
+        # COM run ends where a 4 COM run on the current alignment ends).
+        self.check_lane_com_error("core_x2_lane_com_error_data", "900649,1,data")
+
+    def check_lane_com_error(self, name, error):
+        out = self.run_sim(name, ["--dev-mode", "x2", "--lanes-crossed",
             "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000",
-            "--lane-com-error", "900649,1"])
+            "--lane-com-error", error])
         self.assertRegex(out, r"HOST LANE\s+1 RX COM ERRORS")
         self.assertNotRegex(out, r"lanes partial COM word")
         late = [int(t) for t in re.findall(r"\[(\d+)\] \w+\s*entering Recovery.Active", out)
