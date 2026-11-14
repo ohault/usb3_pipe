@@ -229,6 +229,8 @@ class USB3LanesDebug(LiteXModule):
                 description="Gen 1x2 advertised in the SuperSpeedPlus Polling (0: Gen 1x1 only), from the next training (retrain), with a PHY built x2 capable."),
             CSRField("skp_recovery", size=1, offset=4, reset=1,
                 description="Recovery on a lane SKP run of odd length (lane shifted by one Symbol) in U0 at Gen 1x2 (0: disabled, still counted)."),
+            CSRField("com_recovery", size=1, offset=5, reset=1,
+                description="Deskew cleared (Recovery in U0) on a partial COM word with the lanes deskewed (lane shifted at the end of a TS burst) at Gen 1x2 (0: disabled, still counted)."),
         ])
         self._status = CSRStatus(fields=[
             CSRField("x2",             size=1, offset=0, description="Gen 1x2 negotiated (SuperSpeedPlus Polling)."),
@@ -261,6 +263,8 @@ class USB3LanesDebug(LiteXModule):
             self.comb += phy.rx_errors_reinit_enable.eq(self._control.fields.rx_errors_reinit)
         if hasattr(phy, "lanes_skp_recovery"):
             self.comb += phy.lanes_skp_recovery.eq(self._control.fields.skp_recovery)
+        if hasattr(phy, "lanes_com_recovery"):
+            self.comb += phy.lanes_com_recovery.eq(self._control.fields.com_recovery)
         if hasattr(phy, "x2_enable"):
             self.comb += phy.x2_enable.eq(self._control.fields.x2_enable)
 
@@ -277,6 +281,8 @@ class USB3LanesDebug(LiteXModule):
                 # Lane shifted by its SKP removal in U0 (odd SKP run), counted even when its
                 # Recovery is disabled (skp_recovery).
                 ("skp_odd_u0",     phy.lanes_skp_odd,          0),
+                # Lane shifted since the pairing (partial COM word, lanes deskewed), any state.
+                ("com_slip",       phy.lanes_com_slip,         0),
             ]
         if with_rx_drop:
             events += [("rx_drop", link.rx_drop, 0)] # Dropped RX buffer entries.
@@ -299,6 +305,8 @@ class USB3LanesDebug(LiteXModule):
                     events += [(f"lane{lane}_{name}", getattr(s, name), 0)]
             if hasattr(phy, "rx_errors_reinit"):
                 events += [(f"lane{lane}_rx_errors_reinit", phy.rx_errors_reinit[lane], 0)]
+            if hasattr(phy, "lanes_com_partial"):
+                events += [(f"lane{lane}_rx_com_partial", phy.lanes_com_partial[lane], 0)]
         for name, signal, edge in events:
             csr = CSRStatus(32, name=f"{name}_count",
                 description=f"{name} {'events' if edge else 'cycles'} count (saturating).")
@@ -550,8 +558,9 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
     - lanes    : LTSSM + Gen 1x2 lanes words at the deskew input, deskew pairing, destriped words,
                  lanes TX words to the SerDes.
     - realign  : LTSSM + Gen 1x2 lanes RX words at the deskew input, deskew pairing, lanes Recovery
-                 triggers, both lanes SerDes RX status (comma realignments, decode errors, idle):
-                 a lane realigned in U0 (narrower than lanes: no TX/destriped words).
+                 triggers, both lanes SerDes RX status (comma realignments, elastic buffer errors,
+                 decode errors, idle) and RX words before the word aligner (a lane losing symbols
+                 at the end of a TS burst): a lane realigned in U0 (no TX/destriped words).
     - u3       : LTSSM + U3 exit: LFPS TX/RX, TS1 detection, SerDes RX stream, RX vs TX clocks phase
                  (requires serdes_debug).
     """
@@ -615,9 +624,14 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
         groups["realign"] = link_signals + [
             phy.x2, phy.lane_swap, deskew.aligned, deskew.clear, *deskew.heads,
             *[getattr(deskew.sinks[lane], name) for lane in range(2) for name in ["valid", "data", "ctrl"]],
-        ] + [getattr(phy, name) for name in ["lanes_realign", "lanes_deskew_lost", "lanes_idle"]
+        ] + [getattr(phy, name) for name in ["lanes_realign", "lanes_deskew_lost", "lanes_idle",
+            "lanes_com_slip", "lanes_com_partial"]
             if hasattr(phy, name)] + [getattr(s, name) for s in getattr(phy, "lanes_phys_serdes", [])
-            for name in ["rx_realign", "rx_errors", "rx_idle"] if hasattr(s, name)]
+            for name in ["rx_realign", "rx_buferror", "rx_errors", "rx_idle"] if hasattr(s, name)] + [
+            # Physical lanes words before the word aligner (after the SKP removal and the CDC, sys):
+            # a lane losing symbols at the end of a TS burst, before or in the RX word alignment.
+            getattr(s.rx_datapath.cdc.source, name) for s in getattr(phy, "lanes_phys_serdes", [])
+            if hasattr(s, "rx_datapath") for name in ["valid", "data", "ctrl"]]
     if serdes_debug is not None:
         groups["phase"] = link_signals + [
             serdes_debug.rx_tx_phase,

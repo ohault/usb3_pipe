@@ -331,7 +331,12 @@ deskew is lost, when a lane stays in electrical idle for 10 µs, when a lane rea
 or when a lane receives a run of SKP symbols of odd length. SKP ordered sets are two symbols, so
 an odd run means a SKP symbol received with an error, kept by the SKP removal, or a symbol taken
 for a SKP: the lane is then one symbol off the other lane, and no COM symbol in U0 would show it
-(`RXSKPParityCheck`). A lane that keeps decoding errors is re-initialized.
+(`RXSKPParityCheck`). The deskew is also cleared on a lane word holding COM symbols with other
+symbols, the 4 COM symbols of a training sequence cut by a lane that lost symbols at the end of a
+TS burst. A lane that keeps decoding errors is re-initialized. On Gen 1x2, the receive words are
+also kept for the link layer in Polling.Idle and HotReset.Exit until U0 (as in Recovery.Idle):
+the partner can enter U0 first and send its advertisement at once. The transmit words are dropped
+out of U0, so nothing held from before a Recovery is sent ahead of the next advertisement.
 
 The device finds which receiver gets the configuration lane from the partner's Polling LFPS and
 swaps the lanes, as a flipped USB Type-C plug needs (`LaneSwap`). When the partner is not Gen 1x2

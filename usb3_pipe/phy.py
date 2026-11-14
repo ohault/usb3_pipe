@@ -18,7 +18,7 @@ from litex.gen import *
 from litex.soc.interconnect import stream
 
 from usb3_pipe.common     import COM, SHP, SDP, SLC, LTSSM_PIPE_INTERFACE, EndiannessSwap, AsyncFIFO
-from usb3_pipe.common     import Buffer
+from usb3_pipe.common     import Buffer, SUB
 from usb3_pipe.core       import USB3PIPE, Gen2PIPE, GEN2_PIPE_INTERFACE
 from usb3_pipe.datapath   import GEN2_DATA_WIDTH
 from usb3_pipe.ltssm      import USB3LTSSM, SSPPolling
@@ -977,13 +977,24 @@ class USB3PHY(LiteXModule):
         # at the receiver, Table 6-34, + per lane word alignment/SKP removal/RX buffers latencies).
         self.deskew    = deskew    = LaneDeskew(COM.value*0x01010101, 0b1111, depth=deskew_depth)
         self.destriper = destriper = LaneDestriper()
+        rx_keep_open = Signal() # Partner's Logical Idle received in an Idle handshake state.
+        rx_pass      = Signal()
+        self.sync += If(~ltssm.rx_keep,
+            rx_keep_open.eq(0)
+        ).Elif(destriper.source.valid & (destriper.source.data == 0) & (destriper.source.ctrl == 0),
+            rx_keep_open.eq(1)
+        )
+        self.comb += rx_pass.eq(ltssm.rx_ready | (ltssm.rx_keep & rx_keep_open))
         self.comb += pipes[1].source.connect(deskew.sinks[1])
         for lane in range(2):
             self.comb += deskew.sources[lane].connect(destriper.sinks[lane])
         self.comb += [
             destriper.source.connect(source, omit={"valid", "ready"}),
-            source.valid.eq(destriper.source.valid & ltssm.rx_ready & x2),
-            destriper.source.ready.eq(source.ready | ~ltssm.rx_ready | ~x2),
+            # Words to the Link Layer in U0 and, kept by it until U0 (rx_keep), in the Idle
+            # handshake states from the partner's first Logical Idle word (the partner in U0 first
+            # sends its Advertisement right away; its TS2 Ordered Sets before are not kept).
+            source.valid.eq(destriper.source.valid & rx_pass & x2),
+            destriper.source.ready.eq(source.ready | ~rx_pass | ~x2),
         ]
         self.deskew_aligned = deskew.aligned # o
         # Deskew lost at Gen 1x2 (ex: a lane re-aligned by its RX polarity change or SKP removal
@@ -1026,6 +1037,26 @@ class USB3PHY(LiteXModule):
             self.comb += self.lanes_skp_odd.eq(x2 & ltssm.u0 & Reduce("OR", skp_odd))
             realign += [self.lanes_skp_odd & self.lanes_skp_recovery]
         self.comb += lanes_realign.eq(Reduce("OR", realign) if realign else 0)
+        # A lane shifted by 2 Symbols at the end of a TS burst (two Acorn Minis: the last TS2 of a
+        # lane starting with 2 COM Symbols instead of 4, one 16-bit transceiver word lost): the
+        # deskew sees a single head mismatch, tolerated at the end of an Ordered Sets stream, and
+        # stays aligned with the lane 2 Symbols off (every destriped word corrupted in U0). After
+        # the lane word aligner, the 4 COM Symbols of a TS1/TS2 are one word: a word with COM
+        # Symbols and other Symbols (not COM nor a substituted decode error) is a lane shifted
+        # (or realigned) since the pairing: the deskew is cleared (Recovery in U0).
+        self.lanes_com_recovery = Signal(reset=1) # i: Deskew cleared on a partial COM word (debug).
+        self.lanes_com_partial  = Signal(2)       # o: Partial COM word per lane (any state).
+        self.lanes_com_slip     = Signal()        # o: Partial COM word with the lanes deskewed (x2).
+        for lane in range(2):
+            d   = deskew.sinks[lane]
+            com = Signal(4)
+            sub = Signal(4)
+            self.comb += [
+                com.eq(Cat(*[d.ctrl[i] & (d.data[8*i:8*(i+1)] == COM.value) for i in range(4)])),
+                sub.eq(Cat(*[d.ctrl[i] & (d.data[8*i:8*(i+1)] == SUB.value) for i in range(4)])),
+                self.lanes_com_partial[lane].eq(d.valid & (com != 0) & ((com | sub) != 0b1111)),
+            ]
+        self.comb += self.lanes_com_slip.eq(x2 & deskew.aligned & (self.lanes_com_partial != 0))
         self.lanes_idle_recovery    = Signal(reset=1) # i: Recovery on a lane idle (debug: 0 disables).
         self.lanes_realign_recovery = Signal(reset=1) # i: Recovery on a lane realigned in U0 (debug).
         self.lanes_deskew_lost      = Signal()        # o: Deskew lost trigger (x2, not deskewed).
@@ -1041,9 +1072,13 @@ class USB3PHY(LiteXModule):
             # in Recovery.Idle (idle handshake) would receive our TS1 instead of Idle Symbols and stay
             # there until tRecoveryIdleTimeout (2ms, eSS.Inactive), and a Recovery without a gap does
             # not re-arm the deskew (U0 entries/Recoveries loop: two Acorn Minis).
-            ltssm.lanes_deskew_lost.eq((self.lanes_deskew_lost & deskew.armed) | self.lanes_idle),
+            # Also at once on a COM word at a lane head (deskew lost): the partner sends Training
+            # Sequences (in Recovery), no gap would come to arm the search (a Host left in U0 while
+            # the Device sends TS1, its lanes broken: until the Device Recovery timeouts).
+            ltssm.lanes_deskew_lost.eq((self.lanes_deskew_lost &
+                (deskew.armed | deskew.heads[0] | deskew.heads[1])) | self.lanes_idle),
             deskew.clear.eq((lanes_idle & self.lanes_idle_recovery) | self.lanes_realign |
-                self.lanes_deskew_clear),
+                self.lanes_deskew_clear | (self.lanes_com_slip & self.lanes_com_recovery)),
         ]
 
         # RX: Gen 1x1 (Lane 0) ---------------------------------------------------------------------
@@ -1152,8 +1187,17 @@ class USB3PHYX2Link(LiteXModule):
             self.comb += [sink.connect(tx), rx.connect(source)]
 
         # TX ---------------------------------------------------------------------------------------
-        self.tx_packer = tx_packer = LanesTXPacker()
+        # Out of U0 (PHY not TX ready), the TX words are dropped (as the Gen 1x1 TX packets): a word
+        # held by the packer or packets buffered when the link left U0 (Recovery, Hot Reset) would
+        # be sent at the next U0 entry before the Link Layer Advertisement (two Acorn Minis, scripted
+        # host: the LCSTART of an Advertisement cut by a U0 exit, sent with the next Advertisement:
+        # its LGOOD_n lost, a Device PENDING_HP_TIMER Recovery).
+        self.tx_packer = tx_packer = ResetInserter()(LanesTXPacker())
         self.tx_buffer = tx_buffer = PacketsBuffer(link_layout(), depth=tx_buffer_depth)
+        self.comb += [
+            tx_packer.reset.eq(~phy.tx_ready),
+            tx_buffer.drop.eq(~phy.tx_ready),
+        ]
         self.tx_words  = tx_words  = PairsToWords()
         self.comb += [
             If(x2,
@@ -1173,7 +1217,7 @@ class USB3PHYX2Link(LiteXModule):
                 tx_shift.source.connect(phy.sink),
             ]
         else:
-            self.comb += tx_buffer.source.connect(phy.sink) # Held by the USB3PHY out of U0.
+            self.comb += tx_buffer.source.connect(phy.sink)
 
         # RX ---------------------------------------------------------------------------------------
         self.rx_aligner = rx_aligner = LanesPacketAligner()

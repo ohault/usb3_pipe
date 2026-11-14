@@ -739,6 +739,29 @@ resets per 20 runs).
   are lost (Host Lane 1 RX: GTP buffer/CDC/stride converter/word aligner, or the Device Lane 1
   transmitter at the TS2 -> Logical Idle switch); always on the last TS2 before the Logical Idle.
 
+Reproduced in simulation (`sim.py --lanes 2 --lanes-core --host-script 900000 --lane-slip
+900648,1`: 2 Symbols dropped by the Host Lane 1 receiver at the start of its last TS2 before the
+run's U0; `--lane-rx-log` displays the lanes decoded words): the Host in U0 with Lane 1 2 Symbols
+off, a Device `pending_hp` Recovery, the run restarted. Fixes (t6):
+- Partial COM word (COM Symbols with other Symbols, not substituted decode errors) at the deskew
+  input with the lanes deskewed: deskew cleared (Recovery in U0 once the search is armed),
+  `com_slip`/`lane*_rx_com_partial` counters, control bit 5 (`usb3_lanes.py com-recovery-*`).
+- In U0 with the deskew lost, a COM word at a lane head (the partner sending Training Sequences)
+  is a Recovery at once (no gap to arm the search while the partner sends TS1).
+- Found on the way, two Gen 1x2 issues behind Device `pending_hp` Recoveries after a Recovery or a
+  Hot Reset: the TX words held out of U0 (packer held word, packets buffer) were sent at the next U0
+  entry before the Link Layer Advertisement (an Advertisement LCSTART cut by a U0 exit sent with the
+  next Advertisement: its LGOOD_n lost), now dropped out of U0 as the Gen 1x1 TX packets; the RX
+  words received in HotReset.Exit/Polling.Idle (the partner in U0 first: its Advertisement) were
+  dropped by the PHY, now kept for the Link Layer until U0 from the partner's first Logical Idle word
+  (`rx_keep`, as Recovery.Idle). `TestPHYX2Core.test_core_x2_lane_slip` (no Device Link Layer
+  Recovery request), `test_core_x2_skp_error_d2h` (no lost Advertisement).
+- Not covered: 2 Symbols lost in a TS2 body (not the COM Symbols: `--lane-slip 900649,1`): the lane
+  descrambler is then out of step (only COM resets it), the Host stays in HotReset.Exit until its
+  timeout.
+- Capture probes (t6, `realign` group): the physical lanes words before the word aligner (after the
+  SKP removal/CDC), `rx_buferror`, the partial COM signals, to find where the 2 Symbols are lost.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits

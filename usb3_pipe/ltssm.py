@@ -539,7 +539,13 @@ class USB3LTSSM(LiteXModule):
         )
 
         # Polling.Idle State (7.5.4.10) ------------------------------------------------------------
+        # Gen 1x2: RX words also kept until U0 in Polling.Idle/HotReset.Exit (as in Recovery.Idle):
+        # the partner can enter U0 first and send its Advertisement right away (after a Hot Reset,
+        # a Host in U0 ~24 cycles before the Device: its first Link Command, the LGOOD_n of its
+        # Advertisement, was dropped by the Device PHY, a Device PENDING_HP_TIMER Recovery).
+        rx_keep_exit = self.rx_keep.eq(1) if lanes == 2 else []
         fsm.act("Polling.Idle",
+            rx_keep_exit,
             self.idle_handshake.eq(1), # Idle Symbols + handshake (7.5.4.10).
             self.polling_idle.eq(1),
             self.ts2_decode.eq(1), # Disable Scrambling bit of the received TS2 (7.5.4.10.1).
@@ -907,6 +913,7 @@ class USB3LTSSM(LiteXModule):
 
         # Hot Reset Exit State (7.5.12.3) ----------------------------------------------------------
         fsm.act("HotReset.Exit",
+            rx_keep_exit,
             self.idle_handshake.eq(1), # Idle Symbols + handshake (7.5.4.10).
             self.hot_reset.eq(1),
             t_hot_reset_exit.wait.eq(with_timers),

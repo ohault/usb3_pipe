@@ -217,8 +217,17 @@ class USB3SerDesModel(USB3SerDes):
         sync_rx = getattr(self.sync, rx_clock_domain)
         # Previous word in LSBs.
         sync_rx += rx_data_sr.eq(Cat(rx_data_sr[phy_dw:], rx_data[:phy_dw]))
+        # RX symbol offset (rx_word_shift), moved by 2 Symbols on rx_slip (rx clock domain pulse):
+        # 2 Symbols dropped (or repeated past the last offset), as a 16-bit transceiver word lost
+        # by a lane (sim.py --lane-slip).
+        self.rx_slip = Signal()
+        rx_offset    = Signal(max=nwords + 1, reset=rx_word_shift)
+        sync_rx += If(self.rx_slip,
+            rx_offset.eq(Mux(rx_offset + 2 <= nwords, rx_offset + 2, rx_offset - 2)))
         for i in range(nwords):
-            self.comb += decoders[i].input.eq(rx_data_sr[10*(rx_word_shift+i):10*(rx_word_shift+i+1)])
+            self.comb += Case(rx_offset, {s: decoders[i].input.eq(rx_data_sr[10*(s+i):10*(s+i+1)])
+                for s in range(nwords + 1)})
+        self.rx_decoded = rx_datapath.sink # Decoded RX words (debug: sim.py --lane-rx-log).
 
         # RX decode errors.
         self.rx_error_monitor = RXErrorMonitor(decoders, clock_domain=rx_clock_domain)
@@ -346,7 +355,8 @@ class USB3PIPESim(SoCMini):
         host_port_reset=False, dev_x2_disable=False, host_script_delay=None,
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
-        host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None, lane_skp_error=None):
+        host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None, lane_skp_error=None,
+        lane_slip=None, lane_rx_log=None):
         assert lanes in [1, 2]
         assert (link_words == 1) or (lanes == 1)
         assert (not gen2) or ((lanes == 1) and gen2_capable)
@@ -613,6 +623,7 @@ class USB3PIPESim(SoCMini):
         else:
             self.add_lanes_connection(serdeses, phys, cds, lane_delays, lane_skp, lanes_crossed,
                 lane_skp_error)
+            self.add_lanes_rx_debug(serdeses, cds, lane_slip, lane_rx_log)
 
         # Simulation Timer.
         timer = Signal(32)
@@ -934,6 +945,31 @@ class USB3PIPESim(SoCMini):
                 )
             ]
 
+    def add_lanes_rx_debug(self, serdeses, cds, lane_slip=None, lane_rx_log=None):
+        """Host lanes RX debug (0 ppm: one clock domain, cycles of the simulation timer):
+        lane_slip: (cycle, lane): 2 Symbols dropped by the Host lane SerDes RX at cycle (a 16-bit
+        transceiver word lost, ex: at the start of the last TS2 before the Logical Idle: two Acorn
+        Minis). lane_rx_log: (start, end): the Host and Device lanes decoded RX words displayed."""
+        if (lane_slip is None) and (lane_rx_log is None):
+            return
+        assert cds["host"] == cds["dev"] == "sys", "--lane-slip/--lane-rx-log: 0 ppm only."
+        timer = Signal(32)
+        self.sync += timer.eq(timer + 1)
+        if lane_slip is not None:
+            cycle, lane = lane_slip
+            s = serdeses["host"][lane]
+            self.comb += s.rx_slip.eq(timer == cycle)
+            self.sync += If(timer == cycle,
+                Display("[%08d] HOST LANE %d RX SLIP (2 Symbols dropped)", timer, lane))
+        if lane_rx_log is not None:
+            start, end = lane_rx_log
+            for name in ["host", "dev"]:
+                for lane, s in enumerate(serdeses[name]):
+                    d = s.rx_decoded
+                    self.sync += If((timer >= start) & (timer <= end) & d.valid,
+                        Display("[%08d] {} LANE %d RX %08x %x".format(name.upper()), timer, lane,
+                            d.data, d.ctrl))
+
     def add_ssp_status(self, phy, name, sync, timer):
         """SuperSpeedPlus Polling states (with negotiated x2/gen2)."""
         label = {"host": "HOST", "dev": "DEV "}[name]
@@ -953,6 +989,10 @@ class USB3PIPESim(SoCMini):
         sync += If(phy.deskew_aligned & ~aligned_d,
             Display("[%08d] {} lanes deskewed".format(label), timer)
         )
+        if hasattr(phy, "lanes_com_slip"):
+            sync += If(phy.lanes_com_slip,
+                Display("[%08d] {} lanes partial COM word (lane shifted since the pairing)".format(label), timer)
+            )
         if hasattr(phy, "lanes_skp_odd"):
             sync += If(phy.lanes_skp_odd,
                 Display("[%08d] {} lanes SKP run of odd length in U0 (lane shifted)".format(label), timer)
@@ -993,6 +1033,8 @@ def main():
     parser.add_argument("--lanes-tx-shift", default=0,          help="--lanes 2 --lanes-core: Gen 1x2 TX packets delayed by 1-7 symbols (packets at any symbol position).")
     parser.add_argument("--prbs-gap-bits", default=4,           help="Gaps of 0 to 2**N - 1 cycles between the PRBS packets (--no-core/--lanes 2).")
     parser.add_argument("--lane-skp-error", default=None, help="--lanes 2: CYCLES,DIR,LANE: one SKP Symbol error on Host Lane LANE (DIR h2d: Host -> Device, d2h: Device -> Host), CYCLES after the Host U0 entry.")
+    parser.add_argument("--lane-slip",     default=None, help="--lanes 2, 0 ppm: CYCLE,LANE: 2 Symbols dropped by the Host Lane LANE SerDes RX at CYCLE (a 16-bit transceiver word lost).")
+    parser.add_argument("--lane-rx-log",   default=None, help="--lanes 2, 0 ppm: START,END: Host and Device lanes decoded RX words displayed between the cycles START and END.")
     parser.add_argument("--lane-skp",      default=4096,        help="Extra Host Lane 1/Lane 0 SKP Ordered Sets period (cycles, 0: disabled, --lanes 2).")
     parser.add_argument("--gen2-capable",  action="store_true", help="Gen 2x1 capability advertised/negotiated in the SuperSpeedPlus Polling (--lanes 1).")
     parser.add_argument("--gen2",          action="store_true", help="Gen 2 training to U0 on raw words (implies --gen2-capable).")
@@ -1046,6 +1088,8 @@ def main():
         lane_delays           = (int(args.lane0_delay), int(args.lane1_delay)),
         lane1_word_shift      = int(args.lane1_word_shift),
         lane_skp              = int(args.lane_skp),
+        lane_slip             = None if args.lane_slip is None else tuple(int(v) for v in args.lane_slip.split(",")),
+        lane_rx_log           = None if args.lane_rx_log is None else tuple(int(v) for v in args.lane_rx_log.split(",")),
         lane_skp_error        = None if args.lane_skp_error is None else (lambda c, d, l: (int(c), d, int(l)))(*args.lane_skp_error.split(",")),
         dev_mode              = args.dev_mode,
         lanes_crossed         = args.lanes_crossed,

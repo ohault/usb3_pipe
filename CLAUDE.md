@@ -124,7 +124,11 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   never acknowledged. Host LiteScope (realign group) on a looping load: Host Lane 1 loses 2 COM Symbols
   (one 16-bit word) at the start of its last TS2 before the Logical Idle, the deskew tolerates the single
   end-of-burst mismatch, Lane 1 stays 2 Symbols off in U0 undetected (doc/gen1x2-hardware-validation.md
-  "Looping loads"); open: Host RX vs Device TX. Open: Host Advertisement lost when the
+  "Looping loads"); open: Host RX vs Device TX. Reproduced (`sim.py --lane-slip 900648,1`); t6 fixes: partial
+  COM word with the lanes deskewed -> deskew cleared (`com_slip`, control bit 5), COM at a lane head in U0 with
+  the deskew lost -> Recovery, Gen 1x2 TX words dropped out of U0 (stale LCSTART before the Advertisement),
+  RX words kept in HotReset.Exit/Polling.Idle from the partner's Logical Idle (`rx_keep`: lost Host
+  Advertisement); realign group + words before the word aligner, rx_buferror; hardware run pending. Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build

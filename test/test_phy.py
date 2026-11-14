@@ -554,6 +554,30 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertNotIn("DEV  Link Layer Recovery request", out)
         self.assertEqual(len(re.findall(r"HOST\s*entering HotReset.Active state", out)), 2)
 
+    def test_core_x2_lane_slip(self):
+        # Host Lane 1 losing 2 COM Symbols (one 16-bit transceiver word) at the start of its last
+        # TS2 before the run's U0 (two Acorn Minis, looping loads): the partial COM word clears the
+        # deskew (Recovery at once instead of every destriped word corrupted until the Device
+        # PENDING_HP_TIMER), the TX words held out of U0 are dropped (no stale LCSTART before the
+        # next Advertisement) and the run is done without a Device Link Layer Recovery request.
+        out = self.run_sim("core_x2_lane_slip", ["--dev-mode", "x2", "--lanes-crossed",
+            "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000",
+            "--lane-slip", "900648,1"])
+        self.assertRegex(out, r"HOST LANE\s+1 RX SLIP")
+        self.assertRegex(out, r"HOST\s*lanes partial COM word")
+        self.assertNotIn("DEV  Link Layer Recovery request", out)
+
+    def test_core_x2_skp_error_d2h(self):
+        # SKP Symbol error on a Device -> Host lane: the Host Recovery, then the run restarted with
+        # a Hot Reset, the Host in U0 ~24 cycles before the Device: the Host Advertisement received
+        # in the Device HotReset.Exit is kept until its U0 (rx_keep), no Device PENDING_HP_TIMER
+        # Recovery for a missing Advertisement.
+        out = self.run_sim("core_x2_skp_error_d2h", ["--dev-mode", "x2", "--lanes-crossed",
+            "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000",
+            "--lane-skp-error", "303000,d2h,0"])
+        self.assertRegex(out, r"HOST\s*lanes SKP run of odd length in U0")
+        self.assertNotIn("DEV  Link Layer Recovery request", out)
+
     def test_core_x2_skp_error(self):
         # One SKP Symbol with an 8b/10b error on a single lane during the scripted host run: the
         # lane SKP removal keeps it (lane shifted by one Symbol from the other lane, no COM word in
