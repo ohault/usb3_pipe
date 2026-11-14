@@ -700,9 +700,16 @@ Recoveries of the noisy loads):
 The U0 exits not requested by the Device are 0.1-0.5us U0 periods (the lanes events: Host
 `deskew_lost_u0`, comma realignments). The Device "before the runs" `pending_hp` counts of the t3/t4
 reports are mostly the load order (the Device loaded while the Host still runs its previous
-bitstream: ~1800, then ~360 during the Host load), not idle U0. Next: the scripted host fixed (Device
-LMPs counted from the run start in `link_init`, Advertisement and acknowledges kept on the U0
-re-entries out of the test runs), reproduced first in simulation.
+bitstream: ~1800, then ~360 during the Host load), not idle U0.
+
+Scripted host fixed (both reproduced first):
+- B: `USB3HostModel` counts the Device HPSTARTs from the U0 entry whatever the step (`OP_WAITHP`),
+  `link_init` waits the Device LMPs on that count (`test_host_model.py`
+  `test_link_init_device_lmp_early`: missed before, a `link_init` timeout).
+- C: the idle run is kept through the Recoveries (LTSSM in Recovery.*; left on a Hot Reset or a
+  training as before): Advertisement on each U0 re-entry (`TestPHYX2Core.
+  test_core_x2_host_script_idle_recovery`: a Recovery while idle, 34 Device `pending_hp` requests
+  until the next idle link initialization before, 0 now). Hardware run pending.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

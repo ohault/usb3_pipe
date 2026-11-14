@@ -541,6 +541,19 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertNotIn("DEV  Link Layer Recovery request", out)
         self.assertEqual(len(re.findall(r"HOST\s*entering HotReset.Active state", out)), 2)
 
+    def test_core_x2_host_script_idle_recovery(self):
+        # Recovery out of the test runs (one SKP Symbol error on a lane while the scripted host is
+        # idle): the idle run is kept through the Recovery, its Advertisement sent on the U0
+        # re-entry. Without it, no Advertisement until the next idle link initialization and a
+        # Device PENDING_HP_TIMER Recovery every ~12us (two Acorn Minis: Recovery storms).
+        out = self.run_sim("core_x2_host_script_idle_recovery", ["--dev-mode", "x2",
+            "--lanes-crossed", "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000",
+            "--lane-skp-error", "50000,h2d,1"])
+        self.assertIn("LANE SKP SYMBOL ERROR", out)
+        self.assertIn("HOST_ADVERTISEMENT", out)
+        self.assertNotIn("DEV  Link Layer Recovery request", out)
+        self.assertEqual(len(re.findall(r"HOST\s*entering HotReset.Active state", out)), 2)
+
     def test_core_x2_skp_error(self):
         # One SKP Symbol with an 8b/10b error on a single lane during the scripted host run: the
         # lane SKP removal keeps it (lane shifted by one Symbol from the other lane, no COM word in

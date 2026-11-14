@@ -196,6 +196,9 @@ OP_WAITCRED = 10 # Wait a device Type 2 credit (LCRD2_x received since OP_ACK, 4
                  # consumed.
 OP_WAITLBAD = 11 # Wait data device LBADs received since OP_ACK.
 OP_CHECK    = 12 # Next received word must match data (under mask)/ctrl, else error (strict checks).
+OP_WAITHP   = 13 # Wait data device Header Packets (HPSTART) received since the U0 entry, whatever the
+                 # step on their reception (link initialization: a device LMP received while the
+                 # host still sends its Advertisement/LMP is counted, not missed).
 
 # Host LTSSM PM controls (OP_PM).
 PM_REQ_U1   = 0b00001
@@ -293,6 +296,19 @@ class USB3HostModel(LiteXModule):
             ),
         ]
 
+        # Device Header Packets (HPSTART) received since the U0 entry (OP_WAITHP), whatever the step.
+        hp_rx  = Signal(8)
+        u0_rx  = Signal()
+        self.sync += [
+            u0_rx.eq(self.u0),
+            If(self.u0 & ~u0_rx,
+                hp_rx.eq(0)
+            ).Elif(sink.valid & (sink.ctrl == 0b1111) & (sink.data == 0xfbfbfbf7) &
+                (hp_rx != (2**len(hp_rx) - 1)),
+                hp_rx.eq(hp_rx + 1)
+            ),
+        ]
+
         # Script execution.
         timer = WaitTimer(wait_timeout)
         self.submodules += timer
@@ -324,6 +340,9 @@ class USB3HostModel(LiteXModule):
                 timer.wait.eq(run),
             ],
             OP_WAITLBAD: [
+                timer.wait.eq(run),
+            ],
+            OP_WAITHP: [
                 timer.wait.eq(run),
             ],
             OP_CHECK: [
@@ -555,6 +574,14 @@ class USB3HostModel(LiteXModule):
                         Display("HOST_TIMEOUT step %d", step)
                     )
                 ],
+                OP_WAITHP: [
+                    If(hp_rx >= fields["data"][0:8],
+                        step.eq(step + 1)
+                    ).Elif(timer.done,
+                        self.error.eq(1),
+                        Display("HOST_TIMEOUT step %d", step)
+                    )
+                ],
                 OP_CHECK: [
                     If(sink.valid,
                         If(match,
@@ -645,7 +672,7 @@ class HostScript:
     def check(self, data, ctrl=0, mask=0xffffffff):
         self.steps.append((OP_CHECK, data, ctrl, mask, 0, 0))
 
-    def wait_hp(self, type2=False, dpp=None):
+    def wait_hp(self, type2=False, dpp=None, since_u0=None):
         # Wait a device Header Packet and acknowledge it (LGOOD_n + LCRD_x/LCRD1_x/LCRD2_x, 7.2.4,
         # type2: asynchronous DP in SuperSpeedPlus operation). dpp: payload of the DP, its words
         # checked (strict: the next received words) before the acknowledgement: the DPH words (not
@@ -657,7 +684,13 @@ class HostScript:
             self.auto_count += 1
             self.steps.append((OP_WAITN, self.auto_count, 0, 0, 0, 0))
             return
-        self.wait(0xfbfbfbf7, ctrl=0b1111)
+        if since_u0 is not None:
+            # Device Header Packets counted since the U0 entry (OP_WAITHP): received before this
+            # step too (link initialization: the device sends its LMP right after its U0 entry).
+            assert dpp is None
+            self.steps.append((OP_WAITHP, since_u0, 0, 0, 0, 0))
+        else:
+            self.wait(0xfbfbfbf7, ctrl=0b1111)
         if dpp is not None:
             for _ in range(4):
                 self.check(0, ctrl=0, mask=0) # DPH words (header, CRC-16/Link Control Word).
@@ -704,10 +737,13 @@ class HostScript:
     def link_init(self):
         self.mark("link_init")
         self.advertise()
+        # The device sends its Port Capability LMP right after its U0 entry, possibly before the
+        # host Advertisement/LMP are sent: the device LMPs are counted from the U0 entry (OP_WAITHP),
+        # not only waited from here (a missed LMP: no LGOOD_n, device PENDING_HP_TIMER Recovery).
         self.send_hp(lmp_port_capability)
-        self.wait_hp() # Device Port Capability LMP.
+        self.wait_hp(since_u0=1) # Device Port Capability LMP.
         self.send_hp(lmp_port_configuration)
-        self.wait_hp() # Device Port Configuration Response LMP.
+        self.wait_hp(since_u0=2) # Device Port Configuration Response LMP.
 
     # Control transfers (8.12.2).
     def control_read(self, setup, name, latency=256, status_gap=64):

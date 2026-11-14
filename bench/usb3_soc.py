@@ -641,7 +641,10 @@ class USB3HostScript(LiteXModule):
     script runs, a LUP keep-alive Link Command is sent every 10us in U0 (as a host, 7.5.6.1: the
     Device does not enter Recovery for a lack of link activity, 1ms) and, after a run, the model
     reactive acknowledges (LGOOD_n/LCRD_x of the Device Header Packets) are still sent: no Device
-    Recovery for unacknowledged Header Packets between the runs (PENDING_HP_TIMER).
+    Recovery for unacknowledged Header Packets between the runs (PENDING_HP_TIMER). The idle run
+    (idle_init) is kept through the Recoveries out of the test runs: Advertisement on each U0
+    re-entry (else the Device would request a Recovery every PENDING_HP_TIMER until the next idle
+    link initialization).
 
     Both scripts in the model ROM (SuperSpeedPlus, then SuperSpeed from step ss_start), the run
     starting on the one of the negotiated link (Gen 1x2: SuperSpeedPlus, Gen 1x1: SuperSpeed),
@@ -770,11 +773,22 @@ class USB3HostScript(LiteXModule):
         ).Elif(run_fsm.ongoing("RUN") & ~test & model.done,
             idle_done.eq(1)
         )
+        # Idle run done (reactive acknowledges): kept through the Recoveries (U0 -> Recovery -> U0, the
+        # Header Sequence Numbers kept on both sides), the model sends its Advertisement on each U0
+        # re-entry and acknowledges the Device Header Packets. Left otherwise (Hot Reset, training):
+        # without it, no Advertisement after a Recovery until the next idle link initialization
+        # (idle_delay) and the Device requests a Recovery every PENDING_HP_TIMER (two Acorn Minis:
+        # Recovery storms on the loads with lanes events).
+        in_recovery = Signal()
+        self.comb += in_recovery.eq(Reduce("OR", [link.ltssm_state == link.ltssm_states[s]
+            for s in ["Recovery.Active", "Recovery.Configuration", "Recovery.Idle"]]))
+        idle_keep = Signal()
+        self.comb += idle_keep.eq(~test & model.done & in_recovery)
         run_fsm.act("RUN",
             run.eq(1),
             If(abort,
                 NextState("IDLE")
-            ).Elif(~link.u0,
+            ).Elif(~link.u0 & ~idle_keep,
                 If(test & (model.done | model.error),
                     NextValue(held_done,  model.done),
                     NextValue(held_error, model.error),

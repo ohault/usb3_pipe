@@ -99,5 +99,47 @@ class TestHostModel(unittest.TestCase):
         run_simulation(dut, generator(dut))
         self.assertEqual(dut.result, (0, 1))
 
+    def run_link_init(self, lmp_cycles, ssp=True, cycles=400):
+        # Scripted link initialization with the device Header Packets starts (HPSTART) received at
+        # lmp_cycles: returns (done, error, transmitted words).
+        s = HostScript(ssp=ssp)
+        s.link_init()
+        s.end()
+        dut = USB3HostModel(s.steps, wait_timeout=128)
+
+        def generator(dut):
+            dut.tx = []
+            yield dut.u0.eq(1)
+            yield dut.enable.eq(1)
+            yield dut.source.ready.eq(1)
+            for i in range(cycles):
+                hp = i in lmp_cycles
+                yield dut.sink.valid.eq(hp)
+                yield dut.sink.data.eq(0xfbfbfbf7 if hp else 0)
+                yield dut.sink.ctrl.eq(0b1111 if hp else 0)
+                yield
+                if (yield dut.source.valid):
+                    dut.tx.append(((yield dut.source.data), (yield dut.source.ctrl)))
+            dut.result = ((yield dut.done), (yield dut.error))
+
+        run_simulation(dut, generator(dut))
+        return dut.result + (dut.tx,)
+
+    def test_link_init_device_lmp_late(self):
+        # Device LMPs received after the host Advertisement and LMPs (waits started).
+        done, error, tx = self.run_link_init([100, 200])
+        self.assertEqual((done, error), (1, 0))
+
+    def test_link_init_device_lmp_early(self):
+        # Device Port Capability LMP received while the host still sends its Advertisement (device in
+        # U0 first, hardware: two Acorn Minis, after a Hot Reset): counted, not missed (no Device
+        # PENDING_HP_TIMER Recovery, no link_init timeout), acknowledged after the host LMP.
+        for ssp in [True, False]:
+            with self.subTest(ssp=ssp):
+                done, error, tx = self.run_link_init([3, 100], ssp=ssp)
+                self.assertEqual((done, error), (1, 0))
+                lgood0 = link_command(LGOOD(0))
+                self.assertIn(lgood0[1], tx)
+
 if __name__ == "__main__":
     unittest.main()
