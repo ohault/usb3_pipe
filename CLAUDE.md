@@ -156,7 +156,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   decode errors = training/Recovery activity (rho 0.92 with Host Recoveries), disparity errors = line quality
   (~80/Host lane clean vs 860-1280 noisy); COM-preceding errors 0.009%, disparity > decode on the Host; Device RX
   Lane 1 the worst receiver (46% of errors, most disparity), then Host RX Lane 0 (22%); t10 noisier than t9 but
-  a 10-round t9/t10 A/B: no difference (bench drift).
+  a 10-round t9/t10 A/B: no difference (bench drift). TX post-cursor now a runtime register per SerDes on the
+  Acorn Gen 1x2 builds (`lane{n}_tx_postcursor`, `usb3_lanes.py tx-postcursor --value A[,B]`, reset = --tx-postcursor)
+  for the pre-emphasis sweep (t11, pending).
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

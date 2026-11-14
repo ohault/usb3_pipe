@@ -850,7 +850,10 @@ not idle (not the LFPS: no symbols, decode errors by construction); no 32-bit ad
 clock domains (t9 Host Lane 0 RX WNS +0.095ns). t10 (row above): the counters hold; disparity errors per reset per lane
 are the line quality figure (decode errors are mostly training/Recovery symbols, counted from
 Polling.RxEQ); the weak receivers are the Device RX Lane 1 (most disparity errors) and the Host RX
-Lane 0, on different loads: the TX post-cursor sweep should watch both.
+Lane 0, on different loads: the TX post-cursor sweep should watch both. The Acorn Gen 1x2 builds now have the
+GTP TX post-cursor pre-emphasis as a runtime register per SerDes (SerDes n on SFP-n, reset to the
+`--tx-postcursor` value: `usb3_lanes_debug_lane{n}_tx_postcursor`, `usb3_lanes.py tx-postcursor
+--value 6,10`), so a sweep needs one build per board.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

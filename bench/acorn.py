@@ -175,8 +175,13 @@ class USB3SoC(USB3BaseSoC):
                 # Gen 1x2 (two Acorn Minis): RX electrical idle detection spikes after the partner
                 # Polling LFPS bursts on some bitstream loads, rejected below the shortest LFPS burst.
                 rx_idle_min_burst = 40e-9 if lanes == 2 else None)
-            # TX post-cursor pre-emphasis (--tx-postcursor, UG482 TXPOSTCURSOR), per SFP cage.
-            if tx_postcursor is not None and tx_postcursor[lane]:
+            # TX post-cursor pre-emphasis (--tx-postcursor, UG482 TXPOSTCURSOR), per SFP cage. Gen 1x2:
+            # a runtime control (tx_postcursor, reset to the --tx-postcursor value: USB3LanesDebug
+            # lane{n}_tx_postcursor CSR, usb3_lanes.py tx-postcursor) for pre-emphasis sweeps.
+            if lanes == 2:
+                serdes.tx_postcursor = Signal(5, reset=tx_postcursor[lane] if tx_postcursor else 0)
+                serdes.gtp.gtp_params.update(i_TXPOSTCURSOR=serdes.tx_postcursor)
+            elif tx_postcursor is not None and tx_postcursor[lane]:
                 serdes.gtp.gtp_params.update(i_TXPOSTCURSOR=tx_postcursor[lane])
             serdes.gtp.gtp_params.update(gtp_params) # Debug overrides (--gtp-param).
             usb3_serdes.append(serdes)

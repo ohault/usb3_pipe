@@ -312,6 +312,15 @@ class USB3LanesDebug(LiteXModule):
         # accumulated in sys): only with the LTSSM in a state receiving symbols (Polling.RxEQ to U0,
         # Recovery, Hot Reset) and the lane RX not idle (not the LFPS/electrical idle: no symbols);
         # cleared by a snapshot on clear.
+        # Per SerDes TX post-cursor pre-emphasis (runtime control when the target exposes it: Acorn
+        # Gen 1x2, SerDes n on SFP-n; reset to the build value).
+        for lane, s in enumerate(serdes):
+            if hasattr(s, "tx_postcursor"):
+                csr = CSRStorage(len(s.tx_postcursor), reset=s.tx_postcursor.reset.value,
+                    name=f"lane{lane}_tx_postcursor",
+                    description=f"SerDes {lane} TX post-cursor pre-emphasis (GTP TXPOSTCURSOR).")
+                setattr(self, f"_lane{lane}_tx_postcursor", csr)
+                self.comb += s.tx_postcursor.eq(csr.storage)
         counted = [s for s in serdes if hasattr(s, "add_rx_errors_count") and hasattr(s, "rx_substitution")]
         if counted:
             states  = phy.ltssm_states

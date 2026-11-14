@@ -93,6 +93,9 @@ class USB3LanesClient:
             r["com_recovery"]     = (control >> 5) & 0x1
         if hasattr(self.bus.regs, "usb3_lanes_debug_rx_drop_count"):
             r["rx_drop"] = self.reg("usb3_lanes_debug_rx_drop_count").read()
+        if hasattr(self.bus.regs, "usb3_lanes_debug_lane0_tx_postcursor"):
+            r["tx_postcursor"] = [self.reg(f"usb3_lanes_debug_lane{lane}_tx_postcursor").read()
+                for lane in range(2)]
         if self.has_prbs():
             r.update({f"prbs_{k}": v for k, v in self.prbs().items()})
         return r
@@ -123,6 +126,13 @@ class USB3LanesClient:
         control = self.reg("usb3_lanes_debug_control").read()
         self.reg("usb3_lanes_debug_control").write((control & ~0x20) | (int(enable) << 5))
 
+    def tx_postcursor(self, values):
+        # TX post-cursor pre-emphasis per SerDes (SerDes n on SFP-n, GTP TXPOSTCURSOR 0-31; runtime
+        # control of the Acorn Gen 1x2 builds), applied at once (retrain to train with it).
+        for lane, value in enumerate(values):
+            assert 0 <= value < 32
+            self.reg(f"usb3_lanes_debug_lane{lane}_tx_postcursor").write(value)
+
     def x2_enable(self, enable=True):
         # Gen 1x2 advertised in the SuperSpeedPlus Polling (0: Gen 1x1 only), from the next training.
         control = self.reg("usb3_lanes_debug_control").read()
@@ -145,11 +155,12 @@ def main():
     parser.add_argument("--duration", default=10.0, type=float, help="prbs: test duration (s).")
     parser.add_argument("--runs",     default=1,    type=int,   help="script: runs of the scripted host.")
     parser.add_argument("--timeout",  default=2.0,  type=float, help="script: run timeout (s).")
+    parser.add_argument("--value",    default=None,             help="tx-postcursor: TXPOSTCURSOR (0-31), one value or one per SerDes (ex: 6,10 for SFP-0/SFP-1).")
     parser.add_argument("command",    choices=["status", "clear", "retrain", "watch", "prbs",
         "prbs-enable", "prbs-disable", "script",
         "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable",
         "x2-enable", "x2-disable", "skp-recovery-enable", "skp-recovery-disable",
-        "com-recovery-enable", "com-recovery-disable"])
+        "com-recovery-enable", "com-recovery-disable", "tx-postcursor"])
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -165,6 +176,12 @@ def main():
         lanes.rx_errors_reinit(args.command == "rx-reinit-enable")
     elif args.command in ["com-recovery-enable", "com-recovery-disable"]:
         lanes.com_recovery(args.command == "com-recovery-enable")
+    elif args.command == "tx-postcursor":
+        # TX post-cursor pre-emphasis (no --value: print the current values).
+        if args.value is not None:
+            values = [int(v, 0) for v in args.value.split(",")]
+            lanes.tx_postcursor(values*2 if len(values) == 1 else values)
+        print(json.dumps({"tx_postcursor": lanes.status().get("tx_postcursor")}))
     elif args.command in ["skp-recovery-enable", "skp-recovery-disable"]:
         lanes.skp_recovery(args.command == "skp-recovery-enable")
     elif args.command in ["x2-enable", "x2-disable"]:
