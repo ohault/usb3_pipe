@@ -104,8 +104,10 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   `TestPHYX2Core.test_core_x2_host_script_idle`). Timing: register stages on the scripted host paths
   (`5eefc1e`), `LanesPacketAligner` parser without the 8-step chain (t3 builds at `1192007`: aligner worst path
   +1.008/+0.959ns, 8-9 levels, was +0.307/+0.231ns, 12-13; sys WNS +0.602/+0.679ns, design WNS +0.315/+0.236ns
-  in the GTP domains: PRBS checker reset/count, Device RX stride converter -> skip remover; hardware run pending);
-  last hardware run with both host changes (before the aligner change): 398/400 on noisier loads.
+  in the GTP domains: PRBS checker reset/count, Device RX stride converter -> skip remover); t3 hardware
+  run (2026-11-14, crossed, 20x20): 398/400 (both timeouts on one bad load, rx_errors_cycles ~10x the others),
+  quieter than t2 (resets median 23.5 vs ~46, Host Lane 0 realign 23.7k vs 73k, Host Recoveries median 60
+  vs 109.5), Device in-run Recovery requests unchanged (median 3.5, `pending_hp`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build
   with a USB 3 host through the SFP2USB adapter/the breakout, then a Gen 1x2 host
