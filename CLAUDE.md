@@ -113,8 +113,11 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   odd SKP run in U0 -> Recovery (`RXSKPParityCheck`, `skp_odd_u0`/`lane*_rx_skp_odd`, control bit 4,
   `TestPHYX2Core.test_core_x2_skp_error`); t4 hardware run (047511e, 20x20 crossed): 386/400 (load 1 stuck in
   a deskew_lost_u0 Recovery loop, loads 2-20 380/380), odd SKP runs in U0 rare (Device 0 on 19 loads) and the
-  A/B shows no pending_hp change: not the pending_hp cause (check kept); next: Device Link trace stopped on
-  the Recovery (HPSTART/LCSTART framing lost?). Open: Host Advertisement lost when the
+  A/B shows no pending_hp change: not the pending_hp cause (check kept). Device Link trace (204 Recoveries):
+  all scripted host reactions to the noisy loads' Recoveries, no Device fault: B = Device LMP missed by
+  `link_init` (received before its OP_WAIT), C = no Host Advertisement on U0 re-entries out of the test runs
+  (idle run left on a U0 exit, next idle init 10ms later: a Recovery every 12.18us); next: fix the scripted
+  host (doc/gen1x2-hardware-validation.md "the scripted host after a Recovery"). Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build

@@ -672,10 +672,37 @@ simulations: Recovery ~10 cycles after the error, no Device Link Layer Recovery 
 differences, +/-300ppm, crossed lanes. Hardware (t4 row of the results table): odd SKP runs in U0
 are rare (Device `skp_odd_u0` 0 on 19/20 loads, Host 0-2) and the A/B shows no `pending_hp`
 reduction: the check stays (a real slip is otherwise silent) but the `pending_hp` during the runs
-have another cause. Remaining candidates: a Device Header Packet start (HPSTART) or its LGOOD_n
-start (LCSTART) not recognized when a Symbol of it is corrupted (both sides require the 4 framing
-Symbols; at Gen 1x2 a lane burst hits both Link Command copies), next to check with the Device Link
-trace stopped on the Recovery request (`usb3_trace.py link-clear --circular --filter`).
+have another cause, found with the Device Link trace below.
+
+### Device `pending_hp`: the scripted host after a Recovery (Link trace, 2026-11-14)
+
+Device Link trace stopped on the Recovery requests (t4 bitstreams, `usb3_trace.py link-clear
+--circular --filter [--skip N]`, the trace stopped before its dump; files on the PC in
+`build/hw_runs/crossed_t4/trace/`): 204 Device Recovery requests captured (idle: load 2, in-run:
+load 5), all `pending_hp`, 12.18us after the last Device Header Packet or the U0 entry (the
+SuperSpeedPlus PENDING_HP_TIMER: 10us + 1088 bytes/4/125MHz). None with an acknowledge lost on the
+Device RX side (later Host Link Commands received but not the LGOOD_n: 0), Device `lc_bad` 0 during
+the in-run captures. Two classes, both in the scripted host (bench gateware, a reaction to the
+Recoveries of the noisy loads):
+
+- B (58, 49 of them in-run): right after a link initialization (Hot Reset), the Device Port
+  Capability LMP is sent 0.22us after its U0 entry, while the Host Advertisement is still arriving;
+  the Host LMP is received, then nothing from the Host (no LGOOD_0, no LCRD). `HostScript.link_init`
+  sends the Advertisement and its LMP before its `OP_WAIT` for the Device HPSTART, and
+  `USB3HostModel` only matches the words received during an `OP_WAIT` step (RX always ready): a
+  Device LMP received before it is missed, the run waits in `link_init` (the `link_init` timeouts of
+  the bad loads).
+- C (146, 138 of them idle): no Host Advertisement after the U0 entry, only LUP keep-alives. Out of a
+  test run, `USB3HostScript` leaves its idle run on a U0 exit (model disabled, no Advertisement on the
+  next U0 entry) and starts the next idle link initialization 10ms later: meanwhile the Device
+  requests a Recovery every 12.18us (~800 per 10ms, the Recovery storms of the noisy loads).
+
+The U0 exits not requested by the Device are 0.1-0.5us U0 periods (the lanes events: Host
+`deskew_lost_u0`, comma realignments). The Device "before the runs" `pending_hp` counts of the t3/t4
+reports are mostly the load order (the Device loaded while the Host still runs its previous
+bitstream: ~1800, then ~360 during the Host load), not idle U0. Next: the scripted host fixed (Device
+LMPs counted from the run start in `link_init`, Advertisement and acknowledges kept on the U0
+re-entries out of the test runs), reproduced first in simulation.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
