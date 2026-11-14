@@ -158,7 +158,11 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   Lane 1 the worst receiver (46% of errors, most disparity), then Host RX Lane 0 (22%); t10 noisier than t9 but
   a 10-round t9/t10 A/B: no difference (bench drift). TX post-cursor now a runtime register per SerDes on the
   Acorn Gen 1x2 builds (`lane{n}_tx_postcursor`, `usb3_lanes.py tx-postcursor --value A[,B]`, reset = --tx-postcursor)
-  for the pre-emphasis sweep (t11, pending).
+  for the pre-emphasis sweep; t11 (a1a1784, 10 loads x 14 settings, paired): no value beats 6 (p >= 0.08), the load
+  explains the variance (p 1e-9..1e-20), the setting none; a load's noise is fixed at configuration (survives
+  retrains, RX resets, pre-emphasis): next suspect the PLL lock/TX phase alignment/fabric refclk (test: full GTP
+  channel + PLL re-init at runtime on a noisy load). Device t11 design WNS +0.079ns (sys reset fan-out to the
+  error counters accumulators).
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
