@@ -111,7 +111,10 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   simulation (2026-11-14): a SKP Symbol with an 8b/10b error is kept by the per lane SKP removal (lane one
   Symbol off, no COM in U0 to see it) until the Device PENDING_HP_TIMER (`sim.py --lane-skp-error`); fix:
   odd SKP run in U0 -> Recovery (`RXSKPParityCheck`, `skp_odd_u0`/`lane*_rx_skp_odd`, control bit 4,
-  `TestPHYX2Core.test_core_x2_skp_error`); hardware run pending. Open: Host Advertisement lost when the
+  `TestPHYX2Core.test_core_x2_skp_error`); t4 hardware run (047511e, 20x20 crossed): 386/400 (load 1 stuck in
+  a deskew_lost_u0 Recovery loop, loads 2-20 380/380), odd SKP runs in U0 rare (Device 0 on 19 loads) and the
+  A/B shows no pending_hp change: not the pending_hp cause (check kept); next: Device Link trace stopped on
+  the Recovery (HPSTART/LCSTART framing lost?). Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build
