@@ -832,6 +832,15 @@ The t5 vs t8 A/B (row above, 20 rounds alternating the two builds) shows no diff
 baseline is the loads (about half noisy, Host Lane 0 receive path fed by the Device SFP-1), not
 the gateware changes since t5; t8 has no looping load and failed no run in it.
 
+Receive errors by type (2026-11-14, for the next hardware run): per lane counters of the received
+Symbols with a decode error (`lane*_rx_decode_errors`) or a running disparity error only
+(`lane*_rx_disparity_errors`), and of the same errors on the Symbol just before a COM
+(`lane*_rx_com_decode_errors`/`lane*_rx_com_disparity_errors`: the first COM of an Ordered Set
+received with an error; with 2 corrupted COM Symbols, the second one is the Symbol counted), in
+each SerDes RX clock domain (`RXErrorTypesCount`, `USB3LanesDebug`, `usb3_lanes.py status`,
+`acorn_x2_loads.py --summary`). The t7 capture analysis suggested disparity errors (no decoder
+`invalid` on 25/38 corrupted COM words): these counters measure it on every load.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits

@@ -165,7 +165,9 @@ def summary(loads):
     }
     for side in ["host", "device"]:
         for k in ["recovery_count", "deskew_lost_u0", "realign_u0", "skp_odd_u0", "com_slip", "lane0_rx_realign",
-            "lane1_rx_realign", "lane0_rx_skp_odd", "lane1_rx_skp_odd", "lane0_rx_com_partial", "lane1_rx_com_partial"]:
+            "lane1_rx_realign", "lane0_rx_skp_odd", "lane1_rx_skp_odd", "lane0_rx_com_partial", "lane1_rx_com_partial"] + [
+            f"lane{lane}_{name}" for lane in range(2) for name in ["rx_decode_errors", "rx_disparity_errors",
+            "rx_com_decode_errors", "rx_com_disparity_errors"]]:
             r[f"{side}_{k}_median"] = median([d[side][k] for d in good if k in d[side]])
     for k in CORE_COUNTERS + CORE_CAUSES:
         for when in ["before", "runs"]:

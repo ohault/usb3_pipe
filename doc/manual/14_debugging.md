@@ -286,7 +286,7 @@ counters (`USB3LanesDebug`). The procedure and the results are in
 `doc/gen1x2-hardware-validation.md`.
 
 | Counter or control | Meaning |
-|------------------------------|------------------------------------------------------------------|
+|------------------------------------|------------------------------------------------------------|
 | `deskew_lost_u0` | U0 entered or kept without the lanes deskew (Recovery requested) |
 | `lane_idle_u0` | A lane in electrical idle for 10 µs in U0 (Recovery requested) |
 | `realign_u0` | A lane comma realignment, receive re-initialization or odd SKP run in U0 |
@@ -295,6 +295,9 @@ counters (`USB3LanesDebug`). The procedure and the results are in
 | `skp-recovery-enable` | Recovery on an odd SKP run in U0 (`-disable`: counted only) |
 | `com-recovery-enable` | Deskew cleared on a partial COM word (`-disable`: counted only) |
 | `rx_realign`, `rx_errors_reinit` | Per lane transceiver comma realignments and receive re-initializations |
+| `rx_decode_errors`, `rx_disparity_errors` | Per lane received symbols with a decode error, or with a running disparity error only (valid code in the other disparity column) |
+| `rx_com_decode_errors` | A decode error on the symbol just before a COM: the first COM of an ordered set received with an error |
+| `rx_com_disparity_errors` | The same with a running disparity error |
 | `rx_overflow`, `rx_drop_count` | Link receive buffer or packet aligner overflow, dropped words |
 | `x2-disable`, `x2-enable` | Gen 1x2 advertised or not at the next training (Gen 1x1 test) |
 

@@ -11,14 +11,15 @@ LFPS (TX pattern/electrical idle, filtered RX electrical idle, RX decode errors)
 """
 
 from migen import *
-from migen.genlib.cdc import PulseSynchronizer, MultiReg
+from migen.genlib.cdc import PulseSynchronizer, MultiReg, BusSynchronizer
 
 from litex.gen import *
 
 from litex.soc.interconnect import stream
 
-from usb3_pipe.common   import Buffer
+from usb3_pipe.common   import Buffer, COM
 from usb3_pipe.datapath import RXErrorSubstitution, RXErrorMonitor, RXIdleFilter, RXSKPParityCheck
+from usb3_pipe.datapath import RXErrorTypesCount
 from usb3_pipe.datapath import TXDatapath, RXDatapath
 
 # USB3 Serializer/Deserializer ---------------------------------------------------------------------
@@ -149,6 +150,35 @@ class USB3SerDes(LiteXModule):
             ps.i.eq(checker.odd),
             self.rx_skp_odd.eq(ps.o),
         ]
+
+    def add_rx_errors_count(self):
+        """RX 8b/10b errors counters (debug, free running 32-bit, synchronized to sys), per type: the
+        received Symbols with a decode error (decoder invalid/code not in the 8b/10b table) and with
+        a running disparity error only (valid code in the other running disparity column), and the
+        same errors on the Symbol just before a COM (the first COM Symbol of an Ordered Set received
+        with an error: two Acorn Minis, the start of the TS1/TS2). Added by USB3LanesDebug."""
+        xcvr     = getattr(self, self.xcvr_name)
+        checker  = self.rx_substitution.checker
+        decoders = xcvr.decoders
+        n        = len(decoders)
+        rx_cd    = getattr(self, "rx_cd", "rx")
+        source   = self.rx_substitution.source
+
+        counter = ClockDomainsRenamer(rx_cd)(RXErrorTypesCount(n))
+        self.rx_errors_counter = counter
+        for i in range(n):
+            self.comb += [
+                counter.decode[i].eq(decoders[i].invalid | checker.invalid[i]),
+                counter.disparity[i].eq(checker.disparity_error[i]),
+                counter.com[i].eq(source.ctrl[i] & (source.data[8*i:8*(i+1)] == COM.value)),
+            ]
+        self.rx_errors_counts = {}
+        for name, count in counter.counts.items():
+            bus = BusSynchronizer(32, rx_cd, "sys")
+            self.submodules += bus
+            value = Signal(32, name=name)
+            self.comb += [bus.i.eq(count), value.eq(bus.o)]
+            self.rx_errors_counts[name] = value
 
     def add_lfps(self, xcvr, rx_idle, rx_idle_burst_cycles=1):
         """LFPS: TX pattern, filtered RX electrical idle (from the transceiver's OOB detector, non-idle

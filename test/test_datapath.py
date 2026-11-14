@@ -21,6 +21,7 @@ from litex.gen import *
 
 from usb3_pipe.common   import *
 from usb3_pipe.datapath import RXWordAligner, RXSKPRemover, TXSKPInserter, RXDatapath, TXDatapath
+from usb3_pipe.datapath import RXErrorTypesCount
 from usb3_pipe.datapath import Gen2TXDatapath, Gen2RXDatapath, GEN2_DATA_WIDTH, GEN2_RX_COUNTERS
 from usb3_pipe.datapath import GEN2_IDLE_BLOCK, Gen2TXDCBalance
 from usb3_pipe.coding   import GEN2_DC_REDUCE_ONES, GEN2_DC_REDUCE_ZEROS
@@ -226,6 +227,41 @@ class TestDatapath(unittest.TestCase):
                     found = [i for i in range(len(before)//4 - 2, len(dut.words) - n + 1)
                         if dut.words[i:i + n] == expected]
                     self.assertNotEqual(found, [], dut.words)
+
+    def test_rx_error_types_count(self):
+        # 2 Symbols per word: (decode, disparity, com) flags per Symbol; errors before a COM in the
+        # same word and across words (previous word last Symbol), disparity errors counted only
+        # without a decode error.
+        words = [
+            # Symbol 0          Symbol 1
+            [(0, 0, 0),         (1, 0, 0)],  # decode
+            [(0, 0, 1),         (0, 1, 0)],  # COM after decode (across words), disparity
+            [(0, 0, 1),         (0, 0, 0)],  # COM after disparity (across words)
+            [(0, 1, 0),         (0, 0, 1)],  # COM after disparity (same word)
+            [(1, 1, 0),         (0, 0, 1)],  # decode (+disparity flag: decode only), COM after decode
+            [(0, 0, 0),         (0, 0, 0)],
+            [(0, 0, 0),         (0, 0, 0)],
+        ]
+        dut = RXErrorTypesCount(2)
+
+        def generator(dut):
+            for w in words:
+                yield dut.decode.eq(   sum(s[0] << i for i, s in enumerate(w)))
+                yield dut.disparity.eq(sum(s[1] << i for i, s in enumerate(w)))
+                yield dut.com.eq(      sum(s[2] << i for i, s in enumerate(w)))
+                yield
+            yield
+            dut.result = {}
+            for name, c in dut.counts.items():
+                dut.result[name] = (yield c)
+
+        run_simulation(dut, generator(dut))
+        self.assertEqual(dut.result, {
+            "rx_decode_errors"        : 2,
+            "rx_disparity_errors"     : 2,
+            "rx_com_decode_errors"    : 2,
+            "rx_com_disparity_errors" : 2,
+        })
 
     def test_rx_skip_remover(self):
         datas_input = [

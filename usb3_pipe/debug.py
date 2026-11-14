@@ -210,7 +210,8 @@ class USB3LanesDebug(LiteXModule):
     the Configuration Lane (Lane 0):
     - Status: negotiated x2/gen2, lanes deskewed/swapped, per lane SerDes ready/RX idle/RX polarity.
     - Per lane event counters (TS1/TS1 inverted/TS2 detections, RX errors cycles) and deskew
-      acquisitions.
+      acquisitions; per lane RX 8b/10b errors by type (decode, running disparity, and both on the
+      Symbol just before a COM: the first COM of an Ordered Set received with an error).
     - With link (USB3PHYX2Link): RX buffer overflow status (since the last clear) and dropped
       entries counter (Gen 1x2 RX: the Link Layer did not consume the words fast enough).
     """
@@ -307,6 +308,19 @@ class USB3LanesDebug(LiteXModule):
                 events += [(f"lane{lane}_rx_errors_reinit", phy.rx_errors_reinit[lane], 0)]
             if hasattr(phy, "lanes_com_partial"):
                 events += [(f"lane{lane}_rx_com_partial", phy.lanes_com_partial[lane], 0)]
+        # Per lane RX 8b/10b errors by type (SerDes RX clock domain counters, USB3SerDes): cleared
+        # by a snapshot on clear (no clear crossing to the RX clock domains).
+        for lane, s in enumerate(serdes):
+            if not (hasattr(s, "add_rx_errors_count") and hasattr(s, "rx_substitution")):
+                continue
+            s.add_rx_errors_count()
+            for name, value in s.rx_errors_counts.items():
+                csr  = CSRStatus(32, name=f"lane{lane}_{name}_count",
+                    description=f"Lane {lane} {name.replace('_', ' ')} count (RX Symbols, since the last clear).")
+                base = Signal(32)
+                setattr(self, f"_lane{lane}_{name}_count", csr)
+                self.sync += If(self._clear.re, base.eq(value))
+                self.comb += csr.status.eq(value - base)
         for name, signal, edge in events:
             csr = CSRStatus(32, name=f"{name}_count",
                 description=f"{name} {'events' if edge else 'cycles'} count (saturating).")

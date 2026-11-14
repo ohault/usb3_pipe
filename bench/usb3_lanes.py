@@ -79,6 +79,7 @@ class USB3LanesClient:
         # U0 exits requested by the lanes (Recovery causes) and lanes RX idle cycles in U0.
         for name in ["deskew_lost_u0", "lane_idle_u0", "realign_u0", "skp_odd_u0", "com_slip", "lane0_rx_idle_u0_cycles", "lane1_rx_idle_u0_cycles"] + [
             f"lane{lane}_{name}" for lane in range(2) for name in ["rx_buferror", "rx_realign", "rx_skp_odd", "rx_com_partial", "rx_errors_reinit",
+            "rx_decode_errors", "rx_disparity_errors", "rx_com_decode_errors", "rx_com_disparity_errors",
             "rx_idle_raw_u0_cycles"]]:
             if hasattr(self.bus.regs, f"usb3_lanes_debug_{name}_count"):
                 r[name] = self.reg(f"usb3_lanes_debug_{name}_count").read()

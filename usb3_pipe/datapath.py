@@ -338,6 +338,51 @@ class RXErrorSubstitution(LiteXModule):
                 )
             ]
 
+# RX Error Types Count -----------------------------------------------------------------------------
+
+class RXErrorTypesCount(LiteXModule):
+    """RX 8b/10b Errors Count by type (debug, free running 32-bit counters of RX Symbols):
+    - rx_decode_errors:        decode errors (decode[i]: decoder invalid/code not in the table).
+    - rx_disparity_errors:     running disparity errors only (disparity[i] without decode[i]).
+    - rx_com_decode_errors:    decode error on the Symbol just before a COM (com[i]).
+    - rx_com_disparity_errors: disparity error only on the Symbol just before a COM.
+    The previous Symbol of Symbol 0 is the last Symbol of the previous word (one word per cycle).
+    """
+    def __init__(self, n):
+        self.decode    = Signal(n) # i
+        self.disparity = Signal(n) # i
+        self.com       = Signal(n) # i
+        self.counts    = {}        # o: name -> Signal(32).
+
+        # # #
+
+        disparity = Signal(n)
+        self.comb += disparity.eq(self.disparity & ~self.decode)
+        decode_last    = Signal()
+        disparity_last = Signal()
+        self.sync += [
+            decode_last.eq(self.decode[n-1]),
+            disparity_last.eq(disparity[n-1]),
+        ]
+        prev_decode    = [decode_last]    + [self.decode[i] for i in range(n - 1)]
+        prev_disparity = [disparity_last] + [disparity[i]   for i in range(n - 1)]
+        events = {
+            "rx_decode_errors"        : [self.decode[i] for i in range(n)],
+            "rx_disparity_errors"     : [disparity[i]   for i in range(n)],
+            "rx_com_decode_errors"    : [self.com[i] & prev_decode[i]    for i in range(n)],
+            "rx_com_disparity_errors" : [self.com[i] & prev_disparity[i] for i in range(n)],
+        }
+        w = bits_for(n)
+        for name, flags in events.items():
+            increment = Signal(w)
+            count     = Signal(32, name=name)
+            # Registered increment (one cycle late, timing at the RX clock).
+            self.sync += [
+                increment.eq(Reduce("ADD", [Cat(f, Constant(0, w - 1)) for f in flags])),
+                count.eq(count + increment),
+            ]
+            self.counts[name] = count
+
 # RX Error Monitor ---------------------------------------------------------------------------------
 
 class RXErrorMonitor(LiteXModule):
