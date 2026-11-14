@@ -567,6 +567,21 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertRegex(out, r"HOST\s*lanes partial COM word")
         self.assertNotIn("DEV  Link Layer Recovery request", out)
 
+    def test_core_x2_lane_com_error(self):
+        # The first 2 COM Symbols of the last Host Lane 1 TS2 before the run's U0 received as decode
+        # errors (K28.4, t6 on two Acorn Minis: the first COM Symbols of a TS1/TS2, often on both
+        # lanes): the word aligner keeps its alignment (it moved 2 Symbols later on the first intact
+        # COM: Lane 1 2 Symbols off in U0, partial COM words, Recoveries), no lane shifted.
+        out = self.run_sim("core_x2_lane_com_error", ["--dev-mode", "x2", "--lanes-crossed",
+            "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000",
+            "--lane-com-error", "900649,1"])
+        self.assertRegex(out, r"HOST LANE\s+1 RX COM ERRORS")
+        self.assertNotRegex(out, r"lanes partial COM word")
+        late = [int(t) for t in re.findall(r"\[(\d+)\] \w+\s*entering Recovery.Active", out)
+            if int(t) > 900649]
+        self.assertEqual(late, [])
+        self.assertNotIn("DEV  Link Layer Recovery request", out)
+
     def test_core_x2_skp_error_d2h(self):
         # SKP Symbol error on a Device -> Host lane: the Host Recovery, then the run restarted with
         # a Hot Reset, the Host in U0 ~24 cycles before the Device: the Host Advertisement received

@@ -128,7 +128,14 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   COM word with the lanes deskewed -> deskew cleared (`com_slip`, control bit 5), COM at a lane head in U0 with
   the deskew lost -> Recovery, Gen 1x2 TX words dropped out of U0 (stale LCSTART before the Advertisement),
   RX words kept in HotReset.Exit/Polling.Idle from the partner's Logical Idle (`rx_keep`: lost Host
-  Advertisement); realign group + words before the word aligner, rx_buferror; hardware run pending. Open: Host Advertisement lost when the
+  Advertisement); realign group + words before the word aligner, rx_buferror. t6 (30aab10, 20x20 crossed):
+  314/400, a storm on every load from the `com_slip` deskew clear (A/B com-recovery-disable: 20/20, 20
+  resets); captures: the first 1-2 COM Symbols of a TS arrive as K28.4 (often both lanes, same Ordered
+  Set), the word aligner moved to the first intact COM (= the t5 looping cause on the last TS2); Device
+  TX lane words correct (COM errors after them: Device TX SerDes/channel/Host GTP, open). t7 fixes:
+  `RXWordAligner` keeps the alignment on K28.4 before a COM run, `com_slip` only when the deskewed lanes
+  disagree, sim SerDes model word aligner always enabled (as the hardware), `sim.py --lane-com-error`
+  (`test_core_x2_lane_com_error`); hardware run pending. Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build

@@ -159,6 +159,39 @@ class TestDatapath(unittest.TestCase):
                 start = dut.words.index(expected[0])
                 self.assertEqual(dut.words[start:start + len(expected)], expected)
 
+    def test_rx_word_aligner_keeps_alignment_on_com_errors(self):
+        # The first 1-2 COM Symbols of a TS1 received as decode errors (K28.4 substituted, two Acorn
+        # Minis): the alignment is kept (it moved 1-2 Symbols later, on the first intact COM, and
+        # stayed there when it was the last Ordered Set before the Logical Idle).
+        rng  = random.Random(0)
+        data = lambda n: [(rng.randrange(256), 0) for _ in range(n)]
+        SUB_ = (K(28, 4), 1)
+        ts1  = words_to_symbols(ordered_set_words(TS1))
+        for errors in [1, 2]:
+            for offset in range(4):
+                with self.subTest(errors=errors, offset=offset):
+                    bad = [SUB_]*errors + ts1[errors:]
+                    aligned  = ts1*4 + bad + data(16) + ts1 + bad + data(16)
+                    wire     = symbols_to_words(data(offset) + aligned + data(4 - offset))
+                    expected = symbols_to_words(aligned)
+
+                    def generator(dut):
+                        for d, c in wire:
+                            yield dut.sink.valid.eq(1)
+                            yield dut.sink.data.eq(d)
+                            yield dut.sink.ctrl.eq(c)
+                            yield
+                        yield dut.sink.valid.eq(0)
+
+                    def checker(dut):
+                        dut.words = yield from stream_monitor(dut.source, len(wire) - 1,
+                            timeout=4*len(wire))
+
+                    dut = RXWordAligner()
+                    run_simulation(dut, [generator(dut), checker(dut)])
+                    start = dut.words.index(expected[0])
+                    self.assertEqual(dut.words[start:start + len(expected)], expected)
+
     def test_rx_skip_remover(self):
         datas_input = [
             0x0302013c, 0x07060504, 0x0b0a0908, 0x0f0e0d0c,

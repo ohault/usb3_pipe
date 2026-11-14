@@ -42,7 +42,7 @@ from litex.soc.integration.builder  import *
 
 from litex.soc.cores.code_8b10b import Encoder, Decoder
 
-from usb3_pipe.common   import SKP
+from usb3_pipe.common   import SKP, COM, K
 from usb3_pipe.datapath import TXDatapath, RXDatapath, RXErrorMonitor
 from usb3_pipe.phy      import USB3PHY, USB3PHYX2Link
 from usb3_pipe.serdes   import USB3SerDes
@@ -119,17 +119,33 @@ class USB3SerDesModel(USB3SerDes):
             tx_datapath.skp_enable.eq(self.tx_skp_enable),
             rx_datapath.source.connect(self.source)
         ]
-        self.specials += MultiReg(self.rx_align, rx_datapath.word_aligner.enable, rx_clock_domain)
+        # Word aligner always enabled, as on the hardware SerDes (USB3SerDes: rx_align only drives the
+        # transceiver comma alignment): the alignment also moves in the states without rx_align (ex:
+        # HotReset.Active, Recovery.Idle).
 
         # 8b10b Encoders/Decoders.
         encoder  = Encoder(nwords, True)
         decoders = [ClockDomainsRenamer(rx_clock_domain)(Decoder(True)) for _ in range(nwords)]
         self.submodules += encoder, decoders
         self.comb += rx_datapath.sink.valid.eq(1)
+        # RX COM errors (sim.py --lane-com-error): on rx_com_error (rx clock domain pulse), the first
+        # 2 COM Symbols of the next RX word with COM Symbols substituted by K28.4 (decode errors, as
+        # the first COM Symbols of a TS1/TS2 on two Acorn Minis).
+        self.rx_com_error = Signal()
+        com_armed = Signal()
+        com       = Signal(nwords)
+        com_hit   = Signal()
         for i in range(nwords):
+            self.comb += com[i].eq(decoders[i].k & (decoders[i].d == COM.value))
+        self.comb += com_hit.eq(com_armed & (com != 0))
+        getattr(self.sync, rx_clock_domain).__iadd__(
+            If(self.rx_com_error, com_armed.eq(1)).Elif(com_hit, com_armed.eq(0)))
+        for i in range(nwords):
+            before = [com[a] & com[b] for a in range(i) for b in range(a + 1, i)]
+            sub_i  = com_hit & com[i] & ~(Reduce("OR", before) if before else 0)
             self.comb += [
-                rx_datapath.sink.ctrl[i].eq(decoders[i].k),
-                rx_datapath.sink.data[8*i:8*(i+1)].eq(decoders[i].d),
+                rx_datapath.sink.ctrl[i].eq(decoders[i].k | sub_i),
+                rx_datapath.sink.data[8*i:8*(i+1)].eq(Mux(sub_i, K(28, 4), decoders[i].d)),
             ]
 
         # TX symbols with SKP Ordered Set insertion (as transmitted by a host: a single SKP Ordered
@@ -356,7 +372,7 @@ class USB3PIPESim(SoCMini):
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
         host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None, lane_skp_error=None,
-        lane_slip=None, lane_rx_log=None):
+        lane_slip=None, lane_rx_log=None, lane_com_error=None):
         assert lanes in [1, 2]
         assert (link_words == 1) or (lanes == 1)
         assert (not gen2) or ((lanes == 1) and gen2_capable)
@@ -623,7 +639,7 @@ class USB3PIPESim(SoCMini):
         else:
             self.add_lanes_connection(serdeses, phys, cds, lane_delays, lane_skp, lanes_crossed,
                 lane_skp_error)
-            self.add_lanes_rx_debug(serdeses, cds, lane_slip, lane_rx_log)
+            self.add_lanes_rx_debug(serdeses, cds, lane_slip, lane_rx_log, lane_com_error)
 
         # Simulation Timer.
         timer = Signal(32)
@@ -945,12 +961,15 @@ class USB3PIPESim(SoCMini):
                 )
             ]
 
-    def add_lanes_rx_debug(self, serdeses, cds, lane_slip=None, lane_rx_log=None):
+    def add_lanes_rx_debug(self, serdeses, cds, lane_slip=None, lane_rx_log=None,
+        lane_com_error=None):
         """Host lanes RX debug (0 ppm: one clock domain, cycles of the simulation timer):
         lane_slip: (cycle, lane): 2 Symbols dropped by the Host lane SerDes RX at cycle (a 16-bit
-        transceiver word lost, ex: at the start of the last TS2 before the Logical Idle: two Acorn
-        Minis). lane_rx_log: (start, end): the Host and Device lanes decoded RX words displayed."""
-        if (lane_slip is None) and (lane_rx_log is None):
+        transceiver word lost). lane_com_error: (cycle, lane): the first 2 COM Symbols of the next
+        Host lane RX word with COM Symbols after cycle received as decode errors (K28.4 substituted:
+        two Acorn Minis, ex: at the start of the last TS2 before the Logical Idle). lane_rx_log:
+        (start, end): the Host and Device lanes decoded RX words displayed."""
+        if (lane_slip is None) and (lane_rx_log is None) and (lane_com_error is None):
             return
         assert cds["host"] == cds["dev"] == "sys", "--lane-slip/--lane-rx-log: 0 ppm only."
         timer = Signal(32)
@@ -961,6 +980,12 @@ class USB3PIPESim(SoCMini):
             self.comb += s.rx_slip.eq(timer == cycle)
             self.sync += If(timer == cycle,
                 Display("[%08d] HOST LANE %d RX SLIP (2 Symbols dropped)", timer, lane))
+        if lane_com_error is not None:
+            cycle, lane = lane_com_error
+            s = serdeses["host"][lane]
+            self.comb += s.rx_com_error.eq(timer == cycle)
+            self.sync += If(timer == cycle,
+                Display("[%08d] HOST LANE %d RX COM ERRORS (next COM Symbols as K28.4)", timer, lane))
         if lane_rx_log is not None:
             start, end = lane_rx_log
             for name in ["host", "dev"]:
@@ -1033,6 +1058,7 @@ def main():
     parser.add_argument("--lanes-tx-shift", default=0,          help="--lanes 2 --lanes-core: Gen 1x2 TX packets delayed by 1-7 symbols (packets at any symbol position).")
     parser.add_argument("--prbs-gap-bits", default=4,           help="Gaps of 0 to 2**N - 1 cycles between the PRBS packets (--no-core/--lanes 2).")
     parser.add_argument("--lane-skp-error", default=None, help="--lanes 2: CYCLES,DIR,LANE: one SKP Symbol error on Host Lane LANE (DIR h2d: Host -> Device, d2h: Device -> Host), CYCLES after the Host U0 entry.")
+    parser.add_argument("--lane-com-error", default=None, help="--lanes 2, 0 ppm: CYCLE,LANE: the first 2 COM Symbols of the next Host Lane LANE RX word with COM Symbols after CYCLE received as decode errors (K28.4).")
     parser.add_argument("--lane-slip",     default=None, help="--lanes 2, 0 ppm: CYCLE,LANE: 2 Symbols dropped by the Host Lane LANE SerDes RX at CYCLE (a 16-bit transceiver word lost).")
     parser.add_argument("--lane-rx-log",   default=None, help="--lanes 2, 0 ppm: START,END: Host and Device lanes decoded RX words displayed between the cycles START and END.")
     parser.add_argument("--lane-skp",      default=4096,        help="Extra Host Lane 1/Lane 0 SKP Ordered Sets period (cycles, 0: disabled, --lanes 2).")
@@ -1089,6 +1115,7 @@ def main():
         lane1_word_shift      = int(args.lane1_word_shift),
         lane_skp              = int(args.lane_skp),
         lane_slip             = None if args.lane_slip is None else tuple(int(v) for v in args.lane_slip.split(",")),
+        lane_com_error        = None if args.lane_com_error is None else tuple(int(v) for v in args.lane_com_error.split(",")),
         lane_rx_log           = None if args.lane_rx_log is None else tuple(int(v) for v in args.lane_rx_log.split(",")),
         lane_skp_error        = None if args.lane_skp_error is None else (lambda c, d, l: (int(c), d, int(l)))(*args.lane_skp_error.split(",")),
         dev_mode              = args.dev_mode,

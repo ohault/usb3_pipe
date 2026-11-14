@@ -1043,20 +1043,37 @@ class USB3PHY(LiteXModule):
         # stays aligned with the lane 2 Symbols off (every destriped word corrupted in U0). After
         # the lane word aligner, the 4 COM Symbols of a TS1/TS2 are one word: a word with COM
         # Symbols and other Symbols (not COM nor a substituted decode error) is a lane shifted
-        # (or realigned) since the pairing: the deskew is cleared (Recovery in U0).
+        # (or realigned) since the pairing: the deskew is cleared (Recovery in U0). Only when the
+        # deskewed lanes words disagree (COM/decode error Symbols positions): both lanes shifted the
+        # same way are still paired (t6 on two Acorn Minis: the first COM Symbols of an Ordered Set
+        # received as decode errors on both lanes, the word aligners then moved to the first intact
+        # COM, before RXWordAligner kept the alignment on them: a deskew clear and a Recovery on
+        # nearly every TS burst).
         self.lanes_com_recovery = Signal(reset=1) # i: Deskew cleared on a partial COM word (debug).
         self.lanes_com_partial  = Signal(2)       # o: Partial COM word per lane (any state).
-        self.lanes_com_slip     = Signal()        # o: Partial COM word with the lanes deskewed (x2).
-        for lane in range(2):
-            d   = deskew.sinks[lane]
+        self.lanes_com_slip     = Signal()        # o: Partial COM word, lanes deskewed and disagreeing (x2).
+        def com_masks(d):
             com = Signal(4)
             sub = Signal(4)
             self.comb += [
                 com.eq(Cat(*[d.ctrl[i] & (d.data[8*i:8*(i+1)] == COM.value) for i in range(4)])),
                 sub.eq(Cat(*[d.ctrl[i] & (d.data[8*i:8*(i+1)] == SUB.value) for i in range(4)])),
-                self.lanes_com_partial[lane].eq(d.valid & (com != 0) & ((com | sub) != 0b1111)),
             ]
-        self.comb += self.lanes_com_slip.eq(x2 & deskew.aligned & (self.lanes_com_partial != 0))
+            return com, sub
+        for lane in range(2):
+            com, sub = com_masks(deskew.sinks[lane])
+            self.comb += self.lanes_com_partial[lane].eq(deskew.sinks[lane].valid & (com != 0) &
+                ((com | sub) != 0b1111))
+        out_partial = Signal(2)
+        out_mask    = [Signal(4) for _ in range(2)]
+        for lane in range(2):
+            com, sub = com_masks(deskew.sources[lane])
+            self.comb += [
+                out_mask[lane].eq(com | sub),
+                out_partial[lane].eq(deskew.sources[lane].valid & (com != 0) & ((com | sub) != 0b1111)),
+            ]
+        self.comb += self.lanes_com_slip.eq(x2 & deskew.aligned & (out_partial != 0) &
+            (out_mask[0] != out_mask[1]))
         self.lanes_idle_recovery    = Signal(reset=1) # i: Recovery on a lane idle (debug: 0 disables).
         self.lanes_realign_recovery = Signal(reset=1) # i: Recovery on a lane realigned in U0 (debug).
         self.lanes_deskew_lost      = Signal()        # o: Deskew lost trigger (x2, not deskewed).

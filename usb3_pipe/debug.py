@@ -230,7 +230,7 @@ class USB3LanesDebug(LiteXModule):
             CSRField("skp_recovery", size=1, offset=4, reset=1,
                 description="Recovery on a lane SKP run of odd length (lane shifted by one Symbol) in U0 at Gen 1x2 (0: disabled, still counted)."),
             CSRField("com_recovery", size=1, offset=5, reset=1,
-                description="Deskew cleared (Recovery in U0) on a partial COM word with the lanes deskewed (lane shifted at the end of a TS burst) at Gen 1x2 (0: disabled, still counted)."),
+                description="Deskew cleared (Recovery in U0) on a partial COM word with the lanes deskewed and their COM words disagreeing (lane shifted at the end of a TS burst) at Gen 1x2 (0: disabled, still counted)."),
         ])
         self._status = CSRStatus(fields=[
             CSRField("x2",             size=1, offset=0, description="Gen 1x2 negotiated (SuperSpeedPlus Polling)."),
@@ -281,7 +281,7 @@ class USB3LanesDebug(LiteXModule):
                 # Lane shifted by its SKP removal in U0 (odd SKP run), counted even when its
                 # Recovery is disabled (skp_recovery).
                 ("skp_odd_u0",     phy.lanes_skp_odd,          0),
-                # Lane shifted since the pairing (partial COM word, lanes deskewed), any state.
+                # Lane shifted since the pairing (partial COM word, lanes deskewed and disagreeing), any state.
                 ("com_slip",       phy.lanes_com_slip,         0),
             ]
         if with_rx_drop:

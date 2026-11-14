@@ -333,7 +333,9 @@ an odd run means a SKP symbol received with an error, kept by the SKP removal, o
 for a SKP: the lane is then one symbol off the other lane, and no COM symbol in U0 would show it
 (`RXSKPParityCheck`). The deskew is also cleared on a lane word holding COM symbols with other
 symbols, the 4 COM symbols of a training sequence cut by a lane that lost symbols at the end of a
-TS burst. A lane that keeps decoding errors is re-initialized. On Gen 1x2, the receive words are
+TS burst, when the two deskewed lanes words disagree. The word aligner keeps its alignment when
+the first COM symbols of an ordered set are received as decode errors (K28.4): it would otherwise
+move to the first intact COM symbol, and stay there after the last TS2. A lane that keeps decoding errors is re-initialized. On Gen 1x2, the receive words are
 also kept for the link layer in Polling.Idle and HotReset.Exit until U0 (as in Recovery.Idle):
 the partner can enter U0 first and send its advertisement at once. The transmit words are dropped
 out of U0, so nothing held from before a Recovery is sent ahead of the next advertisement.

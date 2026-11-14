@@ -21,7 +21,7 @@ from litex.gen import *
 
 from litex.soc.interconnect import stream
 
-from usb3_pipe.common     import K, COM, SKP, AsyncFIFO, Buffer
+from usb3_pipe.common     import K, COM, SKP, SUB, AsyncFIFO, Buffer
 from usb3_pipe.common     import BLOCK_HEADER_DATA, BLOCK_HEADER_CONTROL, GEN2_SKP_TX_SYMBOLS
 from usb3_pipe.common     import GEN2_SKP, GEN2_SKPEND, GEN2_SDS, GEN2_TS1, GEN2_TS2, GEN2_TSEQ
 from usb3_pipe.common     import GEN2_IDLE
@@ -187,8 +187,13 @@ class RXWordAligner(LiteXModule):
 
     Align RX Words by analyzing the location of the alignment markers (COM by default, configurable
     K-codes) in the RX stream.
+
+    with_errors: substituted decode errors (K28.4) just before a marker run taken as part of the run
+    (default: with the COM markers only, the Ordered Sets; not with the Link Layer framing markers).
     """
-    def __init__(self, markers=(COM,)):
+    def __init__(self, markers=(COM,), with_errors=None):
+        if with_errors is None:
+            with_errors = (list(markers) == [COM])
         self.enable = Signal(reset=1)
         self.sink   = sink   = stream.Endpoint([("data", 32), ("ctrl", 4)])
         self.source = source = stream.Endpoint([("data", 32), ("ctrl", 4)])
@@ -205,22 +210,39 @@ class RXWordAligner(LiteXModule):
             buf.source.ready.eq(sink.valid & source.ready),
         ]
 
-        # Alignment markers (markers K-codes).
+        # Alignment markers (markers K-codes) and substituted decode errors (K28.4, RXErrorSubstitution).
         def is_marker(data, ctrl):
             return ctrl & Reduce("OR", [data == m.value for m in markers])
+        def is_sub(data, ctrl):
+            return (ctrl & (data == SUB.value)) if with_errors else 0
         marker   = Signal(4)
         marker_d = Signal(4)
+        sub      = Signal(4)
+        sub_d    = Signal(4)
         for i in range(4):
             self.comb += marker[i].eq(is_marker(sink.data[8*i:8*(i+1)], sink.ctrl[i]))
             self.comb += marker_d[i].eq(is_marker(buf.source.data[8*i:8*(i+1)], buf.source.ctrl[i]))
+            self.comb += sub[i].eq(is_sub(sink.data[8*i:8*(i+1)], sink.ctrl[i]))
+            self.comb += sub_d[i].eq(is_sub(buf.source.data[8*i:8*(i+1)], buf.source.ctrl[i]))
 
-        # Alignment detection: first marker of the word.
+        # Alignment detection: start of the first marker run of the word, decode errors just before
+        # the run included: the first markers of an Ordered Set received with errors (two Acorn
+        # Minis: the first 1-2 COM Symbols of a TS1/TS2 substituted by K28.4, a decode error on the
+        # first COM then a running disparity error on the second) would otherwise move the alignment
+        # 1-2 Symbols later, on the first intact marker: back on the next Ordered Set, or never when
+        # it was the last TS2 before the Logical Idle (lane 2 Symbols off in U0, undetected by the
+        # lanes deskew).
+        head = [Signal() for _ in range(5)]
+        self.comb += head[4].eq(0)
         for i in reversed(range(4)):
-            self.comb += If(marker[i], alignment.eq(i))
+            self.comb += head[i].eq(marker[i] | (sub[i] & head[i+1]))
+        for i in reversed(range(4)):
+            self.comb += If(head[i], alignment.eq(i))
 
-        # Alignment update: only at the start of a marker run (markers in the word and no marker on
-        # the last symbol of the previous word), so that alignment is kept on non-marker K-codes
-        # (ex: Link Layer framing in U0) and on marker runs spanning 2 words. The word output on
+        # Alignment update: only at the start of a marker run (markers in the word and no marker nor
+        # decode error on the last symbol of the previous word), so that alignment is kept on
+        # non-marker K-codes (ex: Link Layer framing in U0), on marker runs spanning 2 words and on
+        # marker runs whose first Symbols (end of the previous word) are decode errors. The word output on
         # this cycle ends before the run:
         # - Run earlier in its word than the current alignment: new alignment on this cycle (the
         #   output word is the buffered word, the next one starts on the run).
@@ -231,7 +253,7 @@ class RXWordAligner(LiteXModule):
         run_start     = Signal()
         alignment_sel = Signal(2)
         self.comb += [
-            run_start.eq(self.enable & (marker != 0) & ~marker_d[3]),
+            run_start.eq(self.enable & (marker != 0) & ~marker_d[3] & ~sub_d[3]),
             alignment_sel.eq(alignment_d),
             If(run_start & (alignment < alignment_d),
                 alignment_sel.eq(alignment)
