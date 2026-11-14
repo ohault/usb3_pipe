@@ -709,7 +709,9 @@ Scripted host fixed (both reproduced first):
 - C: the idle run is kept through the Recoveries (LTSSM in Recovery.*; left on a Hot Reset or a
   training as before): Advertisement on each U0 re-entry (`TestPHYX2Core.
   test_core_x2_host_script_idle_recovery`: a Recovery while idle, 34 Device `pending_hp` requests
-  until the next idle link initialization before, 0 now). Hardware run pending.
+  until the next idle link initialization before, 0 now; `test_host_script.py`
+  `test_idle_run_kept_through_recovery`: no new Hot Reset after a Recovery, a new one after a U0
+  exit to another state). Hardware run pending.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

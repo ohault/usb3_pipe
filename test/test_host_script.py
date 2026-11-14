@@ -34,6 +34,11 @@ class FakeLink:
         self.hot_reset     = Signal()
         self.polling_idle  = Signal()
         self.x2            = Signal(reset=1) # Gen 1x2 negotiated: SuperSpeedPlus script.
+        # LTSSM state (USB3PHY ltssm_state/ltssm_states, a subset): U0 by default (a U0 exit then
+        # reads as neither a Recovery nor a Hot Reset).
+        self.ltssm_states  = {"U0": 0, "Recovery.Active": 1, "Recovery.Configuration": 2,
+            "Recovery.Idle": 3, "HotReset.Active": 4, "Polling.Idle": 5}
+        self.ltssm_state   = Signal(3)
 
 class TestUSB3HostScript(unittest.TestCase):
     def test_lup_keep_alive_hot_reset_and_script(self):
@@ -260,6 +265,65 @@ class TestUSB3HostScript(unittest.TestCase):
                 yield
         run_simulation(dut, generator())
         self.assertTrue(resets and resets[0] < 120, resets)
+
+    def run_idle_u0_exit(self, exit_state):
+        # Idle link initialization done (the Device LMPs received), then a U0 exit through
+        # exit_state and back to U0: returns (Hot Reset request cycles, words sent after the U0
+        # re-entry).
+        link = FakeLink()
+        dut  = USB3HostScript(link, sys_clk_freq=10e6, idle_delay=2e-6) # Idle init after 20 cycles.
+        resets, tx = [], []
+        def generator():
+            yield dut._control.fields.idle_init.eq(1)
+            yield link.sink.ready.eq(1)
+            yield link.u0.eq(1)
+            req_d, hot_reset, back = 0, None, None
+            for cycle in range(1200):
+                req = (yield link.hot_reset_req)
+                if req and not req_d:
+                    resets.append(cycle)
+                if req and hot_reset is None:
+                    hot_reset = cycle
+                    yield link.u0.eq(0)
+                    yield link.ltssm_state.eq(link.ltssm_states["HotReset.Active"])
+                if hot_reset is not None:
+                    yield link.hot_reset.eq(cycle == hot_reset + 5)
+                    if cycle == hot_reset + 20:
+                        yield link.u0.eq(1)
+                        yield link.ltssm_state.eq(link.ltssm_states["U0"])
+                        hot_reset = None
+                        back = cycle
+                # Device LMPs (HPSTART words) after the first idle U0 entry.
+                lmp = (back is not None) and (cycle - back in [10, 80]) and len(resets) == 1
+                yield link.source.valid.eq(lmp)
+                yield link.source.data.eq(0xfbfbfbf7 if lmp else 0)
+                yield link.source.ctrl.eq(0xf if lmp else 0)
+                yield link.source.words.eq(1)
+                # U0 exit through exit_state at cycle 500, back to U0 at 520.
+                if cycle == 500:
+                    yield link.u0.eq(0)
+                    yield link.ltssm_state.eq(link.ltssm_states[exit_state])
+                if cycle == 520:
+                    yield link.u0.eq(1)
+                    yield link.ltssm_state.eq(link.ltssm_states["U0"])
+                req_d = req
+                yield
+                if cycle > 520 and (yield link.sink.valid):
+                    tx.append((yield link.sink.data) & 0xffffffff)
+            self.done = (yield dut.model.done)
+        run_simulation(dut, generator())
+        return resets, tx
+
+    def test_idle_run_kept_through_recovery(self):
+        # Recovery out of the test runs after the idle link initialization: no new Hot Reset, the
+        # Advertisement (LGOOD_n) sent on the U0 re-entry (no Device PENDING_HP_TIMER Recovery).
+        resets, tx = self.run_idle_u0_exit("Recovery.Active")
+        self.assertEqual(len(resets), 1, resets)
+        self.assertIn(0xfefefef7, tx) # Link Commands (Advertisement) sent after the U0 re-entry.
+        # U0 exit to a state other than Recovery: the idle run is left, a new idle link
+        # initialization (Hot Reset) after idle_delay, as before.
+        resets, tx = self.run_idle_u0_exit("Polling.Idle")
+        self.assertEqual(len(resets), 2, resets)
 
 if __name__ == "__main__":
     unittest.main()
