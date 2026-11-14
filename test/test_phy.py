@@ -541,6 +541,19 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertNotIn("DEV  Link Layer Recovery request", out)
         self.assertEqual(len(re.findall(r"HOST\s*entering HotReset.Active state", out)), 2)
 
+    def test_core_x2_skp_error(self):
+        # One SKP Symbol with an 8b/10b error on a single lane during the scripted host run: the
+        # lane SKP removal keeps it (lane shifted by one Symbol from the other lane, no COM word in
+        # U0 to detect it). Without the SKP runs parity check, every destriped word was corrupted
+        # until the Device PENDING_HP_TIMER Recovery (as on two Acorn Minis); now a Recovery at once
+        # (odd SKP run), then the run restarted (Hot Reset) and done.
+        out = self.run_sim("core_x2_skp_error", ["--dev-mode", "x2", "--lanes-crossed",
+            "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000",
+            "--lane-skp-error", "303000,h2d,1"])
+        self.assertIn("LANE SKP SYMBOL ERROR", out)
+        self.assertRegex(out, r"DEV\s*lanes SKP run of odd length in U0")
+        self.assertNotIn("DEV  Link Layer Recovery request", out)
+
     def test_core_x2_tx_shift(self):
         # Gen 1x2 with the Host/Device TX packets delayed by 3 symbols: packets starting on Lane 1,
         # at any symbol position of the 64-bit words (LanesPacketAligner).

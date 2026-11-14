@@ -640,9 +640,41 @@ Results with the fixes (Device `cb0bfb6`, 20 loads x 20 runs, crossed cables):
 
 Debug controls (`usb3_lanes_debug_control`, A/B tests on a loaded bitstream): bit 0 Recovery on a
 lane idle, bit 1 RX re-initialization on continuous errors, bit 2 Recovery on a lane realignment in
-U0 (all set by default; `usb3_lanes.py idle-recovery-*`/`rx-reinit-*`). Counters in `usb3_lanes.py
-status`: `deskew_lost_u0`, `lane_idle_u0`, `realign_u0`, per lane `rx_buferror`, `rx_realign`,
-`rx_errors_reinit`, `rx_idle_u0_cycles`, `rx_idle_raw_u0_cycles`.
+U0, bit 4 Recovery on an odd SKP run in U0 (all set by default; `usb3_lanes.py
+idle-recovery-*`/`rx-reinit-*`/`skp-recovery-*`). Counters in `usb3_lanes.py status`:
+`deskew_lost_u0`, `lane_idle_u0`, `realign_u0`, `skp_odd_u0`, per lane `rx_buferror`, `rx_realign`,
+`rx_skp_odd`, `rx_errors_reinit`, `rx_idle_u0_cycles`, `rx_idle_raw_u0_cycles`.
+
+### Device `pending_hp` during the runs: a lane one Symbol off after a SKP error (2026-11-14)
+
+On the t3 run (20 loads x 20 runs), the Device Link Layer Recovery requests during the runs follow
+the Host `deskew_lost_u0` almost one to one (Spearman 0.95 over the loads, `deskew_lost_u0` >= the
+requests on 19/20 loads) and the Device lanes comma realignments (0.9, with the `lcrd` causes on the
+same loads: Link Commands lost on the Device receive side). The scripted host acknowledges every
+Header Packet start it sees (no LBAD, no timer): a `pending_hp` is a Device Header Packet or its
+LGOOD_n not received, then 10us of no acknowledge.
+
+Cause found in the RX path: the 8b/10b errors are substituted (K28.4) before the per lane SKP
+removal, and the lanes deskew is only checked on the TS1/TS2 COM words. A SKP Symbol received with
+an error is not removed: that lane is one Symbol off the other lane, every destriped word is
+corrupted, and nothing in U0 detects it until a Link Layer timeout (Device PENDING_HP_TIMER). The
+Device Recovery TS1 then shows the lanes unpaired on the Host side (`deskew_lost_u0` counted after
+the fact). Reproduced with `sim.py --lanes 2 --lanes-core --host-script 900000 --lane-skp-error
+303000,DIR,LANE` (one SKP Symbol error on one lane during the run): any direction/lane gives a Device
+`pending_hp` Recovery ~1600 cycles later, then the run restarted.
+
+Fix (`RXSKPParityCheck`, `USB3PHY(lanes=2)` only, single lane Verilog unchanged): Gen 1 SKP Ordered
+Sets are 2 Symbols, added/removed whole (per lane SKP counts may differ, always even): a SKP run of
+odd length on a lane in U0 is a lane realignment (deskew cleared, Recovery at once). In the same
+simulations: Recovery ~10 cycles after the error, no Device Link Layer Recovery request
+(`TestPHYX2Core.test_core_x2_skp_error`); no odd run on the PRBS/core simulations with per lane SKP
+differences, +/-300ppm, crossed lanes. Hardware run pending: `skp_odd_u0`/`lane*_rx_skp_odd` against
+the Device `pending_hp` (`usb3_lanes.py skp-recovery-disable` for the A/B on one load).
+
+Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
+Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
+(LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits
+for the Advertisement), then the run restarted (`--lane-skp-error 303000,d2h,0`).
 
 ## Troubleshooting
 

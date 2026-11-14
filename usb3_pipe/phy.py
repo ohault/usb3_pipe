@@ -1010,6 +1010,21 @@ class USB3PHY(LiteXModule):
         realign = [s.rx_realign for s in self.lanes_phys_serdes if hasattr(s, "rx_realign")]
         if hasattr(self, "rx_errors_reinit"):
             realign += [self.rx_errors_reinit != 0]
+        # A lane shifted by one Symbol by its SKP removal (SKP run of odd length: a SKP Symbol with
+        # an 8b/10b error kept, or a Symbol received as a SKP removed) is also no longer deskewed,
+        # and nothing else detects it in U0 (no COM word): every destriped word corrupted until a
+        # Recovery requested by a Link Layer timeout (Device PENDING_HP_TIMER on two Acorn Minis,
+        # sim.py --lane-skp-error). Same Recovery as a lane realigned in U0.
+        self.lanes_skp_recovery = Signal(reset=1) # i: Recovery on an odd SKP run in U0 (debug).
+        self.lanes_skp_odd      = Signal()        # o: Odd SKP run on a lane in U0 (x2).
+        skp_odd = []
+        for s in self.lanes_phys_serdes:
+            if hasattr(s, "rx_datapath") and hasattr(s, "add_rx_skp_check"):
+                s.add_rx_skp_check()
+                skp_odd.append(s.rx_skp_odd)
+        if skp_odd:
+            self.comb += self.lanes_skp_odd.eq(x2 & ltssm.u0 & Reduce("OR", skp_odd))
+            realign += [self.lanes_skp_odd & self.lanes_skp_recovery]
         self.comb += lanes_realign.eq(Reduce("OR", realign) if realign else 0)
         self.lanes_idle_recovery    = Signal(reset=1) # i: Recovery on a lane idle (debug: 0 disables).
         self.lanes_realign_recovery = Signal(reset=1) # i: Recovery on a lane realigned in U0 (debug).

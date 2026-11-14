@@ -77,8 +77,8 @@ class USB3LanesClient:
         }
         r.update({name: self.reg(f"usb3_lanes_debug_{name}_count").read() for name in LANES_COUNTERS})
         # U0 exits requested by the lanes (Recovery causes) and lanes RX idle cycles in U0.
-        for name in ["deskew_lost_u0", "lane_idle_u0", "realign_u0", "lane0_rx_idle_u0_cycles", "lane1_rx_idle_u0_cycles"] + [
-            f"lane{lane}_{name}" for lane in range(2) for name in ["rx_buferror", "rx_realign", "rx_errors_reinit",
+        for name in ["deskew_lost_u0", "lane_idle_u0", "realign_u0", "skp_odd_u0", "lane0_rx_idle_u0_cycles", "lane1_rx_idle_u0_cycles"] + [
+            f"lane{lane}_{name}" for lane in range(2) for name in ["rx_buferror", "rx_realign", "rx_skp_odd", "rx_errors_reinit",
             "rx_idle_raw_u0_cycles"]]:
             if hasattr(self.bus.regs, f"usb3_lanes_debug_{name}_count"):
                 r[name] = self.reg(f"usb3_lanes_debug_{name}_count").read()
@@ -88,6 +88,7 @@ class USB3LanesClient:
             r["rx_errors_reinit"] = (control >> 1) & 0x1
             r["realign_recovery"] = (control >> 2) & 0x1
             r["x2_enable"]        = (control >> 3) & 0x1
+            r["skp_recovery"]     = (control >> 4) & 0x1
         if hasattr(self.bus.regs, "usb3_lanes_debug_rx_drop_count"):
             r["rx_drop"] = self.reg("usb3_lanes_debug_rx_drop_count").read()
         if self.has_prbs():
@@ -108,6 +109,11 @@ class USB3LanesClient:
         # RX re-initialization of a lane with continuous decode errors (debug: 0 disables).
         control = self.reg("usb3_lanes_debug_control").read()
         self.reg("usb3_lanes_debug_control").write((control & ~0x2) | (int(enable) << 1))
+
+    def skp_recovery(self, enable=True):
+        # Recovery on a lane SKP run of odd length in U0 at Gen 1x2 (debug: 0 disables, still counted).
+        control = self.reg("usb3_lanes_debug_control").read()
+        self.reg("usb3_lanes_debug_control").write((control & ~0x10) | (int(enable) << 4))
 
     def x2_enable(self, enable=True):
         # Gen 1x2 advertised in the SuperSpeedPlus Polling (0: Gen 1x1 only), from the next training.
@@ -134,7 +140,7 @@ def main():
     parser.add_argument("command",    choices=["status", "clear", "retrain", "watch", "prbs",
         "prbs-enable", "prbs-disable", "script",
         "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable",
-        "x2-enable", "x2-disable"])
+        "x2-enable", "x2-disable", "skp-recovery-enable", "skp-recovery-disable"])
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -148,6 +154,8 @@ def main():
         lanes.idle_recovery(args.command == "idle-recovery-enable")
     elif args.command in ["rx-reinit-enable", "rx-reinit-disable"]:
         lanes.rx_errors_reinit(args.command == "rx-reinit-enable")
+    elif args.command in ["skp-recovery-enable", "skp-recovery-disable"]:
+        lanes.skp_recovery(args.command == "skp-recovery-enable")
     elif args.command in ["x2-enable", "x2-disable"]:
         # Gen 1x2 capability advertised (x2-disable: Gen 1x1 negotiated), then retrain.
         lanes.x2_enable(args.command == "x2-enable")

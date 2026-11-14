@@ -289,7 +289,9 @@ counters (`USB3LanesDebug`). The procedure and the results are in
 |------------------------------|------------------------------------------------------------------|
 | `deskew_lost_u0` | U0 entered or kept without the lanes deskew (Recovery requested) |
 | `lane_idle_u0` | A lane in electrical idle for 10 µs in U0 (Recovery requested) |
-| `realign_u0` | A lane comma realignment or receive re-initialization in U0 |
+| `realign_u0` | A lane comma realignment, receive re-initialization or odd SKP run in U0 |
+| `skp_odd_u0`, `rx_skp_odd` | Odd SKP runs in U0 (a lane one symbol off), and per lane in any state |
+| `skp-recovery-enable` | Recovery on an odd SKP run in U0 (`-disable`: counted only) |
 | `rx_realign`, `rx_errors_reinit` | Per lane transceiver comma realignments and receive re-initializations |
 | `rx_overflow`, `rx_drop_count` | Link receive buffer or packet aligner overflow, dropped words |
 | `x2-disable`, `x2-enable` | Gen 1x2 advertised or not at the next training (Gen 1x1 test) |

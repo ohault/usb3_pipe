@@ -327,8 +327,11 @@ and its own polarity.
 On receive, the deskew pairs the first COM symbols of each lane after a gap, the TSEQ before the
 TS1 or the Logical Idle before a Recovery, whatever the lanes latencies (`LaneDeskew`). The
 destriper then rebuilds the words (`LaneDestriper`). In U0 the PHY goes to Recovery when the
-deskew is lost, when a lane stays in electrical idle for 10 µs, or when a lane realigns its words.
-A lane that keeps decoding errors is re-initialized.
+deskew is lost, when a lane stays in electrical idle for 10 µs, when a lane realigns its words,
+or when a lane receives a run of SKP symbols of odd length. SKP ordered sets are two symbols, so
+an odd run means a SKP symbol received with an error, kept by the SKP removal, or a symbol taken
+for a SKP: the lane is then one symbol off the other lane, and no COM symbol in U0 would show it
+(`RXSKPParityCheck`). A lane that keeps decoding errors is re-initialized.
 
 The device finds which receiver gets the configuration lane from the partner's Polling LFPS and
 swaps the lanes, as a flipped USB Type-C plug needs (`LaneSwap`). When the partner is not Gen 1x2

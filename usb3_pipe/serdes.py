@@ -18,7 +18,7 @@ from litex.gen import *
 from litex.soc.interconnect import stream
 
 from usb3_pipe.common   import Buffer
-from usb3_pipe.datapath import RXErrorSubstitution, RXErrorMonitor, RXIdleFilter
+from usb3_pipe.datapath import RXErrorSubstitution, RXErrorMonitor, RXIdleFilter, RXSKPParityCheck
 from usb3_pipe.datapath import TXDatapath, RXDatapath
 
 # USB3 Serializer/Deserializer ---------------------------------------------------------------------
@@ -119,6 +119,7 @@ class USB3SerDes(LiteXModule):
         self.rx_buffer       = rx_buffer       = ClockDomainsRenamer("rx")(
             Buffer(rx_substitution.source.description, pipe_ready=True)) # Timings.
         self.rx_datapath     = rx_datapath     = RXDatapath("rx", phy_dw=phy_dw)
+        self.rx_cd           = "rx"
         self.comb += [
             xcvr.tx_enable.eq(self.enable & ~self.tx_reinit),
             xcvr.rx_enable.eq(self.enable & ~self.rx_reset & ~self.rx_reinit),
@@ -133,6 +134,21 @@ class USB3SerDes(LiteXModule):
             rx_datapath.source.connect(self.source),
         ]
         return xcvr
+
+    def add_rx_skp_check(self):
+        """SKP runs of odd length at the SKP removal input (RXSKPParityCheck: a Symbol kept or
+        dropped by the SKP removal, the words shifted by one Symbol), rx_skp_odd pulse synchronized
+        to sys. Added by USB3PHY(lanes=2) (a lane shifted from the other lane in U0)."""
+        rx_cd   = getattr(self, "rx_cd", "rx")
+        checker = ClockDomainsRenamer(rx_cd)(RXSKPParityCheck(self.rx_datapath.skip_remover.sink))
+        ps      = PulseSynchronizer(rx_cd, "sys")
+        self.rx_skp_check = checker
+        self.submodules  += ps
+        self.rx_skp_odd   = Signal() # o: Odd SKP run (sys pulse).
+        self.comb += [
+            ps.i.eq(checker.odd),
+            self.rx_skp_odd.eq(ps.o),
+        ]
 
     def add_lfps(self, xcvr, rx_idle, rx_idle_burst_cycles=1):
         """LFPS: TX pattern, filtered RX electrical idle (from the transceiver's OOB detector, non-idle

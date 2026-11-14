@@ -227,6 +227,8 @@ class USB3LanesDebug(LiteXModule):
                 description="Recovery on a lane realigned (comma realignment/RX re-initialization) in U0 at Gen 1x2 (0: disabled)."),
             CSRField("x2_enable", size=1, offset=3, reset=1,
                 description="Gen 1x2 advertised in the SuperSpeedPlus Polling (0: Gen 1x1 only), from the next training (retrain), with a PHY built x2 capable."),
+            CSRField("skp_recovery", size=1, offset=4, reset=1,
+                description="Recovery on a lane SKP run of odd length (lane shifted by one Symbol) in U0 at Gen 1x2 (0: disabled, still counted)."),
         ])
         self._status = CSRStatus(fields=[
             CSRField("x2",             size=1, offset=0, description="Gen 1x2 negotiated (SuperSpeedPlus Polling)."),
@@ -257,6 +259,8 @@ class USB3LanesDebug(LiteXModule):
             self.comb += phy.lanes_realign_recovery.eq(self._control.fields.realign_recovery)
         if hasattr(phy, "rx_errors_reinit_enable"):
             self.comb += phy.rx_errors_reinit_enable.eq(self._control.fields.rx_errors_reinit)
+        if hasattr(phy, "lanes_skp_recovery"):
+            self.comb += phy.lanes_skp_recovery.eq(self._control.fields.skp_recovery)
         if hasattr(phy, "x2_enable"):
             self.comb += phy.x2_enable.eq(self._control.fields.x2_enable)
 
@@ -270,6 +274,9 @@ class USB3LanesDebug(LiteXModule):
                 ("deskew_lost_u0", u0 & phy.lanes_deskew_lost, 1),
                 ("lane_idle_u0",   u0 & phy.lanes_idle,        1),
                 ("realign_u0",     phy.lanes_realign,          0),
+                # Lane shifted by its SKP removal in U0 (odd SKP run), counted even when its
+                # Recovery is disabled (skp_recovery).
+                ("skp_odd_u0",     phy.lanes_skp_odd,          0),
             ]
         if with_rx_drop:
             events += [("rx_drop", link.rx_drop, 0)] # Dropped RX buffer entries.
@@ -287,7 +294,7 @@ class USB3LanesDebug(LiteXModule):
             # re-initializations on continuous decode errors.
             if with_triggers and hasattr(s, "rx_idle_raw"):
                 events += [(f"lane{lane}_rx_idle_raw_u0_cycles", u0 & phy.x2 & s.rx_idle_raw, 0)]
-            for name in ["rx_buferror", "rx_realign"]:
+            for name in ["rx_buferror", "rx_realign", "rx_skp_odd"]:
                 if hasattr(s, name):
                     events += [(f"lane{lane}_{name}", getattr(s, name), 0)]
             if hasattr(phy, "rx_errors_reinit"):

@@ -107,7 +107,12 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   in the GTP domains: PRBS checker reset/count, Device RX stride converter -> skip remover); t3 hardware
   run (2026-11-14, crossed, 20x20): 398/400 (both timeouts on one bad load, rx_errors_cycles ~10x the others),
   quieter than t2 (resets median 23.5 vs ~46, Host Lane 0 realign 23.7k vs 73k, Host Recoveries median 60
-  vs 109.5), Device in-run Recovery requests unchanged (median 3.5, `pending_hp`).
+  vs 109.5), Device in-run Recovery requests unchanged (median 3.5, `pending_hp`). Cause found in
+  simulation (2026-11-14): a SKP Symbol with an 8b/10b error is kept by the per lane SKP removal (lane one
+  Symbol off, no COM in U0 to see it) until the Device PENDING_HP_TIMER (`sim.py --lane-skp-error`); fix:
+  odd SKP run in U0 -> Recovery (`RXSKPParityCheck`, `skp_odd_u0`/`lane*_rx_skp_odd`, control bit 4,
+  `TestPHYX2Core.test_core_x2_skp_error`); hardware run pending. Open: Host Advertisement lost when the
+  Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build
   with a USB 3 host through the SFP2USB adapter/the breakout, then a Gen 1x2 host
