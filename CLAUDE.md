@@ -102,7 +102,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   (8-bit saturated). The scripted host idle link initialization is on by default (the idle host did
   not acknowledge the Device: a Recovery every ~15us, reproduced with `sim.py --host-script N`,
   `TestPHYX2Core.test_core_x2_host_script_idle`). Timing: register stages on the scripted host paths
-  (`5eefc1e`), `LanesPacketAligner` parser without the 8-step chain (to be measured on a build);
+  (`5eefc1e`), `LanesPacketAligner` parser without the 8-step chain (t3 builds at `1192007`: aligner worst path
+  +1.008/+0.959ns, 8-9 levels, was +0.307/+0.231ns, 12-13; sys WNS +0.602/+0.679ns, design WNS +0.315/+0.236ns
+  in the GTP domains: PRBS checker reset/count, Device RX stride converter -> skip remover; hardware run pending);
   last hardware run with both host changes (before the aligner change): 398/400 on noisier loads.
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build
