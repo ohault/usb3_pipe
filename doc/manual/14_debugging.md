@@ -300,6 +300,7 @@ counters (`USB3LanesDebug`). The procedure and the results are in
 | `rx_com_disparity_errors` | The same with a running disparity error |
 | `rx_overflow`, `rx_drop_count` | Link receive buffer or packet aligner overflow, dropped words |
 | `tx-postcursor --value` | Transmit post-cursor pre-emphasis per SerDes at runtime (Acorn Gen 1x2) |
+| `xcvr-reinit` | Both transceivers and the shared quad PLL reset for 10 µs, then initialized as at the bitstream load (the link trains again) |
 | `x2-disable`, `x2-enable` | Gen 1x2 advertised or not at the next training (Gen 1x1 test) |
 
 With `--lanes-core`, `usb3_lanes.py script --runs N` runs the scripted host and prints one JSON

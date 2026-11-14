@@ -58,6 +58,9 @@ class USB3SerDes(LiteXModule):
                                              # (ex: rate change).
         self.tx_reinit     = Signal()        # TX re-initialization request of the SerDes itself
                                              # (ex: lane reconfiguration).
+        self.reinit        = Signal()        # i: Transceiver TX and RX re-initialization (debug,
+                                             # held: TX/RX reset sequences restarted on release; a
+                                             # SerDes resetting its own Quad PLL also resets it).
 
         self.rx_idle_stretch = 0    # rx_idle stretch (cycles) of the RX idle filter (add_lfps).
         self.xcvr_name       = None # Transceiver submodule name (add_transceiver).
@@ -122,8 +125,8 @@ class USB3SerDes(LiteXModule):
         self.rx_datapath     = rx_datapath     = RXDatapath("rx", phy_dw=phy_dw)
         self.rx_cd           = "rx"
         self.comb += [
-            xcvr.tx_enable.eq(self.enable & ~self.tx_reinit),
-            xcvr.rx_enable.eq(self.enable & ~self.rx_reset & ~self.rx_reinit),
+            xcvr.tx_enable.eq(self.enable & ~self.tx_reinit & ~self.reinit),
+            xcvr.rx_enable.eq(self.enable & ~self.rx_reset & ~self.rx_reinit & ~self.reinit),
             self.ready.eq(xcvr.tx_ready & xcvr.rx_ready),
             xcvr.rx_align.eq(self.rx_align),
             self.sink.connect(tx_datapath.sink),

@@ -562,8 +562,10 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
         # PRBS Link-Layer Stand-Ins ----------------------------------------------------------------
         soc.usb3_prbs = PRBSLinkTester(usb3_phy, data_width=64)
 
-    # Lanes Debug (with the USB3PHYX2Link RX buffer overflow/drops) --------------------------------
-    soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes, link=usb3_link)
+    # Lanes Debug (with the USB3PHYX2Link RX buffer overflow/drops, transceivers re-initialization
+    # held 10us) ------------------------------------------------------------------------------------
+    soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes, link=usb3_link,
+        reinit_cycles=int(sys_clk_freq*10e-6))
 
     # Host Port Reset (Host role: Warm Reset when U0 is not reached, as the host software) --------
     if role == "host":

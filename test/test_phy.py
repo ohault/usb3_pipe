@@ -567,6 +567,21 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertRegex(out, r"HOST\s*lanes partial COM word")
         self.assertNotIn("DEV  Link Layer Recovery request", out)
 
+    def test_core_x2_lanes_reinit(self):
+        # Device transceivers re-initialized in U0 (USB3LanesDebug xcvr_reinit: both SerDes TX in
+        # electrical idle and RX words lost for 10us, as the GTP TX/RX and Quad PLL reset sequences):
+        # Recovery, lanes deskewed again, back to U0 at Gen 1x2, then the scripted host run done.
+        out = self.run_sim("core_x2_lanes_reinit", ["--dev-mode", "x2", "--lanes-crossed",
+            "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000",
+            "--lanes-reinit", "700000,dev"])
+        self.assertIn("DEV  TRANSCEIVERS RE-INITIALIZED", out)
+        after = lambda pattern: [int(t) for t in re.findall(r"\[(\d+)\] " + pattern, out)
+            if 700000 < int(t) < 900000]
+        self.assertNotEqual(after(r"DEV\s*entering Recovery.Active"), [])
+        self.assertNotEqual(after(r"DEV\s*lanes deskewed"), [])
+        self.assertNotEqual(after(r"DEV\s*entering U0"), [])
+        self.assertNotIn("DEV  Link Layer Recovery request", out)
+
     def test_core_x2_lane_com_error(self):
         # The first 2 COM Symbols of the last Host Lane 1 TS2 before the run's U0 received as decode
         # errors (K28.4, t6 on two Acorn Minis: the first COM Symbols of a TS1/TS2, often on both

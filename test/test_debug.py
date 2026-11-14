@@ -194,13 +194,18 @@ def fake_lanes_phy():
     phy = SimpleNamespace(x2=Signal(), gen2=Signal(), deskew_aligned=Signal(), lane_swap=Signal(),
         pipes=pipes)
     serdes = [SimpleNamespace(ready=Signal(), rx_idle=Signal(), rx_polarity=Signal(),
-        rx_errors=Signal()) for _ in range(2)]
+        rx_errors=Signal(), reinit=Signal()) for _ in range(2)]
     return phy, serdes
 
 class LanesDUT(Module):
     def __init__(self):
         self.phy, self.serdes = fake_lanes_phy()
         self.submodules.debug = USB3LanesDebug(self.phy, self.serdes)
+
+class LanesReinitDUT(Module):
+    def __init__(self):
+        self.phy, self.serdes = fake_lanes_phy()
+        self.submodules.debug = USB3LanesDebug(self.phy, self.serdes, reinit_cycles=5)
 
 class LanesLinkDUT(Module):
     def __init__(self):
@@ -209,6 +214,21 @@ class LanesLinkDUT(Module):
         self.submodules.debug = USB3LanesDebug(self.phy, self.serdes, link=self.link)
 
 class TestUSB3LanesDebug(unittest.TestCase):
+    def test_xcvr_reinit(self):
+        # Transceivers re-initialization: both SerDes reinit held reinit_cycles from the write.
+        dut = LanesReinitDUT()
+        dbg = dut.debug
+        def generator():
+            trace = []
+            yield dbg._xcvr_reinit.re.eq(1)
+            yield
+            yield dbg._xcvr_reinit.re.eq(0)
+            for _ in range(8):
+                yield
+                trace.append(((yield dut.serdes[0].reinit), (yield dut.serdes[1].reinit)))
+            self.assertEqual(trace, [(1, 1)]*5 + [(0, 0)]*3)
+        run_simulation(dut, generator())
+
     def test_rx_overflow(self):
         # USB3PHYX2Link RX buffer: dropped entries counted (per cycle), overflow status set until a
         # clear; no rx_drop counter without a link.

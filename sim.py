@@ -105,8 +105,15 @@ class USB3SerDesModel(USB3SerDes):
         nwords = phy_dw//10
         assert 0 <= rx_word_shift <= nwords
 
-        # Control.
-        self.comb += self.ready.eq(self.enable) # Ready when enabled
+        # Control. Re-initialization (reinit): not ready, TX in electrical idle (tx_idle_line, the
+        # partner's rx_idle) with no symbols, RX words lost (as a transceiver TX/RX reset sequence).
+        self.tx_idle_line = Signal() # o
+        reinit_rx = Signal()
+        self.specials += MultiReg(self.reinit, reinit_rx, rx_clock_domain)
+        self.comb += [
+            self.ready.eq(self.enable & ~self.reinit),
+            self.tx_idle_line.eq(self.tx_idle | self.reinit),
+        ]
 
         # Datapath.
         tx_datapath = TXDatapath(phy_dw=nwords*8)
@@ -219,14 +226,18 @@ class USB3SerDesModel(USB3SerDes):
             ).Else(
                 tx_data.eq(Cat(*[encoder.output[i] for i in range(nwords)])),
             ),
-            If(self.tx_polarity,
+            If(self.reinit,
+                self.tx.data.eq(0)
+            ).Elif(self.tx_polarity,
                 self.tx.data.eq(~tx_data)
             ).Else(
                 self.tx.data.eq(tx_data)
             )
         ]
         self.comb += [
-            If(rx_polarity,
+            If(reinit_rx,
+                rx_data.eq(0)
+            ).Elif(rx_polarity,
                 rx_data.eq(~self.rx.data)
             ).Else(
                 rx_data.eq(self.rx.data)
@@ -259,8 +270,8 @@ class USB3SerDesModel(USB3SerDes):
             self.tx.connect(serdes.rx),
             serdes.tx.connect(self.rx),
         ]
-        self.specials   += MultiReg(serdes.tx_idle, self.rx_idle)
-        serdes.specials += MultiReg(self.tx_idle, serdes.rx_idle)
+        self.specials   += MultiReg(serdes.tx_idle_line, self.rx_idle)
+        serdes.specials += MultiReg(self.tx_idle_line, serdes.rx_idle)
 
 # Clock Generator (NCO) ----------------------------------------------------------------------------
 
@@ -375,7 +386,7 @@ class USB3PIPESim(SoCMini):
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
         host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None, lane_skp_error=None,
-        lane_slip=None, lane_rx_log=None, lane_com_error=None):
+        lane_slip=None, lane_rx_log=None, lane_com_error=None, lanes_reinit=None):
         assert lanes in [1, 2]
         assert (link_words == 1) or (lanes == 1)
         assert (not gen2) or ((lanes == 1) and gen2_capable)
@@ -643,6 +654,7 @@ class USB3PIPESim(SoCMini):
             self.add_lanes_connection(serdeses, phys, cds, lane_delays, lane_skp, lanes_crossed,
                 lane_skp_error)
             self.add_lanes_rx_debug(serdeses, cds, lane_slip, lane_rx_log, lane_com_error)
+            self.add_lanes_reinit(serdeses, lanes_reinit)
 
         # Simulation Timer.
         timer = Signal(32)
@@ -937,8 +949,8 @@ class USB3PIPESim(SoCMini):
                 self.comb += d.rx.data.eq(delay[-1])
             else:
                 self.comb += d.rx.data.eq(h_tx)
-            self.specials += MultiReg(h.tx_idle, d.rx_idle)
-            self.specials += MultiReg(d.tx_idle, h.rx_idle)
+            self.specials += MultiReg(h.tx_idle_line, d.rx_idle)
+            self.specials += MultiReg(d.tx_idle_line, h.rx_idle)
 
         # Extra SKP Ordered Sets on a single Host lane at a time -----------------------------------
         # Each lane receives SKP Ordered Sets not present on the other lane (lane-to-lane skew
@@ -963,6 +975,25 @@ class USB3PIPESim(SoCMini):
                     )
                 )
             ]
+
+    def add_lanes_reinit(self, serdeses, lanes_reinit=None):
+        """Transceivers re-initialization (USB3LanesDebug xcvr_reinit): lanes_reinit: (cycle, side[,
+        cycles]): both SerDes of side (host/dev) held in re-initialization for cycles (default 1250,
+        10us at 125MHz) from cycle (cycles of the simulation timer): TX in electrical idle, RX words
+        lost, then the link trains again."""
+        if lanes_reinit is None:
+            return
+        cycle, side, cycles = (tuple(lanes_reinit) + (1250,))[:3]
+        assert side in ["host", "dev"]
+        timer = Signal(32)
+        self.sync += timer.eq(timer + 1)
+        active = (timer >= cycle) & (timer < cycle + cycles)
+        self.comb += [s.reinit.eq(active) for s in serdeses[side]]
+        label = {"host": "HOST", "dev": "DEV "}[side]
+        self.sync += [
+            If(timer == cycle, Display("[%08d] {} TRANSCEIVERS RE-INITIALIZATION".format(label), timer)),
+            If(timer == cycle + cycles, Display("[%08d] {} TRANSCEIVERS RE-INITIALIZED".format(label), timer)),
+        ]
 
     def add_lanes_rx_debug(self, serdeses, cds, lane_slip=None, lane_rx_log=None,
         lane_com_error=None):
@@ -1068,6 +1099,7 @@ def main():
     parser.add_argument("--lane-skp-error", default=None, help="--lanes 2: CYCLES,DIR,LANE: one SKP Symbol error on Host Lane LANE (DIR h2d: Host -> Device, d2h: Device -> Host), CYCLES after the Host U0 entry.")
     parser.add_argument("--lane-com-error", default=None, help="--lanes 2, 0 ppm: CYCLE,LANE[,KIND]: the first 2 COM Symbols of the next Host Lane LANE RX word with COM Symbols after CYCLE received with errors (KIND sub: K28.4 decode errors, default; data: D10.2 data Symbols).")
     parser.add_argument("--lane-slip",     default=None, help="--lanes 2, 0 ppm: CYCLE,LANE: 2 Symbols dropped by the Host Lane LANE SerDes RX at CYCLE (a 16-bit transceiver word lost).")
+    parser.add_argument("--lanes-reinit",  default=None, help="--lanes 2: CYCLE,SIDE[,CYCLES]: both SIDE (host/dev) SerDes re-initialized (USB3LanesDebug xcvr_reinit: TX electrical idle, RX words lost) for CYCLES (default 1250) from CYCLE.")
     parser.add_argument("--lane-rx-log",   default=None, help="--lanes 2, 0 ppm: START,END: Host and Device lanes decoded RX words displayed between the cycles START and END.")
     parser.add_argument("--lane-skp",      default=4096,        help="Extra Host Lane 1/Lane 0 SKP Ordered Sets period (cycles, 0: disabled, --lanes 2).")
     parser.add_argument("--gen2-capable",  action="store_true", help="Gen 2x1 capability advertised/negotiated in the SuperSpeedPlus Polling (--lanes 1).")
@@ -1124,6 +1156,7 @@ def main():
         lane_skp              = int(args.lane_skp),
         lane_slip             = None if args.lane_slip is None else tuple(int(v) for v in args.lane_slip.split(",")),
         lane_com_error        = None if args.lane_com_error is None else tuple(int(v) if i < 2 else v for i, v in enumerate(args.lane_com_error.split(","))),
+        lanes_reinit          = None if args.lanes_reinit is None else tuple(v if i == 1 else int(v) for i, v in enumerate(args.lanes_reinit.split(","))),
         lane_rx_log           = None if args.lane_rx_log is None else tuple(int(v) for v in args.lane_rx_log.split(",")),
         lane_skp_error        = None if args.lane_skp_error is None else (lambda c, d, l: (int(c), d, int(l)))(*args.lane_skp_error.split(",")),
         dev_mode              = args.dev_mode,

@@ -214,8 +214,13 @@ class USB3LanesDebug(LiteXModule):
       Symbol just before a COM: the first COM of an Ordered Set received with an error).
     - With link (USB3PHYX2Link): RX buffer overflow status (since the last clear) and dropped
       entries counter (Gen 1x2 RX: the Link Layer did not consume the words fast enough).
+    - Transceivers re-initialization (xcvr_reinit, write): both SerDes TX and RX reset sequences
+      restarted together after reinit_cycles, with the Quad PLL of a SerDes resetting its own PLL
+      (Acorn Gen 1x2: the Lane 0 GTP Quad PLL, shared by Lane 1): a runtime equivalent of the
+      transceivers initialization at the bitstream load (the link retrains or falls back to
+      Rx.Detect, then trains again).
     """
-    def __init__(self, phy, serdes, link=None):
+    def __init__(self, phy, serdes, link=None, reinit_cycles=1024):
         assert len(serdes) == 2
         with_rx_drop = hasattr(link, "rx_drop")
         self._clear   = CSR() # Clear counters (write).
@@ -354,6 +359,17 @@ class USB3LanesDebug(LiteXModule):
             )
             if name == "rx_drop":
                 self.comb += self._status.fields.rx_overflow.eq(csr.status != 0)
+
+        # Transceivers re-initialization (last CSR: earlier CSRs addresses unchanged): SerDes reinit
+        # held reinit_cycles from the write.
+        self._xcvr_reinit = CSR() # Transceivers (both SerDes and the Quad PLL) re-initialization (write).
+        reinit = Signal(max=reinit_cycles + 1)
+        self.sync += If(self._xcvr_reinit.re,
+            reinit.eq(reinit_cycles)
+        ).Elif(reinit != 0,
+            reinit.eq(reinit - 1)
+        )
+        self.comb += [s.reinit.eq(reinit != 0) for s in serdes if hasattr(s, "reinit")]
 
 # USB3 RX Errors Debug -----------------------------------------------------------------------------
 

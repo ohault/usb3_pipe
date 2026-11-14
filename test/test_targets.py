@@ -120,8 +120,16 @@ def test_target_lanes(name, tmp_path):
     verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
     assert verilog.count("\nGTPE2_COMMON ") == 1
     assert verilog.count("\nGTPE2_CHANNEL ") == 2
-    tx_clks = set(re.findall(r"\.TXUSRCLK\s*\((\w+)\)", verilog))
+    tx_clks = set(verilog_net(verilog, n) for n in re.findall(r"\.TXUSRCLK\s*\((\w+)\)", verilog))
     assert len(tx_clks) == 1
+
+def verilog_net(verilog, name):
+    """Net driving name through `assign name = other;` aliases."""
+    while True:
+        m = re.search(rf"\nassign {name} = (\w+);", verilog)
+        if m is None:
+            return name
+        name = m.group(1)
 
 LANES_CORE_EXAMPLES = [e for e in USB3_EXAMPLES if e not in CPU_EXAMPLES + DRAM_EXAMPLES]
 
@@ -149,7 +157,7 @@ def test_target_lanes_host_script(tmp_path):
         "usb3_script_passes", "usb3_script_fails", "usb3_lanes_debug_rx_drop_count",
         "usb3_script_ss_start", "usb3_script_ssp", "usb3_port_reset_count",
         "usb3_lanes_debug_control", "usb3_lanes_debug_lane0_rx_disparity_errors_count",
-        "usb3_lanes_debug_lane1_rx_com_disparity_errors_count"]:
+        "usb3_lanes_debug_lane1_rx_com_disparity_errors_count", "usb3_lanes_debug_xcvr_reinit"]:
         assert csr_name in csr
     assert "usb3_prbs" not in csr
     verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
@@ -184,11 +192,17 @@ def test_target_tx_postcursor(args, postcursor, tmp_path):
     assert gtp_tx_postcursors(tmp_path) == [postcursor]*(2 if "--lanes" in args else 1)
 
 def gtp_tx_postcursors(output_dir):
-    """TXPOSTCURSOR of the GTPE2_CHANNEL instances of an elaborated target (Verilog order)."""
+    """TXPOSTCURSOR of the GTPE2_CHANNEL instances of an elaborated target (Verilog order): a
+    constant, or the reset value of the register driving it (Gen 1x2 runtime control)."""
     verilog = next((output_dir / "gateware").glob("*.v")).read_text()
     values  = re.findall(r"\.TXPOSTCURSOR\s*\(([^)]*)\)", verilog)
     assert values, "TXPOSTCURSOR not found"
-    return [int(v.split("'d")[-1]) if "'d" in v else int(v.split("'b")[-1], 2) for v in values]
+    def resolve(v):
+        if re.fullmatch(r"\w+", v) and not v[0].isdigit():
+            net = verilog_net(verilog, v)
+            v   = re.search(rf"\nreg\s+(?:\[[^]]*\]\s*)?{net} = ([^;]+);", verilog).group(1)
+        return int(v.split("'d")[-1]) if "'d" in v else int(v.split("'b")[-1], 2)
+    return [resolve(v.strip()) for v in values]
 
 def test_target_tx_postcursor_per_sfp(tmp_path):
     # One value per SFP cage (SFP-0/SFP-1): both values on the two GTPs.

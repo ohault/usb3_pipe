@@ -133,6 +133,11 @@ class USB3LanesClient:
             assert 0 <= value < 32
             self.reg(f"usb3_lanes_debug_lane{lane}_tx_postcursor").write(value)
 
+    def xcvr_reinit(self):
+        # Transceivers re-initialization (both SerDes TX/RX reset sequences and the Lane 0 Quad PLL,
+        # held 10us): the link retrains (Recovery, or Rx.Detect and a full training).
+        self.reg("usb3_lanes_debug_xcvr_reinit").write(1)
+
     def x2_enable(self, enable=True):
         # Gen 1x2 advertised in the SuperSpeedPlus Polling (0: Gen 1x1 only), from the next training.
         control = self.reg("usb3_lanes_debug_control").read()
@@ -160,7 +165,7 @@ def main():
         "prbs-enable", "prbs-disable", "script",
         "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable",
         "x2-enable", "x2-disable", "skp-recovery-enable", "skp-recovery-disable",
-        "com-recovery-enable", "com-recovery-disable", "tx-postcursor"])
+        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit"])
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -188,6 +193,13 @@ def main():
         # Gen 1x2 capability advertised (x2-disable: Gen 1x1 negotiated), then retrain.
         lanes.x2_enable(args.command == "x2-enable")
         lanes.dbg.retrain()
+        lanes.reg("usb3_lanes_debug_clear").write(1)
+        time.sleep(args.wait)
+        print(json.dumps(lanes.status()))
+    elif args.command == "xcvr-reinit":
+        # Transceivers (both SerDes and the Quad PLL) re-initialized, counters cleared, status after
+        # --wait.
+        lanes.xcvr_reinit()
         lanes.reg("usb3_lanes_debug_clear").write(1)
         time.sleep(args.wait)
         print(json.dumps(lanes.status()))
