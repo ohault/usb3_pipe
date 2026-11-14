@@ -144,8 +144,10 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   (`test_core_x2_lane_com_error_data`); t8 (2601dc1, 20x20 crossed): 397/400, no looping load (3 single-run
   failures ending U0/U0), com_slip median 1/22.5, A/B neutral; still noisier than t4/t5 on ~half the loads
   (resets median 61 vs 27, Host Recoveries 157.5 vs 60, Device in-run pending_hp median 8, max 156), those
-  loads with high rx_realign/errcyc: receive quality, or the t6 TX flush/RX keep (not separated, a t5 vs t8
-  A/B would tell). Open: Host Advertisement lost when the
+  loads with high rx_realign/errcyc. t5 vs t8 A/B (20 rounds alternating, fizzy-flurry NUC session): A 399/400,
+  B 400/400, no difference (resets median 23/24.5, p 0.65; pending_hp 1.5/3, p 0.47; clean loads 11/10 of 20):
+  the noise baseline is load variance (Host Lane 0 receive, Device SFP-1 TX), not the changes since t5.
+  Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build
@@ -173,7 +175,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   remote-control-cli). This session sends it tasks with send_message (allowed once by the user on a
   trusted device) and reads its results with list_events (kinds result): its own send_message back is
   refused. No computer folder is offered to cloud sessions on this account (list_computer_folders
-  empty). Self check-ins (send_later) fail with ACCESS_DENIED: the user asks "check again".
+  empty). Self check-ins (send_later) fail with ACCESS_DENIED: the user asks "check again". The NUC
+  session can be archived between runs: list_sessions for another connected `ohault-nuc7i7dnhe-*`
+  session and send it a self-contained brief (bench, rules, paths of earlier run outputs).
 - Upstream docs are in the manual (`doc/manual/`, checks: `python3 doc/manual/build.py --check`,
   needs `pip install cairosvg`; `doc/manual/tools/csr_doc.py dump --check`/`generate --check`); the
   Gen 1x2 material is in its PHY/core/boards/examples/simulation/debugging chapters and options
