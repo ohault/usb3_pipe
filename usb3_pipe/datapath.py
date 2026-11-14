@@ -341,26 +341,36 @@ class RXErrorSubstitution(LiteXModule):
 # RX Error Types Count -----------------------------------------------------------------------------
 
 class RXErrorTypesCount(LiteXModule):
-    """RX 8b/10b Errors Count by type (debug, free running 32-bit counters of RX Symbols):
+    """RX 8b/10b Errors Count by type (debug, counts of RX Symbols):
     - rx_decode_errors:        decode errors (decode[i]: decoder invalid/code not in the table).
     - rx_disparity_errors:     running disparity errors only (disparity[i] without decode[i]).
     - rx_com_decode_errors:    decode error on the Symbol just before a COM (com[i]).
     - rx_com_disparity_errors: disparity error only on the Symbol just before a COM.
     The previous Symbol of Symbol 0 is the last Symbol of the previous word (one word per cycle).
+
+    The flags are counted in rx_cd while enable (sys, ex: LTSSM in a state receiving symbols, RX not
+    idle: not the LFPS/electrical idle) by reset-less per Symbol Gray counters (width bits, the RX
+    clock domain is reset with the transceiver RX: t9 on two Acorn Minis, counts lost and wrapped
+    readings), accumulated in sys (counts: free running 32-bit, never reset by the transceiver).
     """
-    def __init__(self, n):
-        self.decode    = Signal(n) # i
-        self.disparity = Signal(n) # i
-        self.com       = Signal(n) # i
-        self.counts    = {}        # o: name -> Signal(32).
+    def __init__(self, n, rx_cd="rx", width=8):
+        self.decode    = Signal(n) # i (rx_cd)
+        self.disparity = Signal(n) # i (rx_cd)
+        self.com       = Signal(n) # i (rx_cd)
+        self.enable    = Signal()  # i (sys)
+        self.counts    = {}        # o (sys): name -> Signal(32).
 
         # # #
 
+        sync_rx = getattr(self.sync, rx_cd)
+        enable  = Signal()
+        self.specials += MultiReg(self.enable, enable, rx_cd)
+
         disparity = Signal(n)
         self.comb += disparity.eq(self.disparity & ~self.decode)
-        decode_last    = Signal()
-        disparity_last = Signal()
-        self.sync += [
+        decode_last    = Signal(reset_less=True)
+        disparity_last = Signal(reset_less=True)
+        sync_rx += [
             decode_last.eq(self.decode[n-1]),
             disparity_last.eq(disparity[n-1]),
         ]
@@ -372,16 +382,33 @@ class RXErrorTypesCount(LiteXModule):
             "rx_com_decode_errors"    : [self.com[i] & prev_decode[i]    for i in range(n)],
             "rx_com_disparity_errors" : [self.com[i] & prev_disparity[i] for i in range(n)],
         }
-        w = bits_for(n)
+        mask = 2**width - 1
         for name, flags in events.items():
-            increment = Signal(w)
-            count     = Signal(32, name=name)
-            # Registered increment (one cycle late, timing at the RX clock).
-            self.sync += [
-                increment.eq(Reduce("ADD", [Cat(f, Constant(0, w - 1)) for f in flags])),
-                count.eq(count + increment),
-            ]
-            self.counts[name] = count
+            total  = Signal(32, name=name)
+            deltas = []
+            for i, flag in enumerate(flags):
+                # RX: binary counter and its Gray code (registered, one bit changing per cycle).
+                count = Signal(width, reset_less=True)
+                gray  = Signal(width, reset_less=True)
+                sync_rx += [
+                    If(flag & enable, count.eq(count + 1)),
+                    gray.eq(count ^ (count >> 1)),
+                ]
+                # sys: Gray code synchronized, decoded, difference with the previous value.
+                gray_s = Signal(width)
+                self.specials += MultiReg(gray, gray_s, "sys")
+                binary = Signal(width)
+                for b in reversed(range(width)):
+                    self.comb += binary[b].eq(Reduce("XOR", [gray_s[j] for j in range(b, width)]))
+                last  = Signal(width)
+                delta = Signal(width)
+                self.sync += [
+                    last.eq(binary),
+                    delta.eq((binary - last) & mask),
+                ]
+                deltas.append(delta)
+            self.sync += total.eq(total + Reduce("ADD", deltas))
+            self.counts[name] = total
 
 # RX Error Monitor ---------------------------------------------------------------------------------
 

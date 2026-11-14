@@ -295,7 +295,7 @@ counters (`USB3LanesDebug`). The procedure and the results are in
 | `skp-recovery-enable` | Recovery on an odd SKP run in U0 (`-disable`: counted only) |
 | `com-recovery-enable` | Deskew cleared on a partial COM word (`-disable`: counted only) |
 | `rx_realign`, `rx_errors_reinit` | Per lane transceiver comma realignments and receive re-initializations |
-| `rx_decode_errors`, `rx_disparity_errors` | Per lane received symbols with a decode error, or with a running disparity error only (valid code in the other disparity column) |
+| `rx_decode_errors`, `rx_disparity_errors` | Per lane received symbols with a decode error, or with a running disparity error only (valid code in the other disparity column), in the states receiving symbols |
 | `rx_com_decode_errors` | A decode error on the symbol just before a COM: the first COM of an ordered set received with an error |
 | `rx_com_disparity_errors` | The same with a running disparity error |
 | `rx_overflow`, `rx_drop_count` | Link receive buffer or packet aligner overflow, dropped words |

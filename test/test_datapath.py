@@ -228,10 +228,11 @@ class TestDatapath(unittest.TestCase):
                         if dut.words[i:i + n] == expected]
                     self.assertNotEqual(found, [], dut.words)
 
-    def test_rx_error_types_count(self):
+    def check_rx_error_types_count(self, rx_reset_at=None):
         # 2 Symbols per word: (decode, disparity, com) flags per Symbol; errors before a COM in the
         # same word and across words (previous word last Symbol), disparity errors counted only
-        # without a decode error.
+        # without a decode error; not counted while disabled. rx_reset_at: RX clock domain reset
+        # (transceiver RX reset) before that word: the counts are kept.
         words = [
             # Symbol 0          Symbol 1
             [(0, 0, 0),         (1, 0, 0)],  # decode
@@ -240,28 +241,50 @@ class TestDatapath(unittest.TestCase):
             [(0, 1, 0),         (0, 0, 1)],  # COM after disparity (same word)
             [(1, 1, 0),         (0, 0, 1)],  # decode (+disparity flag: decode only), COM after decode
             [(0, 0, 0),         (0, 0, 0)],
+            [(1, 1, 1),         (1, 1, 1)],  # disabled: not counted
             [(0, 0, 0),         (0, 0, 0)],
         ]
-        dut = RXErrorTypesCount(2)
 
-        def generator(dut):
-            for w in words:
-                yield dut.decode.eq(   sum(s[0] << i for i, s in enumerate(w)))
-                yield dut.disparity.eq(sum(s[1] << i for i, s in enumerate(w)))
-                yield dut.com.eq(      sum(s[2] << i for i, s in enumerate(w)))
+        class DUT(LiteXModule):
+            def __init__(self):
+                self.cd_rx = ClockDomain("rx")
+                self.counter = RXErrorTypesCount(2, rx_cd="rx")
+
+        dut = DUT()
+        c   = dut.counter
+
+        def generator():
+            yield c.enable.eq(1)
+            for _ in range(4):
                 yield
-            yield
+            for k, w in enumerate(words):
+                yield dut.cd_rx.rst.eq(int(k == rx_reset_at))
+                yield c.enable.eq(int(k not in (5, 6))) # Synchronized during word 5 (no flags).
+                yield c.decode.eq(   sum(s[0] << i for i, s in enumerate(w)))
+                yield c.disparity.eq(sum(s[1] << i for i, s in enumerate(w)))
+                yield c.com.eq(      sum(s[2] << i for i, s in enumerate(w)))
+                for _ in range(4 if k == 5 else 1): # enable synchronization before word 6.
+                    yield
+            yield dut.cd_rx.rst.eq(0)
+            for _ in range(8):
+                yield
             dut.result = {}
-            for name, c in dut.counts.items():
-                dut.result[name] = (yield c)
+            for name, count in c.counts.items():
+                dut.result[name] = (yield count)
 
-        run_simulation(dut, generator(dut))
-        self.assertEqual(dut.result, {
+        run_simulation(dut, generator(), clocks={"sys": 10, "rx": 10})
+        return dut.result
+
+    def test_rx_error_types_count(self):
+        expected = {
             "rx_decode_errors"        : 2,
             "rx_disparity_errors"     : 2,
             "rx_com_decode_errors"    : 2,
             "rx_com_disparity_errors" : 2,
-        })
+        }
+        self.assertEqual(self.check_rx_error_types_count(), expected)
+        # RX clock domain reset on the error-free word 5: counts kept (t9: lost, wrapped readings).
+        self.assertEqual(self.check_rx_error_types_count(rx_reset_at=5), expected)
 
     def test_rx_skip_remover(self):
         datas_input = [

@@ -148,8 +148,11 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   B 400/400, no difference (resets median 23/24.5, p 0.65; pending_hp 1.5/3, p 0.47; clean loads 11/10 of 20):
   the noise baseline is load variance (Host Lane 0 receive, Device SFP-1 TX), not the changes since t5.
   Per lane RX error type counters added (`lane*_rx_decode_errors`, `rx_disparity_errors`, `rx_com_decode_errors`,
-  `rx_com_disparity_errors`: errors on the Symbol before a COM; `RXErrorTypesCount` in the SerDes RX domains);
-  hardware run pending.
+  `rx_com_disparity_errors`: errors on the Symbol before a COM; `RXErrorTypesCount`); t9 (473b81f, 20x20): 360/400
+  (2 loads stuck in Polling.LFPS, 18 loads 360/360), counters unusable (RX domain reset with the transceiver RX:
+  wrapped readings), 60s idle U0: 0 errors (errors only around resets/training/Recovery), Host Lane 0 RX WNS
+  +0.095ns; fixed: reset-less RX Gray counters accumulated in sys, counted only in symbol states with RX not
+  idle; hardware run pending.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

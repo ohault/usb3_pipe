@@ -308,12 +308,22 @@ class USB3LanesDebug(LiteXModule):
                 events += [(f"lane{lane}_rx_errors_reinit", phy.rx_errors_reinit[lane], 0)]
             if hasattr(phy, "lanes_com_partial"):
                 events += [(f"lane{lane}_rx_com_partial", phy.lanes_com_partial[lane], 0)]
-        # Per lane RX 8b/10b errors by type (SerDes RX clock domain counters, USB3SerDes): cleared
-        # by a snapshot on clear (no clear crossing to the RX clock domains).
+        # Per lane RX 8b/10b errors by type (USB3SerDes, counted in the SerDes RX clock domain,
+        # accumulated in sys): only with the LTSSM in a state receiving symbols (Polling.RxEQ to U0,
+        # Recovery, Hot Reset) and the lane RX not idle (not the LFPS/electrical idle: no symbols);
+        # cleared by a snapshot on clear.
+        counted = [s for s in serdes if hasattr(s, "add_rx_errors_count") and hasattr(s, "rx_substitution")]
+        if counted:
+            states  = phy.ltssm_states
+            symbols = Signal()
+            self.comb += symbols.eq(Reduce("OR", [phy.ltssm_state == states[state] for state in [
+                "Polling.RxEQ", "Polling.Active", "Polling.Configuration", "Polling.Idle", "U0",
+                "Recovery.Active", "Recovery.Configuration", "Recovery.Idle", "HotReset.Active",
+                "HotReset.Exit"] if state in states]))
         for lane, s in enumerate(serdes):
-            if not (hasattr(s, "add_rx_errors_count") and hasattr(s, "rx_substitution")):
+            if s not in counted:
                 continue
-            s.add_rx_errors_count()
+            s.add_rx_errors_count(enable=symbols & ~s.rx_idle)
             for name, value in s.rx_errors_counts.items():
                 csr  = CSRStatus(32, name=f"lane{lane}_{name}_count",
                     description=f"Lane {lane} {name.replace('_', ' ')} count (RX Symbols, since the last clear).")
