@@ -715,10 +715,29 @@ Scripted host fixed (both reproduced first):
   exit to another state). Hardware (t5 row): C confirmed (no Device Recovery storm, before the runs
   max 16), B fixed for the race but the looping loads (about 1 in 20) are another case: the Host
   receives nothing usable after the U0 entry (Host lane 0 comma realignments and `deskew_lost_u0`
-  per run in the hundreds of thousands/hundreds), so the Device LMP is never acknowledged. Suspected:
-  Host lanes deskewed wrong (paired on the wrong COM words) or lost without a Recovery at the U0
-  entry; next: a Host LiteScope capture (`lanes` group) of a U0 period ending in Recovery on a
-  looping load.
+  per run in the hundreds of thousands/hundreds), so the Device LMP is never acknowledged.
+
+### Looping loads: Host Lane 1 loses 2 COM Symbols at the end of the TS2 burst (2026-11-14)
+
+Host LiteScope capture (`--with-analyzer --analyzer-group realign`, built at `99ba623`, timing met:
+design WNS +0.273ns, sys +0.333ns; Device t4), trigger `--state HotReset.Active:U0:Recovery.Active
+--no-retrain` armed before `usb3_lanes.py script --runs 1` (files on the PC in
+`build/hw_runs/crossed_t5/la/`): 2 captures on a normal load, 5 on a looping load (19/20, 1109
+resets per 20 runs).
+
+- On the looping load, in all 5 captures, the last TS2 of Host Lane 1 before the Logical Idle
+  starts with 2 COM Symbols instead of 4 (`COM COM 01 38` at the deskew input: one 16-bit GTP
+  word lost, the TS2 body intact); never on the normal load. No `rx_realign`/`rx_errors` on that
+  word, not next to a SKP removal; the deskew sees one head mismatch, the single end of burst
+  mismatch `LaneDeskew` tolerates: `aligned` stays 1, no Recovery.
+- In U0, Lane 1 is then 2 Symbols off Lane 0 (every Device packet: Lane 0 `SLC SLC xx xx`, Lane 1
+  `00 00 SLC EPF` then `yy yy 00 00`): every destriped word is garbage, the Device Advertisement and
+  LMP are never decoded, the Device PENDING_HP_TIMER ends the U0 period (12.7-12.8us after the Host
+  U0 entry in the two long captures); the Host lanes triggers fire only on the Device TS1.
+- Not the deskew pairing (the COM words coincide during the burst), not a deskew loss, not after
+  the deskew (the lane words are already 2 Symbols apart at its input). Open: where the 2 Symbols
+  are lost (Host Lane 1 RX: GTP buffer/CDC/stride converter/word aligner, or the Device Lane 1
+  transmitter at the TS2 -> Logical Idle switch); always on the last TS2 before the Logical Idle.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
