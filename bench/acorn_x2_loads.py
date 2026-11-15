@@ -34,7 +34,10 @@ than --monitor-recoveries Recovery entries is a noisy window; --monitor-windows 
 windows trigger a re-initialization, the next --monitor-holdoff windows not evaluated, at most
 --monitor-max-reinits per load). With --monitor-ab, the loads alternate monitor enabled (odd) and
 measuring only (even, same thresholds: the windows a monitor would have acted on counted). The
-monitor state of both boards is in the load results (`host`/`device` `monitor`).
+monitor state of both boards is in the load results (`host`/`device` `monitor`). Defaults from
+the t14 calibration (bursts of 5 runs); `--monitor host` is the one that quiets the loads (t14: the
+noise follows the Host transceivers start-up). Back to back runs (--runs 60) may need their own
+thresholds (absolute counts per window).
 
 A load is bad when no run was done (link down) or on an error (ex: a board reconfigured from its
 flash during the runs): reported apart from the runs done on the good loads.
@@ -282,11 +285,11 @@ def main():
     parser.add_argument("--drp-addrs",       default=None,   help="--reinit-until-clean: transceivers DRP addresses dumped per draw (usb3_lanes.py drp-dump --addrs).")
     parser.add_argument("--monitor",         default=None,   choices=["host", "device", "both"], help="Lanes noise monitor enabled on that board(s) during the runs.")
     parser.add_argument("--monitor-ab",      action="store_true", help="--monitor on the odd loads only (even loads: measuring only).")
-    parser.add_argument("--monitor-window-ms",  default=1000, type=int, help="--monitor: window length (ms).")
+    parser.add_argument("--monitor-window-ms",  default=2000, type=int, help="--monitor: window length (ms).")
     parser.add_argument("--monitor-windows",    default=2,    type=int, help="--monitor: consecutive noisy windows triggering a re-initialization.")
     parser.add_argument("--monitor-holdoff",    default=2,    type=int, help="--monitor: windows not evaluated after a re-initialization.")
-    parser.add_argument("--monitor-disparity",  default=100,  type=int, help="--monitor: noisy window above this many RX disparity errors on a lane (0: disabled).")
-    parser.add_argument("--monitor-recoveries", default=0,    type=int, help="--monitor: noisy window above this many Recovery entries (0: disabled).")
+    parser.add_argument("--monitor-disparity",  default=200,  type=int, help="--monitor: noisy window above this many RX disparity errors on a lane (0: disabled).")
+    parser.add_argument("--monitor-recoveries", default=30,   type=int, help="--monitor: noisy window above this many Recovery entries (0: disabled).")
     parser.add_argument("--monitor-max-reinits", default=8,   type=int, help="--monitor: re-initializations budget per load (0: unlimited).")
     parser.add_argument("--settle",          default=2.0,    type=float, help="Time (s) after the servers start.")
     parser.add_argument("--out",             default=None,   help="Results (JSON lines, appended; default: build/hw_runs/<time>/loads.jsonl).")

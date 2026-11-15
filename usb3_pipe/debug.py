@@ -431,7 +431,11 @@ class LanesNoiseMonitor(LiteXModule):
     After `windows` consecutive noisy windows, with enable, out of U3 (u3) and under the
     re-initializations budget (max_reinits since the last clear, 0: unlimited), reinit pulses (one
     sys cycle) and the next `holdoff` windows are not evaluated (link training after the re-init).
-    The windows are measured and counted with enable at 0 too (thresholds calibration).
+    The windows are measured and counted with enable at 0 too (thresholds calibration). Reset values
+    from the t14 calibration (scripted host bursts, ~2.5 runs/s): 2s windows (the errors of a run
+    burst arrive within ~0.5s: shorter windows rarely see 2 noisy windows in a row), disparity 200
+    per lane, 30 Recovery entries. The thresholds are absolute counts per window (traffic pattern
+    dependent); on the Acorn Gen 1x2 pair, only the Host re-initializations quiet a load (t14).
     """
     def __init__(self, disparity, recovery, u3, tick_cycles, clear=None):
         self.reinit = Signal() # o: Transceivers re-initialization request (pulse).
@@ -444,15 +448,15 @@ class LanesNoiseMonitor(LiteXModule):
                 description="Consecutive noisy windows triggering a re-initialization (0: as 1)."),
             CSRField("holdoff",     size=4,  offset=5,  reset=2,
                 description="Windows not evaluated after a re-initialization."),
-            CSRField("window_ms",   size=12, offset=9,  reset=1000,
+            CSRField("window_ms",   size=12, offset=9,  reset=2000,
                 description="Window length (ms, 0: as 1)."),
             CSRField("max_reinits", size=8,  offset=21, reset=8,
                 description="Re-initializations budget since the last clear (0: unlimited)."),
         ])
         self._thresholds = CSRStorage(fields=[
-            CSRField("disparity",  size=16, offset=0,  reset=100,
+            CSRField("disparity",  size=16, offset=0,  reset=200,
                 description="Noisy window: RX disparity errors of a lane above (0: disabled)."),
-            CSRField("recoveries", size=16, offset=16, reset=0,
+            CSRField("recoveries", size=16, offset=16, reset=30,
                 description="Noisy window: Recovery entries above (0: disabled)."),
         ])
         self._window = CSRStatus(fields=
