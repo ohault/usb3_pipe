@@ -189,7 +189,8 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   for 128.9MHz, t16g): the QPLL path on this dock/silicon/IDE, not our `.csr`. t16h: CPLL/QPLL0 5G tasks
   from `csr_task_gen` do not lock, the TX fabric clock stays ~32MHz whatever the PLL/reference (RX follows the reference). Likely cause (litex_wr_nic bench, PR #109):
   the debugger `pll` command programs MS5351 PLL A but MS0 (SerDes reference) is sourced from the unprogrammed PLL B:
-  program PLL B (`tang_ms5351.py --restore --pll B`) and retry t16. Next: TX buffer bypass/phase, CDR/LPM.
+  program PLL B (`tang_ms5351.py --restore --pll B`) and retry t16. t16i confirmed (PLL A = PLL B, not
+  saved): Tang TX/RX 125.0MHz, Acorn Host Gen 1x1 <-> Tang U0, 20/20 runs; a Recovery burst after the script (open). Next: TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

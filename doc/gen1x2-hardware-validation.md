@@ -945,6 +945,13 @@ ran at ~49MHz instead of 125MHz with PLL/CDR lock reported (our RX 48.9MHz at "1
 PLL B (`tools/tang_ms5351.py --restore --pll B` in litex_wr_nic: LiteEth 1000BASE-X link up, TX/RX ~125MHz).
 The t16g register reading did not check the multisynth PLL source. Next on this dock: program the PLL B
 routing, then t16 again (TX/RX clock meters first).
+t16i (2026-11-15, reactive-turtle NUC session; Acorn Host 1-3 SFP-0 <-> Tang SFP0): confirmed. Before: MS5351 #0
+outputs from PLL B (99.992MHz, left by the WR tuner), #1 outputs from an unprogrammed PLL B; after PLL A = PLL B
+(#0 x36/9 = 100.000MHz, #1 x30/6 = 125.000MHz, not saved): Tang (`tang_device_t16b_sfp0_100M`, committed `.csr`,
+QPLL1) TX fabric clock 125.0065MHz, RX 125.0151MHz. Host t15 build in Gen 1x1 (`x2-disable`): U0 on both sides,
+20/20 scripted runs (0 errors/timeouts), Host Recoveries 1 -> 671, Tang RX errors decode +63674, disparity +924,
+COM-preceding disparity +331; after the script a Recovery burst (Host 671 -> 5366, Tang 847 -> 6071 within ~1 min),
+then quiet (0 Recoveries/errors over 10.7s). Open: that burst; then the nested Acorn Host re-inits x Tang reloads.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
