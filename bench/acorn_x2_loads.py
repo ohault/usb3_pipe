@@ -21,7 +21,7 @@ cleared, Device Core counters read before and after the runs (deltas: Recoveries
 
 With --reinit-until-clean N, each load first checks its transceivers start-up draw (the line noise
 of a Gen 1x2 load is drawn at the transceivers start-up, doc/gen1x2-hardware-validation.md t12): a
-check burst of --check-runs scripted host runs, clean when the Host port resets and the RX disparity
+check burst of --check-runs scripted host runs, clean when the scripted host resets and the RX disparity
 errors per reset of every lane are under --clean-resets/--clean-disparity; else both boards
 transceivers re-initialized (`usb3_lanes.py xcvr-reinit`, Device then Host) and checked again, up to
 N times (the first clean draw kept, or the last one). The draws (check results, transceivers status,
@@ -75,6 +75,19 @@ def port_resets(port, csr_csv):
     except Exception:
         return None
     count = bus.regs.usb3_port_reset_count.read() if hasattr(bus.regs, "usb3_port_reset_count") else None
+    bus.close()
+    return count
+
+def script_resets(port, csr_csv):
+    """Scripted host resets count (usb3_script_resets: one Hot Reset per run on a clean link, more on
+    a noisy one), None without."""
+    from litex import RemoteClient
+    try:
+        bus = RemoteClient(port=port, csr_csv=csr_csv)
+        bus.open()
+    except Exception:
+        return None
+    count = bus.regs.usb3_script_resets.read() if hasattr(bus.regs, "usb3_script_resets") else None
     bus.close()
     return count
 
@@ -136,10 +149,10 @@ def check_draw(lanes, host_args, dev_args, host_port, host_csr, check_runs, drp_
     disparity errors per reset per lane (both boards), transceivers status (and DRP dumps)."""
     run(lanes + host_args + ["clear"])
     run(lanes + dev_args  + ["clear"])
-    before = port_resets(host_port, host_csr) or 0
+    before = script_resets(host_port, host_csr) or 0
     code, output = run(lanes + host_args + ["script", "--runs", str(check_runs)])
     lines  = [json.loads(l) for l in output.splitlines() if l.startswith("{")]
-    resets = (port_resets(host_port, host_csr) or 0) - before
+    resets = (script_resets(host_port, host_csr) or 0) - before
     status = {"host": lanes_status(lanes, host_args), "device": lanes_status(lanes, dev_args)}
     r = {"done": lines[-1].get("done", 0) if lines else 0, "resets": resets, "disparity_per_reset": {},
         "xcvr": {side: status[side].get("xcvr") for side in status}}
@@ -244,8 +257,8 @@ def main():
     parser.add_argument("--x1",              action="store_true", help="Gen 1x1: Gen 1x2 not advertised on both boards after each load (runtime control), both retrained.")
     parser.add_argument("--reinit-until-clean", default=0,   type=int, help="Transceivers start-up draws: up to N re-initializations of both boards per load until a clean check (0: disabled).")
     parser.add_argument("--check-runs",      default=5,      type=int, help="--reinit-until-clean: scripted host runs per check.")
-    parser.add_argument("--clean-resets",    default=1.5,    type=float, help="--reinit-until-clean: max Host port resets per check run of a clean draw.")
-    parser.add_argument("--clean-disparity", default=100,    type=float, help="--reinit-until-clean: max RX disparity errors per reset on every lane of a clean draw.")
+    parser.add_argument("--clean-resets",    default=1.5,    type=float, help="--reinit-until-clean: max scripted host resets (usb3_script_resets) per check run of a clean draw.")
+    parser.add_argument("--clean-disparity", default=25,     type=float, help="--reinit-until-clean: max RX disparity errors per reset on every lane of a clean draw (t13: clean draws <= 12, noisy >= 34).")
     parser.add_argument("--drp-addrs",       default=None,   help="--reinit-until-clean: transceivers DRP addresses dumped per draw (usb3_lanes.py drp-dump --addrs).")
     parser.add_argument("--settle",          default=2.0,    type=float, help="Time (s) after the servers start.")
     parser.add_argument("--out",             default=None,   help="Results (JSON lines, appended; default: build/hw_runs/<time>/loads.jsonl).")
@@ -309,6 +322,7 @@ def main():
                 run(lanes + host_args + ["clear"])
                 run(lanes + dev_args  + ["clear"])
                 before = core_counters(args.device_port, device_csr)
+                r["script_resets_before"] = script_resets(args.host_port, host_csr)
                 code, output = run(lanes + host_args + ["script", "--runs", str(args.runs)])
                 after  = core_counters(args.device_port, device_csr)
                 lines  = [json.loads(l) for l in output.splitlines() if l.startswith("{")]

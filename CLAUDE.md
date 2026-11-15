@@ -165,8 +165,12 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   PLL, `usb3_lanes.py xcvr-reinit`, `sim.py --lanes-reinit`, `test_core_x2_lanes_reinit`); t12 (93ea941, 20 loads
   x 14 rounds): 2800/2800 runs, the re-init re-draws the noise (load share of the variance 0.95 with retrains vs
   ~0 with re-inits; 29/100 class changes, both ways): drawn at the transceivers start-up, not the configuration;
-  the Device RX SerDes 1 errors follow the Host SerDes 0 TX start-up. Host t12 design WNS +0.066ns. Next: clean
-  vs noisy draw status (PLL lock, TX buffer/phase, DRP), gateware re-init until clean.
+  the Device RX SerDes 1 errors follow the Host SerDes 0 TX start-up. Host t12 design WNS +0.066ns. Transceivers
+  status/DRP readouts and `acorn_x2_loads.py --reinit-until-clean` added; t13 (35be39a, Host WNS +0.149ns, Device
+  +0.135ns): two noise levels (worst lane disparity/reset <= 11.9 or >= 33.9), no status bit/counter/DRP 0x000-0x0ff
+  value separates them; a draw sets the rate of noise episodes (no settling time); until-clean (20+20 loads, 800/800
+  runs): reset-noisy loads 1/20 vs 7/20 (p 0.044), disparity/Host Recoveries/pending_hp unchanged: a screen, not a
+  fix. Next: monitor during operation (re-init on a sustained disparity rate), TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
