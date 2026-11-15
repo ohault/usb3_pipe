@@ -347,13 +347,14 @@ class MonitorDUT(Module):
     def __init__(self):
         self.disparity = [Signal(32) for _ in range(2)]
         self.recovery  = Signal()
+        self.hot_reset = Signal()
         self.u3        = Signal()
         self.clear     = Signal()
         self.submodules.monitor = LanesNoiseMonitor(self.disparity, self.recovery, self.u3,
-            tick_cycles=2, clear=self.clear)
+            tick_cycles=2, clear=self.clear, hot_reset=self.hot_reset)
 
 class TestLanesNoiseMonitor(unittest.TestCase):
-    def run_monitor(self, windows, control, thresholds, u3=False):
+    def run_monitor(self, windows, control, thresholds, u3=False, ratio={}):
         # windows: (lane 0 disparity errors, lane 1 disparity errors, Recovery entries) per window
         # (window_ms 4 x 2 cycles = 8 cycles); returns the windows of the reinit pulses, the last window
         # readings at each window end and the counters.
@@ -369,11 +370,14 @@ class TestLanesNoiseMonitor(unittest.TestCase):
                 state["last"] = key
                 out["readings"].append(((yield mon._window.fields.disparity0),
                     (yield mon._window.fields.disparity1), (yield mon._window_status.fields.recoveries)))
+                out.setdefault("hot_resets", []).append((yield mon._window_hot_resets.status))
         def generator():
             for name, value in control.items():
                 yield getattr(mon._control.fields, name).eq(value)
             for name, value in thresholds.items():
                 yield getattr(mon._thresholds.fields, name).eq(value)
+            for name, value in ratio.items():
+                yield getattr(mon._ratio.fields, name).eq(value)
             yield mon._control.fields.window_ms.eq(4)
             yield dut.u3.eq(int(u3))
             yield
@@ -384,13 +388,16 @@ class TestLanesNoiseMonitor(unittest.TestCase):
                 if (yield mon._windows_count.status) != 0:
                     break
             counts = [0, 0]
-            for index, (d0, d1, rec) in enumerate(windows):
+            for index, window in enumerate(windows):
+                d0, d1, rec = window[:3]
+                hot = window[3] if len(window) > 3 else 0
                 counts[0] += d0
                 counts[1] += d1
                 yield dut.disparity[0].eq(counts[0])
                 yield dut.disparity[1].eq(counts[1])
                 for cycle in range(8):
                     yield dut.recovery.eq(int(cycle < 2*rec and cycle % 2 == 0))
+                    yield dut.hot_reset.eq(int(cycle < 2*hot and cycle % 2 == 0))
                     yield
                     if (yield mon.reinit):
                         out["reinits"].append(index)
@@ -445,6 +452,28 @@ class TestLanesNoiseMonitor(unittest.TestCase):
         out = self.run_monitor(windows, {"enable": 1, "windows": 1, "holdoff": 0}, {"recoveries": 2}, u3=True)
         self.assertEqual(out["count"], 0)
         self.assertEqual(out["noisy"], 6)
+
+    def test_disparity_per_training(self):
+        # Ratio criterion alone (absolute thresholds 0): worst lane > 10 x trainings with >= 2
+        # trainings (Recovery + Hot Reset entries; Recovery only without with_hot_reset).
+        windows = [
+            (25, 0, 2, 0),  # 25 > 20: noisy.
+            (0, 39, 2, 2),  # 39 <= 40: clean.
+            (50, 0, 1, 0),  # 1 training < min_trainings: clean.
+            (0, 41, 2, 2),  # 41 > 40: noisy.
+            (300, 0, 0, 0), # No training: clean.
+        ]
+        out = self.run_monitor(windows, {"enable": 0}, {"disparity": 0, "recoveries": 0},
+            ratio={"disparity_per_training": 10, "min_trainings": 2, "with_hot_reset": 1})
+        self.assertEqual(out["noisy"], 2)
+        self.assertEqual(out["hot_resets"][1:6], [0, 2, 0, 2, 0])
+        # Recovery entries only: window 1 (39 > 20) and window 3 (41 > 20) noisy too.
+        out = self.run_monitor(windows, {"enable": 0}, {"disparity": 0, "recoveries": 0},
+            ratio={"disparity_per_training": 10, "min_trainings": 2, "with_hot_reset": 0})
+        self.assertEqual(out["noisy"], 3)
+        # Disabled (reset): no noisy window.
+        out = self.run_monitor(windows, {"enable": 0}, {"disparity": 0, "recoveries": 0})
+        self.assertEqual(out["noisy"], 0)
 
 if __name__ == "__main__":
     unittest.main()

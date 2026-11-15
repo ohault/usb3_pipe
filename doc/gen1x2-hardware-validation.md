@@ -891,6 +891,11 @@ nothing that matters: the noise follows the Host SerDes 0 transmitter start-up, 
 run burst arrive within ~0.5s, so the windows are 2s (reset values now 2s, disparity 200 per lane, 30
 Recovery entries; `acorn_x2_loads.py --monitor host`). The thresholds are absolute counts per window
 (traffic dependent): a per Recovery entry normalization would make them independent of the traffic.
+The monitor now has it (`ratio`: a window is noisy when its worst lane has more than
+`disparity_per_training` disparity errors per training, trainings = Recovery entries + Hot Reset
+entries (`with_hot_reset`, the Hot Reset entries per window read back), at least `min_trainings`;
+disabled at reset; `usb3_lanes.py monitor --disparity-per-training N`, `acorn_x2_loads.py
+--monitor-per-training N`).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

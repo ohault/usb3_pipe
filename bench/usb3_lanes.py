@@ -185,6 +185,8 @@ class USB3LanesClient:
         # Lanes noise monitor configuration, last window and counters.
         r = {}
         for reg, fields in MONITOR_FIELDS.items():
+            if not hasattr(self.bus.regs, f"usb3_lanes_debug_monitor_{reg}"):
+                continue
             v, offset = self.reg(f"usb3_lanes_debug_monitor_{reg}").read(), 0
             for name, size in fields:
                 r[name] = (v >> offset) & (2**size - 1)
@@ -195,7 +197,10 @@ class USB3LanesClient:
 
     def monitor_config(self, **kwargs):
         # Lanes noise monitor configuration (control/thresholds fields by name, others unchanged).
-        for reg in ["control", "thresholds"]:
+        for reg in ["control", "thresholds", "ratio"]:
+            if not hasattr(self.bus.regs, f"usb3_lanes_debug_monitor_{reg}"):
+                assert all(kwargs.get(name) is None for name, _ in MONITOR_FIELDS[reg]), f"no monitor {reg} in this build"
+                continue
             v, offset = self.reg(f"usb3_lanes_debug_monitor_{reg}").read(), 0
             for name, size in MONITOR_FIELDS[reg]:
                 if kwargs.get(name) is not None:
@@ -223,6 +228,9 @@ MONITOR_FIELDS = {
     "thresholds"    : [("disparity_threshold", 16), ("recoveries_threshold", 16)],
     "window"        : [("disparity0", 16), ("disparity1", 16)],
     "window_status" : [("recoveries", 16), ("streak", 4), ("holdoff_left", 4), ("budget", 1)],
+    # Disparity errors per training criterion (builds since t14).
+    "ratio"             : [("disparity_per_training", 8), ("min_trainings", 8), ("with_hot_reset", 1)],
+    "window_hot_resets" : [("hot_resets", 16)],
 }
 
 def counters_delta(new, old):
@@ -249,6 +257,9 @@ def main():
     parser.add_argument("--max-reinits",          default=None, type=int, help="monitor: re-initializations budget since the last clear (0: unlimited).")
     parser.add_argument("--disparity-threshold",  default=None, type=int, help="monitor: noisy window when a lane's RX disparity errors exceed it (0: disabled).")
     parser.add_argument("--recoveries-threshold", default=None, type=int, help="monitor: noisy window when the Recovery entries exceed it (0: disabled).")
+    parser.add_argument("--disparity-per-training", default=None, type=int, help="monitor: noisy window when a lane's RX disparity errors exceed this many per training (0: disabled).")
+    parser.add_argument("--min-trainings",          default=None, type=int, help="monitor: trainings in a window required by --disparity-per-training.")
+    parser.add_argument("--with-hot-reset",         default=None, type=int, help="monitor: trainings = Recovery + Hot Reset entries (1) or Recovery entries only (0).")
     parser.add_argument("command",    choices=["status", "clear", "retrain", "watch", "prbs",
         "prbs-enable", "prbs-disable", "script",
         "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable",
@@ -295,7 +306,9 @@ def main():
         # Lanes noise monitor: configuration (options given), then its state (JSON).
         lanes.monitor_config(enable=args.enable, windows=args.windows, holdoff=args.holdoff,
             window_ms=args.window_ms, max_reinits=args.max_reinits,
-            disparity_threshold=args.disparity_threshold, recoveries_threshold=args.recoveries_threshold)
+            disparity_threshold=args.disparity_threshold, recoveries_threshold=args.recoveries_threshold,
+            disparity_per_training=args.disparity_per_training, min_trainings=args.min_trainings,
+            with_hot_reset=args.with_hot_reset)
         print(json.dumps(lanes.monitor()))
     elif args.command == "drp-dump":
         # Transceiver DRP registers (JSON: {lane: {addr: value}}), to compare start-up draws.

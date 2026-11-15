@@ -404,14 +404,16 @@ class USB3LanesDebug(LiteXModule):
         # Lanes noise monitor (per lane RX disparity errors counters required).
         if monitor_tick_cycles is not None and len(counted) == len(serdes):
             states = phy.ltssm_states
-            recovery, u3 = Signal(), Signal()
+            recovery, hot_reset, u3 = Signal(), Signal(), Signal()
             self.comb += [
                 recovery.eq(phy.ltssm_state == states["Recovery.Active"]),
+                hot_reset.eq(phy.ltssm_state == states["HotReset.Active"]),
                 u3.eq(phy.ltssm_state == states["U3"]),
             ]
             self.monitor = LanesNoiseMonitor(
                 disparity   = [s.rx_errors_counts["rx_disparity_errors"] for s in serdes],
                 recovery    = recovery,
+                hot_reset   = hot_reset,
                 u3          = u3,
                 tick_cycles = monitor_tick_cycles,
                 clear       = self._clear.re)
@@ -436,8 +438,15 @@ class LanesNoiseMonitor(LiteXModule):
     burst arrive within ~0.5s: shorter windows rarely see 2 noisy windows in a row), disparity 200
     per lane, 30 Recovery entries. The thresholds are absolute counts per window (traffic pattern
     dependent); on the Acorn Gen 1x2 pair, only the Host re-initializations quiet a load (t14).
+
+    Traffic independent criterion (ratio CSR): a window is also noisy when a lane's disparity errors
+    exceed disparity_per_training x the window trainings, with at least min_trainings trainings
+    (Recovery entries, + the Hot Reset entries with with_hot_reset: hot_reset level): the errors
+    arrive around the trainings (an idle U0 has none, t9/t14), so the errors per training measure the
+    line quality whatever the trainings rate (t12/t13 classes: disparity errors per Host reset). 0
+    disables it (reset); set the absolute thresholds to 0 to use it alone.
     """
-    def __init__(self, disparity, recovery, u3, tick_cycles, clear=None):
+    def __init__(self, disparity, recovery, u3, tick_cycles, clear=None, hot_reset=None):
         self.reinit = Signal() # o: Transceivers re-initialization request (pulse).
         n = len(disparity)
 
@@ -471,12 +480,23 @@ class LanesNoiseMonitor(LiteXModule):
         self._windows_count = CSRStatus(32, description="Windows evaluated (since the last clear).")
         self._noisy_count   = CSRStatus(32, description="Noisy windows (evaluated, since the last clear).")
         self._reinits_count = CSRStatus(32, description="Re-initializations requested by the monitor (since the last clear).")
+        self._ratio = CSRStorage(fields=[
+            CSRField("disparity_per_training", size=8, offset=0,  reset=0,
+                description="Noisy window: RX disparity errors of a lane above this many per training (0: disabled)."),
+            CSRField("min_trainings",          size=8, offset=8,  reset=2,
+                description="Trainings in the window required by the disparity per training criterion (0: as 1)."),
+            CSRField("with_hot_reset",         size=1, offset=16, reset=1,
+                description="Trainings: Recovery entries + Hot Reset entries (0: Recovery entries only)."),
+        ])
+        self._window_hot_resets = CSRStatus(16, description="Hot Reset entries of the last window (saturated).")
 
         # # #
 
-        ctrl  = self._control.fields
-        thr   = self._thresholds.fields
-        clear = Signal() if clear is None else clear
+        ctrl      = self._control.fields
+        thr       = self._thresholds.fields
+        ratio     = self._ratio.fields
+        clear     = Signal() if clear is None else clear
+        hot_reset = Signal() if hot_reset is None else hot_reset
 
         # Window timer: ms ticks.
         tick       = Signal()
@@ -523,12 +543,46 @@ class LanesNoiseMonitor(LiteXModule):
                 last[i].eq(disparity[i]),
                 getattr(self._window.fields, f"disparity{i}").eq(current[i])
             )
-        self.sync += If(window_end, self._window_status.fields.recoveries.eq(entries))
+        hot_reset_d = Signal()
+        hot_resets  = Signal(16)
+        self.sync += hot_reset_d.eq(hot_reset)
+        self.sync += If(window_end,
+            hot_resets.eq(0)
+        ).Elif(hot_reset & ~hot_reset_d & (hot_resets != 0xffff),
+            hot_resets.eq(hot_resets + 1)
+        )
+        self.sync += If(window_end,
+            self._window_status.fields.recoveries.eq(entries),
+            self._window_hot_resets.status.eq(hot_resets)
+        )
+
+        # Disparity errors per training: worst lane > disparity_per_training x trainings (registered,
+        # one cycle behind the counts: negligible on a window).
+        trainings     = Signal(17)
+        worst         = Signal(16)
+        limit         = Signal(25)
+        enough        = Signal()
+        ratio_noisy   = Signal()
+        min_trainings = Signal(8)
+        self.comb += [
+            trainings.eq(entries + Mux(ratio.with_hot_reset, hot_resets, 0)),
+            min_trainings.eq(Mux(ratio.min_trainings == 0, 1, ratio.min_trainings)),
+        ]
+        worst_comb = current[0]
+        for i in range(1, n):
+            worst_comb = Mux(current[i] > worst_comb, current[i], worst_comb)
+        self.sync += [
+            worst.eq(worst_comb),
+            limit.eq(ratio.disparity_per_training * trainings),
+            enough.eq(trainings >= min_trainings),
+        ]
+        self.comb += ratio_noisy.eq((ratio.disparity_per_training != 0) & enough & (worst > limit))
 
         noisy = Signal()
         self.comb += noisy.eq(
             ((thr.disparity  != 0) & Reduce("OR", [current[i] > thr.disparity for i in range(n)])) |
-            ((thr.recoveries != 0) & (entries > thr.recoveries)))
+            ((thr.recoveries != 0) & (entries > thr.recoveries)) |
+            ratio_noisy)
 
         # Decision at the window end.
         streak  = self._window_status.fields.streak

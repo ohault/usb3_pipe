@@ -37,7 +37,9 @@ measuring only (even, same thresholds: the windows a monitor would have acted on
 monitor state of both boards is in the load results (`host`/`device` `monitor`). Defaults from
 the t14 calibration (bursts of 5 runs); `--monitor host` is the one that quiets the loads (t14: the
 noise follows the Host transceivers start-up). Back to back runs (--runs 60) may need their own
-thresholds (absolute counts per window).
+thresholds (absolute counts per window); --monitor-per-training (with --monitor-disparity 0
+--monitor-recoveries 0 to use it alone) is the traffic independent criterion: a lane's disparity
+errors per training (Recovery entries, + Hot Reset entries) in the window.
 
 A load is bad when no run was done (link down) or on an error (ex: a board reconfigured from its
 flash during the runs): reported apart from the runs done on the good loads.
@@ -290,6 +292,9 @@ def main():
     parser.add_argument("--monitor-holdoff",    default=2,    type=int, help="--monitor: windows not evaluated after a re-initialization.")
     parser.add_argument("--monitor-disparity",  default=200,  type=int, help="--monitor: noisy window above this many RX disparity errors on a lane (0: disabled).")
     parser.add_argument("--monitor-recoveries", default=30,   type=int, help="--monitor: noisy window above this many Recovery entries (0: disabled).")
+    parser.add_argument("--monitor-per-training",  default=None, type=int, help="--monitor: noisy window above this many RX disparity errors per training on a lane (0: disabled; default: the build's).")
+    parser.add_argument("--monitor-min-trainings", default=None, type=int, help="--monitor: trainings in a window required by --monitor-per-training.")
+    parser.add_argument("--monitor-with-hot-reset", default=None, type=int, help="--monitor: trainings = Recovery + Hot Reset entries (1) or Recovery entries only (0).")
     parser.add_argument("--monitor-max-reinits", default=8,   type=int, help="--monitor: re-initializations budget per load (0: unlimited).")
     parser.add_argument("--settle",          default=2.0,    type=float, help="Time (s) after the servers start.")
     parser.add_argument("--out",             default=None,   help="Results (JSON lines, appended; default: build/hw_runs/<time>/loads.jsonl).")
@@ -363,7 +368,11 @@ def main():
                             "--window-ms", str(args.monitor_window_ms), "--windows", str(args.monitor_windows),
                             "--holdoff", str(args.monitor_holdoff), "--max-reinits", str(args.monitor_max_reinits),
                             "--disparity-threshold", str(args.monitor_disparity),
-                            "--recoveries-threshold", str(args.monitor_recoveries)])
+                            "--recoveries-threshold", str(args.monitor_recoveries)] +
+                            sum([[option, str(value)] for option, value in [
+                                ("--disparity-per-training", args.monitor_per_training),
+                                ("--min-trainings",          args.monitor_min_trainings),
+                                ("--with-hot-reset",         args.monitor_with_hot_reset)] if value is not None], []))
                 before = core_counters(args.device_port, device_csr)
                 r["script_resets_before"] = script_resets(args.host_port, host_csr)
                 code, output = run(lanes + host_args + ["script", "--runs", str(args.runs)])

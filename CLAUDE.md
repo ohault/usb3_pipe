@@ -175,8 +175,10 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   monitor`, `acorn_x2_loads.py --monitor/--monitor-ab`; `TestLanesNoiseMonitor`); t14 (fc9cc51, Host WNS +0.214ns, Device +0.081ns): errors of a run burst within
   ~0.5s (2s windows needed), idle U0 silent; A/B 30 loads: noisy bursts 0.35 vs 0.64 per load (p 0.008), last 10
   bursts 0.21 vs 0.61, no failed run from re-inits; only Host re-inits help (Host-only 43/200 vs Device-only 99/200
-  noisy bursts, p 6.5e-9): reset values now 2s/disparity 200/30 Recoveries, use `--monitor host`. Next: thresholds
-  per Recovery entry (traffic independent), TX buffer bypass/phase, CDR/LPM.
+  noisy bursts, p 6.5e-9): reset values now 2s/disparity 200/30 Recoveries, use `--monitor host`. Disparity per
+  training criterion added (`ratio` CSR: worst lane errors > N x (Recovery + Hot Reset entries), min trainings,
+  disabled at reset; `--disparity-per-training`, `--monitor-per-training`): t15 (calibration at two run densities +
+  Host-only A/B) pending. Next: TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
