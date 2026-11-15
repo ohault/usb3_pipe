@@ -222,3 +222,11 @@ def test_target_lanes_args(tmp_path):
         cmd = [sys.executable, "-c", RUN_TARGET, "bench/acorn.py", "--output-dir", str(tmp_path)] + args
         p = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         assert p.returncode != 0
+
+def test_target_tang_rx_errors_count(tmp_path):
+    # Tang Mega 138K Pro Device (mixed Acorn Host/Tang Device line noise tests): RX 8b/10b errors by
+    # type counters (USB3RXErrorTypesDebug, SerDes logic on the GTR12 TX clock: counts synchronized).
+    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path, ["--example", "loopback", "--with-rx-errors"])
+    for name in ["rx_decode_errors", "rx_disparity_errors", "rx_com_decode_errors", "rx_com_disparity_errors"]:
+        assert f"usb3_rx_errors_{name}_count" in csr
+    assert "usb3_rx_errors_clear" in csr

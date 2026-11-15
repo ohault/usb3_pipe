@@ -25,6 +25,15 @@ from usb3_pipe.datapath import GEN2_RX_COUNTERS
 
 # Helpers ------------------------------------------------------------------------------------------
 
+# LTSSM states receiving Symbols (RX 8b/10b errors counted: not Rx.Detect/Polling.LFPS/U1-U3).
+LTSSM_SYMBOL_STATES = ["Polling.RxEQ", "Polling.Active", "Polling.Configuration", "Polling.Idle", "U0",
+    "Recovery.Active", "Recovery.Configuration", "Recovery.Idle", "HotReset.Active", "HotReset.Exit"]
+
+def ltssm_symbols(phy):
+    """LTSSM in a state receiving Symbols (expression, phy.ltssm_state clock domain)."""
+    states = phy.ltssm_states
+    return Reduce("OR", [phy.ltssm_state == states[state] for state in LTSSM_SYMBOL_STATES if state in states])
+
 def gray_decode(gray):
     """Gray to binary decoding (combinatorial)."""
     n = len(gray)
@@ -334,12 +343,8 @@ class USB3LanesDebug(LiteXModule):
                 self.comb += s.tx_postcursor.eq(csr.storage)
         counted = [s for s in serdes if hasattr(s, "add_rx_errors_count") and hasattr(s, "rx_substitution")]
         if counted:
-            states  = phy.ltssm_states
             symbols = Signal()
-            self.comb += symbols.eq(Reduce("OR", [phy.ltssm_state == states[state] for state in [
-                "Polling.RxEQ", "Polling.Active", "Polling.Configuration", "Polling.Idle", "U0",
-                "Recovery.Active", "Recovery.Configuration", "Recovery.Idle", "HotReset.Active",
-                "HotReset.Exit"] if state in states]))
+            self.comb += symbols.eq(ltssm_symbols(phy))
         for lane, s in enumerate(serdes):
             if s not in counted:
                 continue
@@ -627,6 +632,45 @@ class LanesNoiseMonitor(LiteXModule):
                 )
             )
         ]
+
+# USB3 RX Error Types Debug -----------------------------------------------------------------------
+
+class USB3RXErrorTypesDebug(LiteXModule):
+    """USB3 RX 8b/10b errors by type (CSRs, single lane SerDes: the per lane counters of
+    USB3LanesDebug): decode errors, running disparity errors, and both on the Symbol just before a
+    COM (USB3SerDes.add_rx_errors_count: reset-less RX counters, counted only with the LTSSM in a
+    state receiving Symbols and the RX not idle), cleared (snapshot) with `clear`.
+
+    serdes_cd: clock domain of the SerDes "sys" (ex: "tx" on the Tang Mega 138K Pro, SerDes logic on
+    the GTR12 TX clock): enable resynchronized to it, counts synchronized back to sys
+    (BusSynchronizer). phy.ltssm_state in sys.
+    """
+    def __init__(self, phy, serdes, serdes_cd="sys"):
+        self._clear = CSR() # Clear the counters (write: snapshot).
+
+        # # #
+
+        symbols = Signal()
+        self.comb += symbols.eq(ltssm_symbols(phy))
+        if serdes_cd != "sys":
+            symbols_s = Signal()
+            self.specials += MultiReg(symbols, symbols_s, serdes_cd)
+            symbols = symbols_s
+        enable = Signal()
+        self.comb += enable.eq(symbols & ~serdes.rx_idle)
+        serdes.add_rx_errors_count(enable=enable)
+        for name, value in serdes.rx_errors_counts.items():
+            if serdes_cd != "sys":
+                sync = BusSynchronizer(32, serdes_cd, "sys")
+                self.submodules += sync
+                self.comb += sync.i.eq(value)
+                value = sync.o
+            csr  = CSRStatus(32, name=f"{name}_count",
+                description=f"{name.replace('_', ' ')} count (RX Symbols, since the last clear).")
+            base = Signal(32)
+            setattr(self, f"_{name}_count", csr)
+            self.sync += If(self._clear.re, base.eq(value))
+            self.comb += csr.status.eq(value - base)
 
 # USB3 RX Errors Debug -----------------------------------------------------------------------------
 

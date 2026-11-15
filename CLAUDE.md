@@ -178,7 +178,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   noisy bursts, p 6.5e-9): reset values now 2s/disparity 200/30 Recoveries, use `--monitor host`. Disparity per
   training criterion added (`ratio` CSR: worst lane errors > N x (Recovery + Hot Reset entries), min trainings,
   disabled at reset; `--disparity-per-training`, `--monitor-per-training`): t15 (calibration at two run densities +
-  Host-only A/B) pending. Next: TX buffer bypass/phase, CDR/LPM.
+  Host-only A/B) pending. Mixed pair next (t16, user offer: one Acorn replaced by a Tang Mega 138K Pro Dock):
+  Acorn Host SFP-0 <-> Tang Device (Gen 1x1, `sipeed_tang_mega_138k_pro.py --with-rx-errors`:
+  `USB3RXErrorTypesDebug`), Acorn Host re-inits x Tang reloads. Next: TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

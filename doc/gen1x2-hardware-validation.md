@@ -896,6 +896,10 @@ The monitor now has it (`ratio`: a window is noisy when its worst lane has more 
 entries (`with_hot_reset`, the Hot Reset entries per window read back), at least `min_trainings`;
 disabled at reset; `usb3_lanes.py monitor --disparity-per-training N`, `acorn_x2_loads.py
 --monitor-per-training N`).
+Mixed pair (t16, planned): the Acorn Host SerDes 0 (SFP-0) to a Tang Mega 138K Pro Device (GTR12, Gen 1x1
+Device Core, `--with-rx-errors`: the same RX error type counters, `usb3_rx_errors_*`) over one DAC cable,
+Gen 1x1 (SuperSpeed fallback of the scripted host): does the Tang receiver see the draws of the Acorn
+Host transmitter start-up (Host re-inits), and does the noise follow the Acorn draws or the Tang loads?
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

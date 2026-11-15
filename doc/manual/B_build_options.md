@@ -100,6 +100,7 @@ The `msc_dram` example is only available on the Acorn, the only target with a DR
 | `--with-tx-raw-check` | off | Same check on the scrambled transmit blocks |
 | `--with-trace` | off | Packet trace of the device core, with the split clocking |
 | `--with-gen2-debug` | off | Gen 2 receive monitor on the raw words |
+| `--with-rx-errors` | off | Receive decode and running disparity error counters |
 | `--with-gtr12-debug` | off | GTR12 and PIPE bring-up debug |
 | `--with-gtr12-analyzer` | off | LiteScope on the raw GTR12 receive words |
 | `--place-option` | 2 | Gowin place algorithm: 0, 1 or 2 |

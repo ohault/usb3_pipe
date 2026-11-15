@@ -42,7 +42,7 @@ from usb3_pipe          import GW5USB3SerDes
 from usb3_pipe.common   import COM, K, BLOCK_HEADER_DATA
 from usb3_pipe.datapath import Gen2RX, Gen2RXDatapath, GEN2_IDLE_BLOCK, GEN2_RX_COUNTERS
 from usb3_pipe.framing  import Gen2LinkRX, SHP, SLC
-from usb3_pipe.debug    import Gen2RXDebug
+from usb3_pipe.debug    import Gen2RXDebug, USB3RXErrorTypesDebug
 from usb3_pipe.crc      import CRC16Words, CRC5
 
 from usb3_soc import USB3BaseSoC, add_usb3_device, usb3_analyzer, CountSync
@@ -79,7 +79,8 @@ class USB3SoC(USB3BaseSoC):
         serdes_csr=None, rx_idle_source="~astat5", with_upar=True, with_gtr12_debug=False,
         with_gtr12_analyzer=False, with_analyzer=False, analyzer_group="link", gen2_capable=False,
         with_gen2_debug=False, with_trace=False, with_tx_check=False, with_tx_raw_check=False,
-        with_ltssm_history=False, analyzer_csv="analyzer.csv", usb3_kwargs={}, **kwargs):
+        with_ltssm_history=False, with_rx_errors=False, analyzer_csv="analyzer.csv", usb3_kwargs={},
+        **kwargs):
         # USB3 PIPE/SerDes at 125MHz (Gen 1 32-bit words); with a lower sys_clk_freq, the PIPE runs
         # on the GTR12 TX fabric clock ("tx" clock domain: frequency-locked to the transmitted
         # words, no TX CDC FIFO underflow) and the LTSSM/Core/SoC in sys with 64-bit Link Layer
@@ -135,6 +136,12 @@ class USB3SoC(USB3BaseSoC):
             leds          = [platform.request("led_n", i) for i in range(3)],
             leds_inverted = True,
             **usb3_kwargs)
+
+        # RX 8b/10b errors by type (decode/running disparity, as the Acorn Gen 1x2 lanes counters:
+        # mixed Acorn Host/Tang Device pair line noise tests).
+        if with_rx_errors:
+            self.usb3_rx_errors = USB3RXErrorTypesDebug(self.usb3_phy, usb3_serdes,
+                serdes_cd = "sys" if phy_cd is None else phy_cd)
 
         # GTR12 bring-up: lane status, SerDes registers access (UPAR).
         gtr12 = usb3_serdes.gtr12
@@ -673,6 +680,7 @@ def main():
     parser.add_argument("--with-tx-raw-check",   action="store_true", help="Gen 2 TX blocks self-check (scrambled blocks with SKPs decoded: Header Packets/Link Commands CRCs).")
     parser.add_argument("--with-trace",          action="store_true", help="USB3 Device Core Header Packets trace (bench/usb3_trace.py).")
     parser.add_argument("--with-gen2-debug",     action="store_true", help="Gen 2 bring-up debug (RX monitor on the raw RX words: alignment, blocks/Ordered Sets counters).")
+    parser.add_argument("--with-rx-errors", action="store_true", help="RX 8b/10b errors by type counters (usb3_rx_errors_*: decode/running disparity, also on the Symbol before a COM).")
     parser.add_argument("--with-gtr12-debug",    action="store_true", help="GTR12/PIPE bring-up debug (transitions, RX snapshots, SSP status).")
     parser.add_argument("--with-gtr12-analyzer", action="store_true", help="LiteScope Analyzer on the GTR12 raw RX words.")
     parser.add_argument("--place-option",   default=2, type=int, help="Gowin place algorithm.", choices=[0, 1, 2])
@@ -693,6 +701,7 @@ def main():
         serdes_csr          = args.serdes_csr,
         rx_idle_source      = args.rx_idle_source,
         with_gtr12_debug    = args.with_gtr12_debug,
+        with_rx_errors      = args.with_rx_errors,
         gen2_capable        = args.gen2_capable,
         with_gen2_debug     = args.with_gen2_debug,
         with_trace          = args.with_trace,
