@@ -251,6 +251,27 @@ def test_target_tang_rx_errors_count(tmp_path):
     assert "usb3_rx_errors_clear" in csr
     assert "usb3_tx_freq_value" in csr and "usb3_rx_freq_value" in csr
 
+def test_target_tang_x2(tmp_path):
+    # Tang Mega 138K Pro Gen 1x2 (SFP0/SFP1, Q1 lanes 0/1): one GTR12 quad instance/UPAR/register
+    # configuration for both lanes, Lane 1 TX on the Lane 0 TX clock (sys), Host (scripted host)
+    # and Device (PRBS stand-ins) roles. The two lanes configuration is given (--serdes-csr).
+    csr_file = ROOT / "usb3_pipe" / "gw5" / "usb3_5g_ln0.csr"
+    for role, args in [("device", []), ("host", ["--lanes-core"])]:
+        out = tmp_path / role
+        csr = elaborate("sipeed_tang_mega_138k_pro", out, ["--lanes", "2", "--role", role,
+            "--serdes-csr", str(csr_file), "--with-clk-meters"] + args)
+        assert "usb3_lanes_debug_xcvr_reinit" in csr and "usb3_rx1_freq_value" in csr
+        assert ("usb3_script" in csr) == (role == "host")
+        verilog = next((out / "gateware").glob("*.v")).read_text()
+        assert len(re.findall(r"\nGTR12_QUAD #\(", verilog)) == 1
+        assert len(re.findall(r"\nGTR12_UPAR GTR12_UPAR\(", verilog)) == 1
+        tx_clk = re.search(r"\.LANE0_PCS_TX_O_FABRIC_CLK\s*\((\w+)\)", verilog).group(1)
+        for lane in [0, 1]:
+            assert re.search(rf"\.LANE{lane}_FABRIC_TX_CLK\s*\({tx_clk}\)", verilog)
+        assert "LANE1_PCS_TX_O_FABRIC_CLK" not in verilog
+        tcl = (out / "gateware" / "run.tcl").read_text()
+        assert tcl.count("set_csr ") == 1
+
 def test_target_tang_device_c(tmp_path):
     # Tang Mega 138K Pro production part (--device C): Gowin device set for version C.
     elaborate("sipeed_tang_mega_138k_pro", tmp_path, ["--example", "loopback", "--device", "C"])

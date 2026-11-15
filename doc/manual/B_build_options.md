@@ -104,6 +104,10 @@ The `msc_dram` example is only available on the Acorn, the only target with a DR
 | `--with-rx-errors` | off | Receive decode and running disparity error counters |
 | `--with-clk-meters` | off | Transceiver TX/RX clock frequency meters |
 | `--device` | ES | GW5AST-138 part: `ES` (version B) or `C` (production) |
+| `--lanes` | 1 | 1 (Gen 1x1 on `--sfp`) or 2 (Gen 1x2 on SFP0 and SFP1, `sys` on the lane 0 TX clock, experimental) |
+| `--role` | `device` | PHY role with `--lanes 2`: `device` or `host` |
+| `--no-x2` | off | With `--lanes 2`: not Gen 1x2 capable, Gen 1x1 on SFP0 |
+| `--lanes-core` | off | With `--lanes 2`: device core (device role) or scripted host (host role) instead of the PRBS stand-ins |
 | `--with-gtr12-debug` | off | GTR12 and PIPE bring-up debug |
 | `--with-gtr12-analyzer` | off | LiteScope on the raw GTR12 receive words |
 | `--place-option` | 2 | Gowin place algorithm: 0, 1 or 2 |

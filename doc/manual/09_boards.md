@@ -225,8 +225,11 @@ bitstream with openFPGALoader, as [Other boards](#gs-other-boards) shows.
 The dock reference clocks come from two MS5351 clock generators, set from the console of the dock
 debugger (`pll_clk`, on the UART that the bridge also uses): 100 MHz for REFCLK1, 125 MHz for
 REFCLK0. An unprogrammed dock passes its 25 MHz crystal through, and the transceiver then runs at a
-quarter of its rate (LFPS bursts four times too long, no training). `--with-clk-meters` reads the
-transceiver clocks: 125 MHz at 5 Gbps. The platform targets the engineering sample part
+quarter of its rate (LFPS bursts four times too long, no training). Each generator has two PLLs,
+and its outputs can take their clock from the PLL that the console did not program: check that PLL
+A and PLL B carry the same settings (the transceiver otherwise reports its PLLs locked at a wrong
+rate, about 32 MHz instead of 125 MHz on the TX clock). `--with-clk-meters` reads the transceiver
+clocks: 125 MHz at 5 Gbps. The platform targets the engineering sample part
 (GW5AST-LV138FPG676AES, version B); `--device C` builds for the production part
 (GW5AST-LV138FPG676AC1/I0, version C).
 
@@ -242,6 +245,12 @@ IDE 1.9.12. The clocking changes a few defaults of the shared options:
 | Packet trace | Only with `--with-trace` | Unless `--lean` |
 | Throughput profile | Not built | Unless `--lean` |
 | PHY debug | Unless `--lean` | Unless `--lean` |
+
+`--lanes 2` (experimental) builds a Gen 1x2 PHY on SFP0 (lane 0) and SFP1 (lane 1), as the Acorn
+`--lanes 2` builds: PRBS stand-ins, or with `--lanes-core` the scripted host (`--role host`) or the
+device core. Both lanes share one GTR12 instance, one UPAR and one register configuration
+(`usb3_5g_x2.csr`, generated from `usb3_5g_x2.toml`, or `--serdes-csr`); `sys` runs at 125 MHz on
+the lane 0 TX clock, so the bridge only answers once the dock reference clock is programmed.
 
 With `--lean` and the split clocking, a minimal `usb3_phy_status` register keeps the LTSSM state,
 U0 and the transceiver ready. The UVC, Isochronous and composite examples need 32-bit link words,

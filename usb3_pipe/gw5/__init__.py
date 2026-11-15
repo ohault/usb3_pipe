@@ -71,6 +71,15 @@ def gw5_usb3_csr_config(lane, rate="5G", refclk="100M", position="Q1", pll=None)
         csr_config = gw5_csr_overrides(csr_config, GW5AT15_Q0_QPLL0_OVERRIDES)
     return csr_config
 
+def gw5_usb3_csr_config_x2(refclk="100M"):
+    """GTR12 register configuration of the GW5AST-138B Q1 lanes 0 and 1 at 5G (Gen 1x2, QPLL1, 100MHz
+    REFCLK1): usb3_5g_x2.csr, generated from usb3_5g_x2.toml (gen_toml.py x2) with Gowin's tool."""
+    assert refclk == "100M", "Gen 1x2: 100MHz REFCLK1."
+    filename = os.path.join(os.path.dirname(__file__), "usb3_5g_x2.csr")
+    assert os.path.exists(filename), ("usb3_5g_x2.csr not generated yet (serdes_toml_to_csr on "
+        "usb3_5g_x2.toml): --serdes-csr.")
+    return open(filename).read()
+
 def gw5_usb3_rate_writes(lane, refclk="100M", pll="QPLL1", clk_freq=62.5e6):
     """Register writes of the 5G <-> 10G rate change of a Q1 lane: [(addr, value_5g, value_10g)],
     the writes of the 5G and 10G configurations that differ (same writes sequence). CPLL: the writes

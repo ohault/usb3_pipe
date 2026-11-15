@@ -190,7 +190,13 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   from `csr_task_gen` do not lock, the TX fabric clock stays ~32MHz whatever the PLL/reference (RX follows the reference). Likely cause (litex_wr_nic bench, PR #109):
   the debugger `pll` command programs MS5351 PLL A but MS0 (SerDes reference) is sourced from the unprogrammed PLL B:
   program PLL B (`tang_ms5351.py --restore --pll B`) and retry t16. t16i confirmed (PLL A = PLL B, not
-  saved): Tang TX/RX 125.0MHz, Acorn Host Gen 1x1 <-> Tang U0, 20/20 runs; a Recovery burst after the script (open). Next: TX buffer bypass/phase, CDR/LPM.
+  saved): Tang TX/RX 125.0MHz, Acorn Host Gen 1x1 <-> Tang U0, 20/20 runs; a Recovery burst after the script (open). 2026-11-15
+  (user: continue towards Gen 1x2 Host/Device validation with Acorn/Tang combinations, no SFP2USB): `bench/acorn.py
+  --sfp 1` (Gen 1x1 cage; --lanes 2: Lane 0 on SFP-1), Tang `--lanes 2 [--role host] [--no-x2] [--lanes-core]`
+  (both Q1 lanes in one GTR12 instance, `GW5UPARArbiter`, `gw5_gtr12_share_quad`, sys on the Lane 0 TX clock at
+  125MHz, `usb3_5g_x2.toml`; its `.csr` to generate on the NUC). Wiring: acorn1 (1-3) SFP-0 <-> Tang SFP0, acorn1
+  SFP-1 <-> acorn2 (1-5) SFP-1 (Gen 1x2 Acorn/Tang needs acorn SFP-1 <-> Tang SFP1). NUC session for this bench:
+  reactive-turtle (t16j nested Gen 1x1, t16k single-lane combinations + x2 .csr). Next: TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
