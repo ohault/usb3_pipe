@@ -64,6 +64,7 @@ options.
 | `--lpm-hold` | `none` | Hold the GTP equalizer adaptation: `none`, `rxeq` (adapt only in Polling.RxEQ), `always`; `rxeq` with `--lanes 2` |
 | `--tx-postcursor` | 0 | GTP transmit post-cursor pre-emphasis (0 to 31), one value or one per SFP cage (`6,10`); 6 with `--lanes 2`, where it is the reset value of a runtime register |
 | `--lanes` | 1 | 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2 on SFP-0 and SFP-1, Mini only, experimental) |
+| `--sfp` | 0 | SFP cage of lane 0 (Mini): the Gen 1x1 cage, or with `--lanes 2` and 1, lane 0 (Configuration Lane, Gen 1x1 fallback) on SFP-1 and lane 1 on SFP-0 |
 | `--role` | `device` | PHY role with `--lanes 2`: `device` or `host` (one board in each role) |
 | `--no-x2` | off | With `--lanes 2`: not Gen 1x2 capable, Gen 1x1 on SFP-0 |
 | `--lanes-core` | off | With `--lanes 2`: device core (device role) or scripted host (host role) instead of the PRBS stand-ins |

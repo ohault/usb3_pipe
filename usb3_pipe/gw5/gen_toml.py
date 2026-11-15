@@ -6,7 +6,8 @@
 
 """GW5AST-138B Q1 USB3 SerDes configuration TOML.
 
-Usage: python3 gen_toml.py <base.toml> <lane> <rate> > usb3_<rate>_ln<lane>.toml, then
+Usage: python3 gen_toml.py <base.toml> <lane> <rate> > usb3_<rate>_ln<lane>.toml (lane 0, 1, or
+       x2: lanes 0 and 1, Gen 1x2, the quad RX clock from lane 0), then
        serdes_toml_to_csr.bin usb3_<rate>_ln<lane>.toml -o usb3_<rate>_ln<lane>.csr --comment
        (Gowin IDE bin/serdes_toml_to_csr.dist, tested with Gowin 1.9.10).
 
@@ -20,7 +21,9 @@ alignment.
 import re
 import sys
 
-base, lane, rate = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+base, lane, rate = sys.argv[1], sys.argv[2], sys.argv[3]
+lanes = [0, 1] if lane == "x2" else [int(lane)]
+lane  = lanes[0]
 t = open(base).read()
 
 def section(t, name, f):
@@ -66,7 +69,7 @@ def ln_off(b):
     return setkv(b, "enable", "false")
 
 t = section(t, "q1", q1)
-t = section(t, f"q1.ln{lane}", ln_on)
-t = section(t, f"q1.ln{1-lane}", ln_off)
-print(f"# GW5AST-138B Q1 lane {lane}: 100 MHz REFCLK1, {rate}b/s, raw 20-bit PMA, {'40' if rate == '5G' else '80'}-bit fabric, K28.5 alignment.")
+for n in [0, 1]:
+    t = section(t, f"q1.ln{n}", ln_on if n in lanes else ln_off)
+print(f"# GW5AST-138B Q1 lane(s) {'/'.join(map(str, lanes))}: 100 MHz REFCLK1, {rate}b/s, raw 20-bit PMA, {'40' if rate == '5G' else '80'}-bit fabric, K28.5 alignment.")
 print(t, end="")

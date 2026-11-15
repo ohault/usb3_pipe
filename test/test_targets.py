@@ -214,11 +214,29 @@ def test_target_tx_postcursor_per_sfp(tmp_path):
     elaborate("acorn", tmp_path, ["--lanes", "2", "--tx-postcursor", "6,10"])
     assert sorted(gtp_tx_postcursors(tmp_path)) == [6, 10]
 
+def sfp_pins(output_dir):
+    """SFP TX P pins of the elaborated target, in the GTP instances (lanes) order."""
+    verilog = next((output_dir / "gateware").glob("*.v")).read_text()
+    xdc     = next((output_dir / "gateware").glob("*.xdc")).read_text()
+    pins    = []
+    for port in re.findall(r"\.GTPTXP\s*\(\s*(\w+)\s*\)", verilog):
+        pins.append(re.search(rf"LOC (\w+) \[get_ports {{{port}}}\]", xdc).group(1))
+    return pins
+
+def test_target_sfp_select(tmp_path):
+    # --sfp 1: Gen 1x1 on SFP-1; Gen 1x2 Lane 0 (Configuration Lane) on SFP-1, Lane 1 on SFP-0, the
+    # per cage TX post-cursor following the cages.
+    elaborate("acorn", tmp_path / "x1", ["--sfp", "1"])
+    assert sfp_pins(tmp_path / "x1") == ["B4"]
+    elaborate("acorn", tmp_path / "x2", ["--lanes", "2", "--sfp", "1", "--tx-postcursor", "6,10"])
+    assert sfp_pins(tmp_path / "x2") == ["B4", "D5"]
+    assert gtp_tx_postcursors(tmp_path / "x2") == [10, 6]
+
 def test_target_lanes_args(tmp_path):
     # --role host/--no-x2/--lanes-core require --lanes 2, --lanes 2 requires the Mini, --lanes-core
     # requires the core.
     for args in [["--role", "host"], ["--no-x2"], ["--lanes-core"], ["--lanes", "2", "--variant", "standard"],
-        ["--lanes", "2", "--lanes-core", "--no-core"]]:
+        ["--lanes", "2", "--lanes-core", "--no-core"], ["--sfp", "1", "--variant", "standard"]]:
         cmd = [sys.executable, "-c", RUN_TARGET, "bench/acorn.py", "--output-dir", str(tmp_path)] + args
         p = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         assert p.returncode != 0

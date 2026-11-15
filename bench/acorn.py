@@ -124,7 +124,7 @@ class _CRG(LiteXModule):
 class USB3SoC(USB3BaseSoC):
     def __init__(self, platform, cpu_type=None, with_dram=False,
         gtp_params={}, rxcdr_cfg=None, lpm_hold="none", tx_postcursor=None, lanes=1, role="device", x2_capable=True,
-        lanes_core=False,
+        lanes_core=False, sfp=0,
         with_analyzer=False, analyzer_group="link", analyzer_csv="analyzer.csv",
         usb3_kwargs={}, **kwargs):
         sys_clk_freq = int(125e6)
@@ -159,16 +159,20 @@ class USB3SoC(USB3BaseSoC):
 
         # USB3 SerDes ------------------------------------------------------------------------------
         # Gen 1x2 (lanes=2): Lane 0 on SFP-0, Lane 1 on SFP-1 (same GTP quad), Lane 1 on the Lane 0
-        # Quad PLL and TX clock (lanes TX in lockstep).
+        # Quad PLL and TX clock (lanes TX in lockstep). sfp: SFP cage of Lane 0 (Gen 1x1: the cage;
+        # Gen 1x2: sfp=1 swaps the cages, Lane 0/Configuration Lane on SFP-1: single lane fallback
+        # and Gen 1x1 links over SFP-1, ex: one cable per board pair with three boards).
+        assert sfp in [0, 1]
         usb3_serdes = []
         for lane in range(lanes):
+            cage = lane ^ sfp
             serdes = A7USB3SerDes(platform,
                 sys_clk      = self.crg.cd_sys.clk,
                 sys_clk_freq = sys_clk_freq,
                 refclk_pads  = ClockSignal("clk200"), # Directly from the oscillator (no PLL jitter).
                 refclk_freq  = 200e6,
-                tx_pads      = platform.request("sfp_tx", lane),
-                rx_pads      = platform.request("sfp_rx", lane),
+                tx_pads      = platform.request("sfp_tx", cage),
+                rx_pads      = platform.request("sfp_rx", cage),
                 rxcdr_cfg    = rxcdr_cfg,
                 pll          = None if lane == 0 else usb3_serdes[0].pll,
                 tx_clk       = None if lane == 0 else usb3_serdes[0].gtp.cd_tx.clk,
@@ -179,10 +183,10 @@ class USB3SoC(USB3BaseSoC):
             # a runtime control (tx_postcursor, reset to the --tx-postcursor value: USB3LanesDebug
             # lane{n}_tx_postcursor CSR, usb3_lanes.py tx-postcursor) for pre-emphasis sweeps.
             if lanes == 2:
-                serdes.tx_postcursor = Signal(5, reset=tx_postcursor[lane] if tx_postcursor else 0)
+                serdes.tx_postcursor = Signal(5, reset=tx_postcursor[cage] if tx_postcursor else 0)
                 serdes.gtp.gtp_params.update(i_TXPOSTCURSOR=serdes.tx_postcursor)
-            elif tx_postcursor is not None and tx_postcursor[lane]:
-                serdes.gtp.gtp_params.update(i_TXPOSTCURSOR=tx_postcursor[lane])
+            elif tx_postcursor is not None and tx_postcursor[0]:
+                serdes.gtp.gtp_params.update(i_TXPOSTCURSOR=tx_postcursor[0])
             serdes.gtp.gtp_params.update(gtp_params) # Debug overrides (--gtp-param).
             usb3_serdes.append(serdes)
         # Fabric reference clock on GTGREFCLK0 (doc/manual: Transceivers): allowed as a warning.
@@ -258,6 +262,7 @@ def main():
     gtp_group.add_argument("--lpm-hold",  default=None,   help="GTP LPM adaptation hold (rxeq: adapt only in Polling.RxEQ; default: rxeq with --lanes 2, else none).", choices=["none", "rxeq", "always"])
     x2_group = parser.add_argument_group(title="Gen 1x2 (two lanes, SFP-0/SFP-1: two boards link tests with PRBS Link-Layer stand-ins, or dual SFP to USB-C breakout)")
     x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2, SFP-0/SFP-1, Mini only).", choices=[1, 2])
+    x2_group.add_argument("--sfp",        default=0, type=int, help="SFP cage of Lane 0 (Mini): Gen 1x1 cage, or --lanes 2 with 1: Lane 0 (Configuration Lane, Gen 1x1 fallback) on SFP-1, Lane 1 on SFP-0.", choices=[0, 1])
     x2_group.add_argument("--role",       default="device",    help="USB3PHY role with --lanes 2 (one board in each role).", choices=["device", "host"])
     x2_group.add_argument("--no-x2",      action="store_true", help="--lanes 2: not Gen 1x2 capable (Gen 1x1 negotiated: single lane fallback on SFP-0).")
     x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2 instead of the PRBS stand-ins: Device: USB3 Device Core (--example; Gen 1x2 (SuperSpeedPlus) with loopback/wishbone/bench, Gen 1x1 otherwise); Host: scripted USB host (enumeration + Bulk loopback with data checks, for a Device running --example loopback).")
@@ -270,6 +275,7 @@ def main():
         assert args.cpu_type is None and not args.with_dram, "--lanes 2: no CPU/DRAM."
         assert not (args.lanes_core and args.no_core), "--lanes-core: USB3 Device Core required."
     else:
+        assert args.variant == "mini" or args.sfp == 0, "--sfp 1 requires the Mini."
         assert args.role == "device", "--role host requires --lanes 2."
         assert not args.no_x2, "--no-x2 requires --lanes 2."
         assert not args.lanes_core, "--lanes-core requires --lanes 2."
@@ -303,6 +309,7 @@ def main():
         role        = args.role,
         x2_capable  = not args.no_x2,
         lanes_core  = args.lanes_core,
+        sfp         = args.sfp,
         **usb3_soc_argdict(args))
     usb3_soc_build(parser, args, soc)
 
