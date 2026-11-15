@@ -928,7 +928,17 @@ the committed `.csr` in 8 TX (`cfg_txlane_clktree` 0x3310 vs 0x3350, MCU/start-u
 (unmodified design, rebuilt for the ES part without bitstream compression: the shipped bitstream does
 not load, openFPGALoader "checksum data is truncated"): LED2/3 7 times on in 20s, a TX clock ~40-55MHz
 instead of 128.9MHz: the QPLL path is slow with Sipeed's own design too, not our `.csr`/LiteICLink (the
-dock/silicon revision or this IDE). Tang Gen 1x1 bring-up on this dock open.
+dock/silicon revision or this IDE). t16h (`csr_task_gen` 5G tasks on q1.ln1 over the committed `.csr`,
+`--pcs_tx_clk_src` 0 CPLL/1 QPLL0, 100 and 125MHz refmux0): neither the CPLL nor QPLL0 locks (only QPLL1),
+all writes read back; the TX fabric clock stays 31.85-32.01MHz in every variant (QPLL1 locked or not
+selected, either reference, lane clock tree 0x3550/0x3150/0x3310), the RX clock follows the reference
+(48.9MHz at 100, 60.9MHz at 125): the TX fabric clock does not come from the selected PLL at all. Sipeed's
+working 1.25G CPLL demo writes CPLL registers the task does not (0x90a20c 0x10280108, 0x90a220 0x14,
+0x90a22c 0xB40DC, clock tree 0x7530). No lock/calibration register is named on the NUC (the names exist
+only in the compiled Gowin SDK of `csr_task_gen`: `LCPLL.get_lock_status`, `Quad.check_all_pll_ok`,
+`Quad.config_clk_mon`). Gowin V1.9.12.04 release notes: a new (encrypted) USB 3.2 PHY IP at 5/10/20Gbps,
+USB3.1 PHY descrambling fix between two consecutive SKPs, new `csr_task_gen`/`serdes_toml_to_csr_138k`
+binaries (not run). Tang Gen 1x1 bring-up on this dock open.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
