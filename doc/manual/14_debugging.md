@@ -303,6 +303,7 @@ counters (`USB3LanesDebug`). The procedure and the results are in
 | `xcvr-reinit` | Both transceivers and the shared quad PLL reset for 10 µs, then initialized as at the bitstream load (the link trains again) |
 | `xcvr`, `qpll_lock_lost`, `tx_buferror` | Per transceiver status (ready, quad PLL lock and reference clock lost, transmit and receive buffer status, CDR lock), quad PLL lock losses and transmit buffer errors (Acorn) |
 | `drp-dump --addrs` | Transceiver DRP registers read back (Acorn), to compare start-up draws |
+| `monitor` | Lanes noise monitor (Acorn Gen 1x2): per window (`--window-ms`), a lane with more than `--disparity-threshold` disparity errors or more than `--recoveries-threshold` Recovery entries is noisy; `--windows` noisy windows in a row re-initialize the transceivers (`--enable 1`), then `--holdoff` windows are skipped, at most `--max-reinits` times until a clear; with `--enable 0` it only measures and counts |
 | `x2-disable`, `x2-enable` | Gen 1x2 advertised or not at the next training (Gen 1x1 test) |
 
 With `--lanes-core`, `usb3_lanes.py script --runs N` runs the scripted host and prints one JSON
@@ -310,7 +311,9 @@ line per run, with the failing step on an error. A Gen 1x2 build changes from on
 to the next: `bench/acorn_x2_loads.py` loads both boards N times and runs the script on each load.
 With `--reinit-until-clean N`, it first checks each load with a short burst of runs and
 re-initializes both boards' transceivers until the burst is clean (the line noise is drawn at the
-transceivers start-up).
+transceivers start-up). With `--monitor host|device|both`, the lanes noise monitor of that board
+re-initializes its transceivers during the runs when the noise rate stays high (`--monitor-ab`:
+odd loads only, even loads measuring only, for an interleaved comparison).
 The `lanes` and `realign` LiteScope groups capture the lanes words around the deskew and the
 Recovery triggers.
 

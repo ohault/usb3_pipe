@@ -880,6 +880,11 @@ time: re-init until clean removes the reset-heavy draws (7/20 to 1/20 loads) but
 episodes, Host Recoveries or Device `pending_hp`. The check counts the scripted host resets
 (`usb3_script_resets`, the port reset policy Warm Resets stay at ~0). Next: a monitor during operation
 (re-init when the disparity rate stays high) and the TX buffer bypass/phase alignment, CDR/LPM state.
+The Acorn Gen 1x2 builds now have that monitor (`LanesNoiseMonitor`, `usb3_lanes.py monitor`,
+`acorn_x2_loads.py --monitor host|device|both [--monitor-ab]`): per window (1s by default) the RX
+disparity errors of each lane and the Recovery entries, a re-initialization of the board's
+transceivers after consecutive noisy windows (2), the next windows skipped (2), a budget per clear
+(8), never in U3; disabled at reset (measuring only).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

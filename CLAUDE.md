@@ -170,7 +170,10 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   +0.135ns): two noise levels (worst lane disparity/reset <= 11.9 or >= 33.9), no status bit/counter/DRP 0x000-0x0ff
   value separates them; a draw sets the rate of noise episodes (no settling time); until-clean (20+20 loads, 800/800
   runs): reset-noisy loads 1/20 vs 7/20 (p 0.044), disparity/Host Recoveries/pending_hp unchanged: a screen, not a
-  fix. Next: monitor during operation (re-init on a sustained disparity rate), TX buffer bypass/phase, CDR/LPM.
+  fix. Lanes noise monitor added (`LanesNoiseMonitor` in USB3LanesDebug: per 1s window lane disparity errors/
+  Recovery entries, re-init after 2 noisy windows, holdoff 2, budget 8, not in U3, disabled at reset; `usb3_lanes.py
+  monitor`, `acorn_x2_loads.py --monitor/--monitor-ab`; `TestLanesNoiseMonitor`): t14 (calibration + A/B) pending.
+  Next: TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

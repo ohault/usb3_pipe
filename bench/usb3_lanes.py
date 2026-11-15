@@ -104,6 +104,8 @@ class USB3LanesClient:
         if hasattr(self.bus.regs, "usb3_lanes_debug_lane0_tx_postcursor"):
             r["tx_postcursor"] = [self.reg(f"usb3_lanes_debug_lane{lane}_tx_postcursor").read()
                 for lane in range(2)]
+        if self.has_monitor():
+            r["monitor"] = self.monitor()
         if self.has_prbs():
             r.update({f"prbs_{k}": v for k, v in self.prbs().items()})
         return r
@@ -175,6 +177,34 @@ class USB3LanesClient:
     def drp_dump(self, lane, addrs):
         return {f"0x{a:03x}": self.drp_read(lane, a) for a in addrs}
 
+    def has_monitor(self):
+        # Lanes noise monitor (LanesNoiseMonitor, Acorn Gen 1x2 builds since t13).
+        return hasattr(self.bus.regs, "usb3_lanes_debug_monitor_control")
+
+    def monitor(self):
+        # Lanes noise monitor configuration, last window and counters.
+        r = {}
+        for reg, fields in MONITOR_FIELDS.items():
+            v, offset = self.reg(f"usb3_lanes_debug_monitor_{reg}").read(), 0
+            for name, size in fields:
+                r[name] = (v >> offset) & (2**size - 1)
+                offset += size
+        for name in ["windows", "noisy", "reinits"]:
+            r[f"{name}_count"] = self.reg(f"usb3_lanes_debug_monitor_{name}_count").read()
+        return r
+
+    def monitor_config(self, **kwargs):
+        # Lanes noise monitor configuration (control/thresholds fields by name, others unchanged).
+        for reg in ["control", "thresholds"]:
+            v, offset = self.reg(f"usb3_lanes_debug_monitor_{reg}").read(), 0
+            for name, size in MONITOR_FIELDS[reg]:
+                if kwargs.get(name) is not None:
+                    value = int(kwargs[name])
+                    assert 0 <= value < 2**size, f"monitor {name}: {value}"
+                    v = (v & ~((2**size - 1) << offset)) | (value << offset)
+                offset += size
+            self.reg(f"usb3_lanes_debug_monitor_{reg}").write(v)
+
     def x2_enable(self, enable=True):
         # Gen 1x2 advertised in the SuperSpeedPlus Polling (0: Gen 1x1 only), from the next training.
         control = self.reg("usb3_lanes_debug_control").read()
@@ -186,6 +216,14 @@ class USB3LanesClient:
 # USB3LanesDebug lane{n}_xcvr_status fields (A7USB3SerDes xcvr_status order): name, size.
 XCVR_STATUS_FIELDS = [("tx_ready", 1), ("rx_ready", 1), ("qpll_lock", 1), ("qpll_refclk_lost", 1),
     ("tx_bufstatus", 2), ("rx_bufstatus", 3), ("rx_cdrlock", 1)]
+
+# USB3LanesDebug lanes noise monitor (LanesNoiseMonitor) CSR fields: name, size.
+MONITOR_FIELDS = {
+    "control"       : [("enable", 1), ("windows", 4), ("holdoff", 4), ("window_ms", 12), ("max_reinits", 8)],
+    "thresholds"    : [("disparity_threshold", 16), ("recoveries_threshold", 16)],
+    "window"        : [("disparity0", 16), ("disparity1", 16)],
+    "window_status" : [("recoveries", 16), ("streak", 4), ("holdoff_left", 4), ("budget", 1)],
+}
 
 def counters_delta(new, old):
     """32-bit wrapping counters differences."""
@@ -204,11 +242,18 @@ def main():
     parser.add_argument("--lane",     default=None,             help="drp-dump: SerDes (0/1, default both).")
     parser.add_argument("--addrs",    default="0x000-0x0ff",    help="drp-dump: DRP addresses (START-END and/or A,B,...).")
     parser.add_argument("--value",    default=None,             help="tx-postcursor: TXPOSTCURSOR (0-31), one value or one per SerDes (ex: 6,10 for SFP-0/SFP-1).")
+    parser.add_argument("--enable",               default=None, type=int, help="monitor: re-initialization on a sustained noise rate (1) or windows measured only (0).")
+    parser.add_argument("--windows",              default=None, type=int, help="monitor: consecutive noisy windows triggering a re-initialization.")
+    parser.add_argument("--holdoff",              default=None, type=int, help="monitor: windows not evaluated after a re-initialization.")
+    parser.add_argument("--window-ms",            default=None, type=int, help="monitor: window length (ms).")
+    parser.add_argument("--max-reinits",          default=None, type=int, help="monitor: re-initializations budget since the last clear (0: unlimited).")
+    parser.add_argument("--disparity-threshold",  default=None, type=int, help="monitor: noisy window when a lane's RX disparity errors exceed it (0: disabled).")
+    parser.add_argument("--recoveries-threshold", default=None, type=int, help="monitor: noisy window when the Recovery entries exceed it (0: disabled).")
     parser.add_argument("command",    choices=["status", "clear", "retrain", "watch", "prbs",
         "prbs-enable", "prbs-disable", "script",
         "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable",
         "x2-enable", "x2-disable", "skp-recovery-enable", "skp-recovery-disable",
-        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit", "drp-dump"])
+        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit", "drp-dump", "monitor"])
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -246,6 +291,12 @@ def main():
         lanes.reg("usb3_lanes_debug_clear").write(1)
         time.sleep(args.wait)
         print(json.dumps(lanes.status()))
+    elif args.command == "monitor":
+        # Lanes noise monitor: configuration (options given), then its state (JSON).
+        lanes.monitor_config(enable=args.enable, windows=args.windows, holdoff=args.holdoff,
+            window_ms=args.window_ms, max_reinits=args.max_reinits,
+            disparity_threshold=args.disparity_threshold, recoveries_threshold=args.recoveries_threshold)
+        print(json.dumps(lanes.monitor()))
     elif args.command == "drp-dump":
         # Transceiver DRP registers (JSON: {lane: {addr: value}}), to compare start-up draws.
         addrs = []

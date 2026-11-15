@@ -159,7 +159,9 @@ def test_target_lanes_host_script(tmp_path):
         "usb3_lanes_debug_control", "usb3_lanes_debug_lane0_rx_disparity_errors_count",
         "usb3_lanes_debug_lane1_rx_com_disparity_errors_count", "usb3_lanes_debug_xcvr_reinit",
         "usb3_lanes_debug_lane1_xcvr_status", "usb3_lanes_debug_lane0_drp_do",
-        "usb3_lanes_debug_lane0_qpll_lock_lost_count", "usb3_lanes_debug_lane1_tx_buferror_count"]:
+        "usb3_lanes_debug_lane0_qpll_lock_lost_count", "usb3_lanes_debug_lane1_tx_buferror_count",
+        "usb3_lanes_debug_monitor_control", "usb3_lanes_debug_monitor_thresholds", "usb3_lanes_debug_monitor_window",
+        "usb3_lanes_debug_monitor_window_status", "usb3_lanes_debug_monitor_reinits_count"]:
         assert csr_name in csr
     assert "usb3_prbs" not in csr
     verilog = next((tmp_path / "gateware").glob("*.v")).read_text()

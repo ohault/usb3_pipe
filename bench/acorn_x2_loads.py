@@ -27,6 +27,15 @@ transceivers re-initialized (`usb3_lanes.py xcvr-reinit`, Device then Host) and 
 N times (the first clean draw kept, or the last one). The draws (check results, transceivers status,
 optional DRP dumps: --drp-addrs) are in the load results (`draws`).
 
+With --monitor host|device|both, the lanes noise monitor of that board(s) re-initializes its
+transceivers during the runs when the noise rate stays high (`usb3_lanes.py monitor`: per window
+of --monitor-window-ms, a lane with more than --monitor-disparity RX disparity errors or more
+than --monitor-recoveries Recovery entries is a noisy window; --monitor-windows consecutive noisy
+windows trigger a re-initialization, the next --monitor-holdoff windows not evaluated, at most
+--monitor-max-reinits per load). With --monitor-ab, the loads alternate monitor enabled (odd) and
+measuring only (even, same thresholds: the windows a monitor would have acted on counted). The
+monitor state of both boards is in the load results (`host`/`device` `monitor`).
+
 A load is bad when no run was done (link down) or on an error (ex: a board reconfigured from its
 flash during the runs): reported apart from the runs done on the good loads.
 """
@@ -236,6 +245,17 @@ def summary(loads):
         r["draws_loads_clean"]   = f"{sum(d['draws'][-1]['clean'] for d in draws)}/{len(draws)}"
         r["draws_first_clean"]   = f"{sum(d['draws'][0]['clean'] for d in draws)}/{len(draws)}"
         r["draws_reinits_median"] = median([len(d["draws"]) - 1 for d in draws])
+    monitored = [d for d in good if "monitor" in d]
+    for group, name in [(lambda d: d["monitor"] is not None, "on"), (lambda d: d["monitor"] is None, "off")]:
+        loads_group = [d for d in monitored if group(d)]
+        if not loads_group:
+            continue
+        r[f"monitor_{name}_loads"] = len(loads_group)
+        r[f"monitor_{name}_runs_done"] = f"{sum(d['script']['done'] for d in loads_group)}/{sum(d['runs'] for d in loads_group)}"
+        for side in ["host", "device"]:
+            for k in ["reinits_count", "noisy_count", "windows_count"]:
+                r[f"monitor_{name}_{side}_{k}_median"] = median([d[side]["monitor"][k] for d in loads_group
+                    if "monitor" in d.get(side, {})])
     for k in CORE_COUNTERS + CORE_CAUSES:
         for when in ["before", "runs"]:
             values = [d["core"][when][k] for d in good if d.get("core", {}).get(when) and k in d["core"][when]]
@@ -260,6 +280,14 @@ def main():
     parser.add_argument("--clean-resets",    default=1.5,    type=float, help="--reinit-until-clean: max scripted host resets (usb3_script_resets) per check run of a clean draw.")
     parser.add_argument("--clean-disparity", default=25,     type=float, help="--reinit-until-clean: max RX disparity errors per reset on every lane of a clean draw (t13: clean draws <= 12, noisy >= 34).")
     parser.add_argument("--drp-addrs",       default=None,   help="--reinit-until-clean: transceivers DRP addresses dumped per draw (usb3_lanes.py drp-dump --addrs).")
+    parser.add_argument("--monitor",         default=None,   choices=["host", "device", "both"], help="Lanes noise monitor enabled on that board(s) during the runs.")
+    parser.add_argument("--monitor-ab",      action="store_true", help="--monitor on the odd loads only (even loads: measuring only).")
+    parser.add_argument("--monitor-window-ms",  default=1000, type=int, help="--monitor: window length (ms).")
+    parser.add_argument("--monitor-windows",    default=2,    type=int, help="--monitor: consecutive noisy windows triggering a re-initialization.")
+    parser.add_argument("--monitor-holdoff",    default=2,    type=int, help="--monitor: windows not evaluated after a re-initialization.")
+    parser.add_argument("--monitor-disparity",  default=100,  type=int, help="--monitor: noisy window above this many RX disparity errors on a lane (0: disabled).")
+    parser.add_argument("--monitor-recoveries", default=0,    type=int, help="--monitor: noisy window above this many Recovery entries (0: disabled).")
+    parser.add_argument("--monitor-max-reinits", default=8,   type=int, help="--monitor: re-initializations budget per load (0: unlimited).")
     parser.add_argument("--settle",          default=2.0,    type=float, help="Time (s) after the servers start.")
     parser.add_argument("--out",             default=None,   help="Results (JSON lines, appended; default: build/hw_runs/<time>/loads.jsonl).")
     parser.add_argument("--summary",         default=None,   help="Only print the summary of a results file.")
@@ -321,6 +349,18 @@ def main():
                             break
                 run(lanes + host_args + ["clear"])
                 run(lanes + dev_args  + ["clear"])
+                if args.monitor:
+                    # Lanes noise monitor (cleared above): enabled on --monitor board(s) (odd loads
+                    # only with --monitor-ab), measuring only elsewhere.
+                    enabled = args.monitor if (not args.monitor_ab or load % 2 == 1) else None
+                    r["monitor"] = enabled
+                    for side, side_args in [("host", host_args), ("device", dev_args)]:
+                        enable = int(enabled in [side, "both"])
+                        run(lanes + side_args + ["monitor", "--enable", str(enable),
+                            "--window-ms", str(args.monitor_window_ms), "--windows", str(args.monitor_windows),
+                            "--holdoff", str(args.monitor_holdoff), "--max-reinits", str(args.monitor_max_reinits),
+                            "--disparity-threshold", str(args.monitor_disparity),
+                            "--recoveries-threshold", str(args.monitor_recoveries)])
                 before = core_counters(args.device_port, device_csr)
                 r["script_resets_before"] = script_resets(args.host_port, host_csr)
                 code, output = run(lanes + host_args + ["script", "--runs", str(args.runs)])

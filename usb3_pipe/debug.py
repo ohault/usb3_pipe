@@ -219,8 +219,11 @@ class USB3LanesDebug(LiteXModule):
       (Acorn Gen 1x2: the Lane 0 GTP Quad PLL, shared by Lane 1): a runtime equivalent of the
       transceivers initialization at the bitstream load (the link retrains or falls back to
       Rx.Detect, then trains again).
+    - With monitor_tick_cycles (sys cycles per ms) and the per lane RX error counters: lanes noise
+      monitor (LanesNoiseMonitor, monitor_*), transceivers re-initialization on a sustained RX
+      disparity errors/Recovery rate.
     """
-    def __init__(self, phy, serdes, link=None, reinit_cycles=1024):
+    def __init__(self, phy, serdes, link=None, reinit_cycles=1024, monitor_tick_cycles=None):
         assert len(serdes) == 2
         with_rx_drop = hasattr(link, "rx_drop")
         self._clear   = CSR() # Clear counters (write).
@@ -366,8 +369,9 @@ class USB3LanesDebug(LiteXModule):
         # Transceivers re-initialization (last CSR: earlier CSRs addresses unchanged): SerDes reinit
         # held reinit_cycles from the write.
         self._xcvr_reinit = CSR() # Transceivers (both SerDes and the Quad PLL) re-initialization (write).
-        reinit = Signal(max=reinit_cycles + 1)
-        self.sync += If(self._xcvr_reinit.re,
+        reinit         = Signal(max=reinit_cycles + 1)
+        reinit_request = Signal() # Lanes noise monitor re-initialization (below).
+        self.sync += If(self._xcvr_reinit.re | reinit_request,
             reinit.eq(reinit_cycles)
         ).Elif(reinit != 0,
             reinit.eq(reinit - 1)
@@ -396,6 +400,175 @@ class USB3LanesDebug(LiteXModule):
                 setattr(self, f"lane{lane}_drp", drp)
                 drp_index = xcvr.drp_mux.interfaces.index(xcvr.drp)
                 self.comb += xcvr.drp_mux.sel.eq(Mux(drp_sel.storage, drp_index, 0))
+
+        # Lanes noise monitor (per lane RX disparity errors counters required).
+        if monitor_tick_cycles is not None and len(counted) == len(serdes):
+            states = phy.ltssm_states
+            recovery, u3 = Signal(), Signal()
+            self.comb += [
+                recovery.eq(phy.ltssm_state == states["Recovery.Active"]),
+                u3.eq(phy.ltssm_state == states["U3"]),
+            ]
+            self.monitor = LanesNoiseMonitor(
+                disparity   = [s.rx_errors_counts["rx_disparity_errors"] for s in serdes],
+                recovery    = recovery,
+                u3          = u3,
+                tick_cycles = monitor_tick_cycles,
+                clear       = self._clear.re)
+            self.comb += reinit_request.eq(self.monitor.reinit)
+
+# Lanes Noise Monitor -----------------------------------------------------------------------------
+
+class LanesNoiseMonitor(LiteXModule):
+    """Gen 1x2 lanes noise monitor: transceivers re-initialization on a sustained noise rate.
+
+    The line noise of a Gen 1x2 link is drawn at the transceivers start-up and sets the rate of noise
+    episodes (doc/gen1x2-hardware-validation.md t12/t13): a check at the start-up only catches the
+    draws noisy all the time. The monitor measures, per window of window_ms ticks (tick_cycles sys
+    cycles), the RX running disparity errors of each lane (disparity: sys free running counts) and
+    the Recovery entries (recovery: level); a window is noisy when a lane exceeds the disparity
+    threshold or the Recovery entries exceed the recoveries threshold (0: criterion disabled).
+    After `windows` consecutive noisy windows, with enable, out of U3 (u3) and under the
+    re-initializations budget (max_reinits since the last clear, 0: unlimited), reinit pulses (one
+    sys cycle) and the next `holdoff` windows are not evaluated (link training after the re-init).
+    The windows are measured and counted with enable at 0 too (thresholds calibration).
+    """
+    def __init__(self, disparity, recovery, u3, tick_cycles, clear=None):
+        self.reinit = Signal() # o: Transceivers re-initialization request (pulse).
+        n = len(disparity)
+
+        self._control = CSRStorage(fields=[
+            CSRField("enable",      size=1,  offset=0,  reset=0,
+                description="Transceivers re-initialization on a sustained noise rate (0: windows measured only)."),
+            CSRField("windows",     size=4,  offset=1,  reset=2,
+                description="Consecutive noisy windows triggering a re-initialization (0: as 1)."),
+            CSRField("holdoff",     size=4,  offset=5,  reset=2,
+                description="Windows not evaluated after a re-initialization."),
+            CSRField("window_ms",   size=12, offset=9,  reset=1000,
+                description="Window length (ms, 0: as 1)."),
+            CSRField("max_reinits", size=8,  offset=21, reset=8,
+                description="Re-initializations budget since the last clear (0: unlimited)."),
+        ])
+        self._thresholds = CSRStorage(fields=[
+            CSRField("disparity",  size=16, offset=0,  reset=100,
+                description="Noisy window: RX disparity errors of a lane above (0: disabled)."),
+            CSRField("recoveries", size=16, offset=16, reset=0,
+                description="Noisy window: Recovery entries above (0: disabled)."),
+        ])
+        self._window = CSRStatus(fields=
+            [CSRField(f"disparity{i}", size=16, offset=16*i,
+                description=f"Lane {i} RX disparity errors of the last window (saturated).") for i in range(n)])
+        self._window_status = CSRStatus(fields=[
+            CSRField("recoveries", size=16, offset=0,  description="Recovery entries of the last window (saturated)."),
+            CSRField("streak",     size=4,  offset=16, description="Current consecutive noisy windows."),
+            CSRField("holdoff",    size=4,  offset=20, description="Remaining windows not evaluated."),
+            CSRField("budget",     size=1,  offset=24, description="Re-initializations budget reached."),
+        ])
+        self._windows_count = CSRStatus(32, description="Windows evaluated (since the last clear).")
+        self._noisy_count   = CSRStatus(32, description="Noisy windows (evaluated, since the last clear).")
+        self._reinits_count = CSRStatus(32, description="Re-initializations requested by the monitor (since the last clear).")
+
+        # # #
+
+        ctrl  = self._control.fields
+        thr   = self._thresholds.fields
+        clear = Signal() if clear is None else clear
+
+        # Window timer: ms ticks.
+        tick       = Signal()
+        prescaler  = Signal(max=max(tick_cycles, 2))
+        window_end = Signal()
+        ms         = Signal(12)
+        self.sync += [
+            tick.eq(0),
+            If(prescaler == 0,
+                prescaler.eq(tick_cycles - 1),
+                tick.eq(1)
+            ).Else(
+                prescaler.eq(prescaler - 1)
+            ),
+            window_end.eq(0),
+            If(tick,
+                If(ms + 1 >= ctrl.window_ms,
+                    ms.eq(0),
+                    window_end.eq(1)
+                ).Else(
+                    ms.eq(ms + 1)
+                )
+            )
+        ]
+
+        # Per window measurements: disparity errors per lane (count difference), Recovery entries.
+        def sat16(v):
+            return Mux(v > 0xffff, 0xffff, v[:16])
+        last     = [Signal(32) for _ in range(n)]
+        current  = [Signal(16) for _ in range(n)]
+        recovery_d = Signal()
+        entries  = Signal(16)
+        self.sync += recovery_d.eq(recovery)
+        self.sync += If(window_end,
+            entries.eq(0)
+        ).Elif(recovery & ~recovery_d & (entries != 0xffff),
+            entries.eq(entries + 1)
+        )
+        for i in range(n):
+            delta = Signal(32)
+            self.comb += delta.eq(disparity[i] - last[i])
+            self.comb += current[i].eq(sat16(delta))
+            self.sync += If(window_end,
+                last[i].eq(disparity[i]),
+                getattr(self._window.fields, f"disparity{i}").eq(current[i])
+            )
+        self.sync += If(window_end, self._window_status.fields.recoveries.eq(entries))
+
+        noisy = Signal()
+        self.comb += noisy.eq(
+            ((thr.disparity  != 0) & Reduce("OR", [current[i] > thr.disparity for i in range(n)])) |
+            ((thr.recoveries != 0) & (entries > thr.recoveries)))
+
+        # Decision at the window end.
+        streak  = self._window_status.fields.streak
+        holdoff = self._window_status.fields.holdoff
+        reinits = self._reinits_count.status
+        budget  = Signal()
+        self.comb += [
+            budget.eq((ctrl.max_reinits != 0) & (reinits >= ctrl.max_reinits)),
+            self._window_status.fields.budget.eq(budget),
+        ]
+        trigger = Signal()
+        self.comb += trigger.eq(((streak + 1) >= ctrl.windows) & ctrl.enable & ~u3 & ~budget)
+        def incr(c):
+            return If(c != (2**32 - 1), c.eq(c + 1))
+        self.sync += [
+            self.reinit.eq(0),
+            If(clear,
+                streak.eq(0),
+                holdoff.eq(0),
+                self._windows_count.status.eq(0),
+                self._noisy_count.status.eq(0),
+                reinits.eq(0),
+            ).Elif(window_end,
+                If(holdoff != 0,
+                    holdoff.eq(holdoff - 1),
+                    streak.eq(0)
+                ).Else(
+                    incr(self._windows_count.status),
+                    If(noisy,
+                        incr(self._noisy_count.status),
+                        If(trigger,
+                            self.reinit.eq(1),
+                            incr(reinits),
+                            streak.eq(0),
+                            holdoff.eq(ctrl.holdoff)
+                        ).Elif(streak != 15,
+                            streak.eq(streak + 1)
+                        )
+                    ).Else(
+                        streak.eq(0)
+                    )
+                )
+            )
+        ]
 
 # USB3 RX Errors Debug -----------------------------------------------------------------------------
 

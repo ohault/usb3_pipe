@@ -15,7 +15,7 @@ from litex.gen import *
 from litex.soc.interconnect import stream
 
 from usb3_pipe.common import K
-from usb3_pipe.debug  import USB3PHYDebug, USB3LanesDebug, USB3PHY_DEBUG_HISTORY_DEPTH
+from usb3_pipe.debug  import USB3PHYDebug, USB3LanesDebug, LanesNoiseMonitor, USB3PHY_DEBUG_HISTORY_DEPTH
 
 # Fake PHY/SerDes ----------------------------------------------------------------------------------
 
@@ -342,6 +342,109 @@ class TestUSB3LanesDebug(unittest.TestCase):
             self.assertEqual((yield dbg._lane1_rx_errors_cycles_count.status), 0)
 
         run_simulation(dut, generator())
+
+class MonitorDUT(Module):
+    def __init__(self):
+        self.disparity = [Signal(32) for _ in range(2)]
+        self.recovery  = Signal()
+        self.u3        = Signal()
+        self.clear     = Signal()
+        self.submodules.monitor = LanesNoiseMonitor(self.disparity, self.recovery, self.u3,
+            tick_cycles=2, clear=self.clear)
+
+class TestLanesNoiseMonitor(unittest.TestCase):
+    def run_monitor(self, windows, control, thresholds, u3=False):
+        # windows: (lane 0 disparity errors, lane 1 disparity errors, Recovery entries) per window
+        # (window_ms 4 x 2 cycles = 8 cycles); returns the windows of the reinit pulses, the last window
+        # readings at each window end and the counters.
+        dut = MonitorDUT()
+        mon = dut.monitor
+        out = {"reinits": [], "readings": []}
+        state = {"last": None}
+        def snapshot():
+            # Last window readings at each window end (windows/holdoff counters change).
+            key = ((yield mon._windows_count.status), (yield mon._window_status.fields.holdoff),
+                (yield mon._reinits_count.status))
+            if key != state["last"]:
+                state["last"] = key
+                out["readings"].append(((yield mon._window.fields.disparity0),
+                    (yield mon._window.fields.disparity1), (yield mon._window_status.fields.recoveries)))
+        def generator():
+            for name, value in control.items():
+                yield getattr(mon._control.fields, name).eq(value)
+            for name, value in thresholds.items():
+                yield getattr(mon._thresholds.fields, name).eq(value)
+            yield mon._control.fields.window_ms.eq(4)
+            yield dut.u3.eq(int(u3))
+            yield
+            # Align on a window end.
+            while not (yield mon.reinit) and (yield mon._windows_count.status) == 0 and \
+                  (yield mon._window_status.fields.holdoff) == 0:
+                yield
+                if (yield mon._windows_count.status) != 0:
+                    break
+            counts = [0, 0]
+            for index, (d0, d1, rec) in enumerate(windows):
+                counts[0] += d0
+                counts[1] += d1
+                yield dut.disparity[0].eq(counts[0])
+                yield dut.disparity[1].eq(counts[1])
+                for cycle in range(8):
+                    yield dut.recovery.eq(int(cycle < 2*rec and cycle % 2 == 0))
+                    yield
+                    if (yield mon.reinit):
+                        out["reinits"].append(index)
+                    yield from snapshot()
+            for _ in range(10):
+                yield
+                if (yield mon.reinit):
+                    out["reinits"].append(len(windows))
+                yield from snapshot()
+            out["windows"] = (yield mon._windows_count.status)
+            out["noisy"]   = (yield mon._noisy_count.status)
+            out["count"]   = (yield mon._reinits_count.status)
+            out["budget"]  = (yield mon._window_status.fields.budget)
+            yield dut.clear.eq(1)
+            yield
+            yield dut.clear.eq(0)
+            yield
+            out["cleared"] = ((yield mon._windows_count.status), (yield mon._noisy_count.status),
+                (yield mon._reinits_count.status))
+        run_simulation(dut, generator())
+        return out
+
+    def test_disabled_measures(self):
+        # Enable 0: windows measured and counted, no re-initialization.
+        out = self.run_monitor([(200, 0, 0)]*4 + [(3, 7, 2)], {"enable": 0}, {"disparity": 100})
+        self.assertEqual(out["reinits"], [])
+        self.assertEqual(out["noisy"], 4)
+        self.assertEqual(out["count"], 0)
+        self.assertEqual(out["readings"][1:6], [(200, 0, 0)]*4 + [(3, 7, 2)]) # [0]: before the first window.
+        self.assertEqual(out["cleared"], (0, 0, 0))
+
+    def test_consecutive_windows_holdoff(self):
+        # 2 consecutive noisy windows (any lane) -> re-init, then 2 windows held off; an isolated
+        # noisy window resets nothing.
+        windows = [(200, 0, 0), (0, 0, 0), (0, 150, 0), (101, 0, 0), (500, 500, 0), (500, 500, 0),
+            (0, 0, 0), (0, 300, 0), (300, 0, 0)]
+        out = self.run_monitor(windows, {"enable": 1, "windows": 2, "holdoff": 2}, {"disparity": 100})
+        self.assertEqual(out["reinits"], [3, 8])
+        self.assertEqual(out["count"], 2)
+        # Windows 4/5 held off after the first re-init (on window 3), second re-init on window 8.
+        self.assertEqual(out["windows"], len(windows) + 1 - 2) # + the window after the last one.
+        self.assertEqual(out["noisy"], 5)
+
+    def test_recoveries_threshold_budget_u3(self):
+        # Recovery entries criterion, the budget (1 re-init) and no re-init in U3.
+        windows = [(0, 0, 3)]*6
+        out = self.run_monitor(windows, {"enable": 1, "windows": 1, "holdoff": 0, "max_reinits": 1},
+            {"disparity": 0, "recoveries": 2})
+        self.assertEqual(out["count"], 1)
+        self.assertEqual(out["budget"], 1)
+        self.assertEqual(out["readings"][1], (0, 0, 3))
+        out = self.run_monitor(windows, {"enable": 1, "windows": 1, "holdoff": 0}, {"recoveries": 2}, u3=True)
+        self.assertEqual(out["count"], 0)
+        self.assertEqual(out["noisy"], 6)
 
 if __name__ == "__main__":
     unittest.main()
