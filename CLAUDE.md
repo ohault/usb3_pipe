@@ -187,7 +187,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   intact (`--with-clk-meters`); upstream master the same (t16c), `--device C` the same (t16d): the Gowin IDE
   (V1.9.12.02 SP2) or the dock; Sipeed's 1.25G CPLL demo nominal, Sipeed's 10.3125G QPLL demo also slow (~40-55MHz
   for 128.9MHz, t16g): the QPLL path on this dock/silicon/IDE, not our `.csr`. t16h: CPLL/QPLL0 5G tasks
-  from `csr_task_gen` do not lock, the TX fabric clock stays ~32MHz whatever the PLL/reference (RX follows the reference). Next: TX buffer bypass/phase, CDR/LPM.
+  from `csr_task_gen` do not lock, the TX fabric clock stays ~32MHz whatever the PLL/reference (RX follows the reference). Likely cause (litex_wr_nic bench, PR #109):
+  the debugger `pll` command programs MS5351 PLL A but MS0 (SerDes reference) is sourced from the unprogrammed PLL B:
+  program PLL B (`tang_ms5351.py --restore --pll B`) and retry t16. Next: TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

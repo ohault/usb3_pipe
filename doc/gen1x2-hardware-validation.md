@@ -938,7 +938,13 @@ working 1.25G CPLL demo writes CPLL registers the task does not (0x90a20c 0x1028
 only in the compiled Gowin SDK of `csr_task_gen`: `LCPLL.get_lock_status`, `Quad.check_all_pll_ok`,
 `Quad.config_clk_mon`). Gowin V1.9.12.04 release notes: a new (encrypted) USB 3.2 PHY IP at 5/10/20Gbps,
 USB3.1 PHY descrambling fix between two consecutive SKPs, new `csr_task_gen`/`serdes_toml_to_csr_138k`
-binaries (not run). Tang Gen 1x1 bring-up on this dock open.
+binaries (not run). Likely cause (2026-11-15, found on the same dock by the litex_wr_nic bench session,
+enjoy-digital/litex_wr_nic draft PR #109): Sipeed's debugger `pll` command programs the MS5351 PLL A but
+routes MS0 (the SerDes reference) from the unprogrammed PLL B (CLK0 control register 16): the GW5 SerDes
+ran at ~49MHz instead of 125MHz with PLL/CDR lock reported (our RX 48.9MHz at "100MHz"), fixed by programming
+PLL B (`tools/tang_ms5351.py --restore --pll B` in litex_wr_nic: LiteEth 1000BASE-X link up, TX/RX ~125MHz).
+The t16g register reading did not check the multisynth PLL source. Next on this dock: program the PLL B
+routing, then t16 again (TX/RX clock meters first).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
