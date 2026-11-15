@@ -185,7 +185,8 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   `USB3RXErrorTypesDebug`), Acorn Host re-inits x Tang reloads: blocked (2026-11-15), the user's dock MS5351 refclks unprogrammed (set,
   not saved), then the Tang GTR12 TX fabric clock at 32.0MHz instead of 125MHz with the `.csr` config read back
   intact (`--with-clk-meters`); upstream master the same (t16c), `--device C` the same (t16d): the Gowin IDE
-  (V1.9.12.02 SP2) or the dock. Next: TX buffer bypass/phase, CDR/LPM.
+  (V1.9.12.02 SP2) or the dock; Sipeed's 1.25G CPLL demo nominal, Sipeed's 10.3125G QPLL demo also slow (~40-55MHz
+  for 128.9MHz, t16g): the QPLL path on this dock/silicon/IDE, not our `.csr`. Next: TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

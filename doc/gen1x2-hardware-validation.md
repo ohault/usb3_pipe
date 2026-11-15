@@ -917,7 +917,18 @@ builds target the engineering sample part (GW5AST-LV138FPG676AES, version B, the
 the user's dock (debugger serial 2025-03) likely carries the production version C: `--device C` to try.
 t16d: `--device C` (GW5AST-LV138FPG676AC1/I0) the same (TX fabric clock 32.015MHz, CDR locked, no
 Polling LFPS received); the revision cannot be read over JTAG (idcode 0x1081b for both). Left: the Gowin
-IDE (V1.9.12.02 SP2 on the NUC) or this dock. Tang Gen 1x1 bring-up on this dock open.
+IDE (V1.9.12.02 SP2 on the NUC) or this dock. t16e/f: not the TX idle UPAR writes, the GTR12 rate pins/clock tie-offs (identical to Sipeed's demos) or the
+fabric clock root register; the clock follows the PLL: QPLL1 ~32MHz, the lane CPLL (our CPLL `.csr`)
+~61MHz, both for 125MHz. Sipeed's 1.25G demo (CPLL) runs at its nominal TX clock on this dock and IDE
+(LED2/3 ~2 toggles/s). t16g: dock MS5351 #0 100MHz, #1 125MHz (as Sipeed's SET_5351.md; the
+switch-to-REFCLK pad mapping vs the schematic uncertain); the standalone `serdes_toml_to_csr_138k` of
+this IDE fails on every TOML (Gowin's own examples too), `csr_task_gen` gives a 5G QPLL task differing from
+the committed `.csr` in 8 TX (`cfg_txlane_clktree` 0x3310 vs 0x3350, MCU/start-up sequencing) and 4 RX
+(CDR) registers: 0x3310 in our design changes nothing (TX 32.008MHz). Sipeed's 10.3125G QPLL demo
+(unmodified design, rebuilt for the ES part without bitstream compression: the shipped bitstream does
+not load, openFPGALoader "checksum data is truncated"): LED2/3 7 times on in 20s, a TX clock ~40-55MHz
+instead of 128.9MHz: the QPLL path is slow with Sipeed's own design too, not our `.csr`/LiteICLink (the
+dock/silicon revision or this IDE). Tang Gen 1x1 bring-up on this dock open.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
