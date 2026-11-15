@@ -182,7 +182,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   counted, Host noisy 2.2 vs clean 0.8 per training (coarse), Device 8.1 vs 1.1; Host ratio blind to the Device RX
   noise; quiet bench, A/B 37 vs 38/300 noisy bursts (no effect measurable). Mixed pair next (t16, user offer: one Acorn replaced by a Tang Mega 138K Pro Dock):
   Acorn Host SFP-0 <-> Tang Device (Gen 1x1, `sipeed_tang_mega_138k_pro.py --with-rx-errors`:
-  `USB3RXErrorTypesDebug`), Acorn Host re-inits x Tang reloads. Next: TX buffer bypass/phase, CDR/LPM.
+  `USB3RXErrorTypesDebug`), Acorn Host re-inits x Tang reloads: blocked (2026-11-15), the user's dock MS5351 refclks unprogrammed (set,
+  not saved), then the Tang GTR12 TX fabric clock at 32.0MHz instead of 125MHz with the `.csr` config read back
+  intact (`--with-clk-meters`; GTR12_QUAD fabric clock parameters suspected). Next: TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

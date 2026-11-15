@@ -905,6 +905,13 @@ Mixed pair (t16, planned): the Acorn Host SerDes 0 (SFP-0) to a Tang Mega 138K P
 Device Core, `--with-rx-errors`: the same RX error type counters, `usb3_rx_errors_*`) over one DAC cable,
 Gen 1x1 (SuperSpeed fallback of the scripted host): does the Tang receiver see the draws of the Acorn
 Host transmitter start-up (Host re-inits), and does the noise follow the Acorn draws or the Tang loads?
+t16 (2026-11-15, blocked): the Tang never trains (Polling.LFPS: its LFPS bursts 3.9us every 39us, the Host
+bursts seen as Ping). The user's dock MS5351 reference clocks were not programmed (25MHz crystal passed
+through; set to 100/125MHz from the debugger console, not saved), and then the GTR12 TX fabric clock still
+measures 32.0MHz instead of 125MHz (`--with-clk-meters`) on both lanes and with either reference clock,
+QPLL1 locked, while 264 of the 268 `.csr` registers read back as configured (UPAR, the 4 others on unused
+lanes): the fabric clock is not divided from the configured PLL path (GTR12_QUAD fabric clock parameters
+in LiteICLink `gtr12_gw5.py` suspected). Tang Gen 1x1 bring-up on this dock open.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
