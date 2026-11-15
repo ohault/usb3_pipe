@@ -915,7 +915,9 @@ in LiteICLink `gtr12_gw5.py` suspected). t16c: upstream master (8ece28c) fails t
 (Tang LFPS 3.97us every 39.2us), and FABRIC_CLK_LIFE_DIV_I does not move the ~32MHz: not our code. The
 builds target the engineering sample part (GW5AST-LV138FPG676AES, version B, the LiteX-Boards platform);
 the user's dock (debugger serial 2025-03) likely carries the production version C: `--device C` to try.
-Tang Gen 1x1 bring-up on this dock open.
+t16d: `--device C` (GW5AST-LV138FPG676AC1/I0) the same (TX fabric clock 32.015MHz, CDR locked, no
+Polling LFPS received); the revision cannot be read over JTAG (idcode 0x1081b for both). Left: the Gowin
+IDE (V1.9.12.02 SP2 on the NUC) or this dock. Tang Gen 1x1 bring-up on this dock open.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
