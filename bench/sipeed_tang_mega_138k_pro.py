@@ -48,6 +48,12 @@ from usb3_pipe.crc      import CRC16Words, CRC5
 from usb3_soc import USB3BaseSoC, add_usb3_device, usb3_analyzer, CountSync
 from usb3_soc import usb3_soc_args, usb3_soc_argdict, usb3_soc_build
 
+# GW5AST-138 parts of the Tang Mega 138K Pro boards: name -> (Gowin part, Gowin device name).
+TANG_DEVICES = {
+    "ES" : ("GW5AST-LV138FPG676AES",    "GW5AST-138B"), # Engineering sample (LiteX-Boards default).
+    "C"  : ("GW5AST-LV138FPG676AC1/I0", "GW5AST-138C"), # Production, version C.
+}
+
 class _CRG(LiteXModule):
     def __init__(self, platform, sys_clk_freq):
         self.rst    = Signal()
@@ -688,6 +694,7 @@ def main():
     parser.add_argument("--with-trace",          action="store_true", help="USB3 Device Core Header Packets trace (bench/usb3_trace.py).")
     parser.add_argument("--with-gen2-debug",     action="store_true", help="Gen 2 bring-up debug (RX monitor on the raw RX words: alignment, blocks/Ordered Sets counters).")
     parser.add_argument("--with-rx-errors", action="store_true", help="RX 8b/10b errors by type counters (usb3_rx_errors_*: decode/running disparity, also on the Symbol before a COM).")
+    parser.add_argument("--device",              default=None, choices=list(TANG_DEVICES), help="GW5AST-138 part/revision (default: the LiteX-Boards platform's, ES: version B; C: production version C).")
     parser.add_argument("--with-clk-meters",     action="store_true", help="GTR12 TX/RX fabric clocks frequency meters (usb3_tx_freq/usb3_rx_freq, Hz).")
     parser.add_argument("--with-gtr12-debug",    action="store_true", help="GTR12/PIPE bring-up debug (transitions, RX snapshots, SSP status).")
     parser.add_argument("--with-gtr12-analyzer", action="store_true", help="LiteScope Analyzer on the GTR12 raw RX words.")
@@ -697,6 +704,9 @@ def main():
     args = parser.parse_args()
 
     platform = sipeed_tang_mega_138k_pro.Platform(toolchain="gowin")
+    if args.device is not None:
+        # GW5AST-138 silicon revision of the board (LiteX-Boards: the engineering sample, version B).
+        platform.device, platform.devicename = TANG_DEVICES[args.device]
     # Place & Route options for timings (Gowin SUG100: timing driven by default).
     platform.toolchain.options["place_option"]        = args.place_option
     platform.toolchain.options["route_option"]        = args.route_option

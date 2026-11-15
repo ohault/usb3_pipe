@@ -232,3 +232,9 @@ def test_target_tang_rx_errors_count(tmp_path):
         assert f"usb3_rx_errors_{name}_count" in csr
     assert "usb3_rx_errors_clear" in csr
     assert "usb3_tx_freq_value" in csr and "usb3_rx_freq_value" in csr
+
+def test_target_tang_device_c(tmp_path):
+    # Tang Mega 138K Pro production part (--device C): Gowin device set for version C.
+    elaborate("sipeed_tang_mega_138k_pro", tmp_path, ["--example", "loopback", "--device", "C"])
+    tcl = (tmp_path / "gateware" / "run.tcl").read_text()
+    assert "set_device -name GW5AST-138C GW5AST-LV138FPG676AC1/I0" in tcl
