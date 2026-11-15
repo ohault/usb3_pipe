@@ -79,7 +79,7 @@ class USB3SoC(USB3BaseSoC):
         serdes_csr=None, rx_idle_source="~astat5", with_upar=True, with_gtr12_debug=False,
         with_gtr12_analyzer=False, with_analyzer=False, analyzer_group="link", gen2_capable=False,
         with_gen2_debug=False, with_trace=False, with_tx_check=False, with_tx_raw_check=False,
-        with_ltssm_history=False, with_rx_errors=False, analyzer_csv="analyzer.csv", usb3_kwargs={},
+        with_ltssm_history=False, with_rx_errors=False, with_clk_meters=False, analyzer_csv="analyzer.csv", usb3_kwargs={},
         **kwargs):
         # USB3 PIPE/SerDes at 125MHz (Gen 1 32-bit words); with a lower sys_clk_freq, the PIPE runs
         # on the GTR12 TX fabric clock ("tx" clock domain: frequency-locked to the transmitted
@@ -142,6 +142,13 @@ class USB3SoC(USB3BaseSoC):
         if with_rx_errors:
             self.usb3_rx_errors = USB3RXErrorTypesDebug(self.usb3_phy, usb3_serdes,
                 serdes_cd = "sys" if phy_cd is None else phy_cd)
+
+        # Clocks frequency meters (Hz, 1s gates): GTR12 TX/RX fabric clocks (125MHz at 5Gbps; a dock
+        # reference clock not programmed (25MHz crystal passed through) gives a quarter of it).
+        if with_clk_meters:
+            from litex.soc.cores.freqmeter import FreqMeter
+            self.usb3_tx_freq = FreqMeter(period=int(sys_clk_freq), clk=ClockSignal("tx"))
+            self.usb3_rx_freq = FreqMeter(period=int(sys_clk_freq), clk=ClockSignal("rx"))
 
         # GTR12 bring-up: lane status, SerDes registers access (UPAR).
         gtr12 = usb3_serdes.gtr12
@@ -681,6 +688,7 @@ def main():
     parser.add_argument("--with-trace",          action="store_true", help="USB3 Device Core Header Packets trace (bench/usb3_trace.py).")
     parser.add_argument("--with-gen2-debug",     action="store_true", help="Gen 2 bring-up debug (RX monitor on the raw RX words: alignment, blocks/Ordered Sets counters).")
     parser.add_argument("--with-rx-errors", action="store_true", help="RX 8b/10b errors by type counters (usb3_rx_errors_*: decode/running disparity, also on the Symbol before a COM).")
+    parser.add_argument("--with-clk-meters",     action="store_true", help="GTR12 TX/RX fabric clocks frequency meters (usb3_tx_freq/usb3_rx_freq, Hz).")
     parser.add_argument("--with-gtr12-debug",    action="store_true", help="GTR12/PIPE bring-up debug (transitions, RX snapshots, SSP status).")
     parser.add_argument("--with-gtr12-analyzer", action="store_true", help="LiteScope Analyzer on the GTR12 raw RX words.")
     parser.add_argument("--place-option",   default=2, type=int, help="Gowin place algorithm.", choices=[0, 1, 2])
@@ -702,6 +710,7 @@ def main():
         rx_idle_source      = args.rx_idle_source,
         with_gtr12_debug    = args.with_gtr12_debug,
         with_rx_errors      = args.with_rx_errors,
+        with_clk_meters     = args.with_clk_meters,
         gen2_capable        = args.gen2_capable,
         with_gen2_debug     = args.with_gen2_debug,
         with_trace          = args.with_trace,

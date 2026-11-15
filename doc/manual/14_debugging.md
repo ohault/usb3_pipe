@@ -349,6 +349,7 @@ index to `<name>_sel`, then read `<name>_data`. Their layouts are in the `add_*`
 | `--with-tx-raw-check` | `usb3_tx_raw_check_*` | Same check after the scrambler, block counts |
 | `--with-ltssm-history` | `usb3_tx_ffe`, `usb3_rx_eq` | Equalizer settings, LGOOD latency, Gen 2 receive probes |
 | `--with-rx-errors` | `usb3_rx_errors_*` | Decode and running disparity errors |
+| `--with-clk-meters` | `usb3_tx_freq`, `usb3_rx_freq` | Transceiver fabric clocks in Hz (125 MHz at 5 Gbps) |
 | `--with-gtr12-debug` | `gtr12_transitions_*` | Lane status transitions, snapshots, polling state |
 | `--with-gtr12-analyzer` | `analyzer.csv` | LiteScope on the raw receive words |
 
