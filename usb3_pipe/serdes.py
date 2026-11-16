@@ -108,10 +108,11 @@ class USB3SerDes(LiteXModule):
         return self.add_xcvr_datapath(name, xcvr, data_width)
 
     def add_xcvr_datapath(self, name, xcvr, data_width, rx_disparity_check=True, tx_cdc=True,
-        tx_input_register=False, rx_rom_style="distributed"):
+        tx_input_register=False, rx_rom_style="distributed", rx_valid=None):
         """TX/RX datapaths of a LiteICLink transceiver (added as name): 8b/10b stream endpoints,
         SKP insertion/removal, CDC, word alignment, RX errors substitution (rx_rom_style: 8b/10b
-        checker ROM style)."""
+        checker ROM style). rx_valid: decoded RX words valid (rx clock domain, aligned with the
+        decoders outputs), else every cycle."""
         self.add_module(name=name, module=xcvr)
         self.xcvr_name = name
         xcvr.add_stream_endpoints()
@@ -132,11 +133,13 @@ class USB3SerDes(LiteXModule):
             self.sink.connect(tx_datapath.sink),
             tx_datapath.skp_enable.eq(self.tx_skp_enable),
             tx_datapath.source.connect(xcvr.sink),
-            xcvr.source.connect(rx_substitution.sink),
+            xcvr.source.connect(rx_substitution.sink, omit=set() if rx_valid is None else {"valid"}),
             rx_substitution.source.connect(rx_buffer.sink),
             rx_buffer.source.connect(rx_datapath.sink),
             rx_datapath.source.connect(self.source),
         ]
+        if rx_valid is not None:
+            self.comb += rx_substitution.sink.valid.eq(rx_valid)
         return xcvr
 
     def add_rx_skp_check(self):
@@ -700,7 +703,8 @@ class GW5USB3SerDes(USB3SerDes):
     """
     def __init__(self, platform, sys_clk, sys_clk_freq, lane=0, rx_idle_source="~astat5",
         with_upar=True, upar_clk=None, xcvr_cd="sys", refclk="100M", csr_config=None, tx_cdc=True,
-        position=None, pll=None, gen2_capable=False, xcvr_clk_freq=None, quad_owner=None, tx_clk=None):
+        position=None, pll=None, gen2_capable=False, xcvr_clk_freq=None, quad_owner=None, tx_clk=None,
+        rx_valid_gate=False, with_rx_invalid_count=False):
         USB3SerDes.__init__(self)
         assert with_upar # TX Electrical Idle through UPAR.
         # quad_owner: GW5USB3SerDes owning the quad (GTR12 instance, register configuration, UPAR) of this
@@ -761,9 +765,27 @@ class GW5USB3SerDes(USB3SerDes):
         if xcvr_cd != "sys":
             gtr12 = ClockDomainsRenamer({"sys": xcvr_cd})(gtr12)
         # No RX running disparity check (RX paths at 125MHz on the GW5A fabric), TX datapath input
-        # register (PIPE TX multiplexers at 125MHz on the GW5A fabric).
+        # register (PIPE TX multiplexers at 125MHz on the GW5A fabric). rx_valid_gate: the RX words
+        # taken only with the GTR12 RX interface FIFO RX_VLD_OUT (registered as the decoders
+        # outputs), else every rx cycle (a cycle without a word then decodes a duplicated word,
+        # without 8b/10b error: a lane one word off, ex: Gen 1x2 lane on another lane's quad RX
+        # clock). rx_invalid: RX_VLD_OUT low (rx clock domain, debug).
+        self.rx_invalid = Signal()
+        rx_valid = None
+        if rx_valid_gate:
+            rx_valid = Signal()
+            self.sync.rx += rx_valid.eq(gtr12.rx_valid)
         self.add_xcvr_datapath("gtr12", gtr12, data_width=40, rx_disparity_check=False,
-            tx_cdc=tx_cdc, tx_input_register=True)
+            tx_cdc=tx_cdc, tx_input_register=True, rx_valid=rx_valid)
+        self.comb += self.rx_invalid.eq(~gtr12.rx_valid)
+        if with_rx_invalid_count:
+            # RX_VLD_OUT low cycles (rx clock), read in sys: rx_invalid_count (32-bit, wrapping).
+            from migen.genlib.cdc import BusSynchronizer
+            count = Signal(32)
+            self.sync.rx += If(self.rx_invalid, count.eq(count + 1))
+            self.rx_invalid_count = Signal(32) # o (sys)
+            self.rx_invalid_sync  = bs = BusSynchronizer(32, "rx", "sys")
+            self.comb += [bs.i.eq(count), self.rx_invalid_count.eq(bs.o)]
 
         # TX Electrical Idle (UPAR writes of the lane TX driver control register): no TX Electrical
         # Idle from the fabric data (constant words: DC level on the AC coupled link, seen on

@@ -720,7 +720,7 @@ class USB3X2SoC(USB3BaseSoC):
     lanes arbitrated: Lane 1 bursts edges a UPAR write later)."""
     def __init__(self, platform, refclk="100M", csr_config=None, role="device", x2_capable=True,
         lanes_core=False, example="loopback", with_clk_meters=False, with_analyzer=False,
-        analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, **kwargs):
+        analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, rx_valid_gate=True, **kwargs):
         sys_clk_freq  = 125e6
         xcvr_clk_freq = 62.5e6
 
@@ -749,7 +749,9 @@ class USB3X2SoC(USB3BaseSoC):
                 refclk         = refclk,
                 csr_config     = csr_config if lane == 0 else None,
                 quad_owner     = None if lane == 0 else usb3_serdes[0],
-                tx_clk         = None if lane == 0 else usb3_serdes[0].gtr12.cd_tx.clk)
+                tx_clk         = None if lane == 0 else usb3_serdes[0].gtr12.cd_tx.clk,
+                rx_valid_gate  = rx_valid_gate,
+                with_rx_invalid_count = True)
             usb3_serdes.append(serdes)
         gtr12 = usb3_serdes[0].gtr12
         # sys clock: the Lane 0 TX clock net itself (no alias: GowinSynthesis merges aliases, the
@@ -780,9 +782,14 @@ class USB3X2SoC(USB3BaseSoC):
             self.usb3_rx_freq  = FreqMeter(period=int(sys_clk_freq), clk=gtr12.cd_rx.clk)
             self.usb3_rx1_freq = FreqMeter(period=int(sys_clk_freq), clk=usb3_serdes[1].gtr12.cd_rx.clk)
 
-        # GTR12 status, UPAR access.
+        # GTR12 status, UPAR access, RX interface FIFO RX_VLD_OUT low cycles per lane (lane{n}_rx_invalid:
+        # rx clock cycles, 32-bit, quasi-static reads).
         for n, serdes in enumerate(usb3_serdes):
             serdes.gtr12.add_status_csr()
+            csr = CSRStatus(32, name=f"usb3_gtr12_lane{n}_rx_invalid",
+                description=f"Lane {n} GTR12 RX_VLD_OUT low cycles (rx clock, wrapping).")
+            setattr(self, f"usb3_gtr12_lane{n}_rx_invalid", csr)
+            self.comb += csr.status.eq(serdes.rx_invalid_count)
         gtr12.upar.add_csr()
 
         # Analyzer ---------------------------------------------------------------------------------
@@ -816,6 +823,7 @@ def main():
     x2_group.add_argument("--role",       default="device",    help="USB3PHY role with --lanes 2.", choices=["device", "host"])
     x2_group.add_argument("--no-x2",      action="store_true", help="--lanes 2: not Gen 1x2 capable (Gen 1x1 on SFP0).")
     x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2: scripted USB host (Host role) or Device Core (Device role, --example) instead of the PRBS stand-ins.")
+    x2_group.add_argument("--no-rx-valid-gate", action="store_true", help="--lanes 2: RX words taken every rx cycle, not only with the GTR12 RX_VLD_OUT (A/B).")
     usb3_soc_args(parser, output_dir="build/sipeed_tang_mega_138k_pro")
     args = parser.parse_args()
     if args.lanes == 1:
@@ -849,6 +857,7 @@ def main():
             example         = example,
             with_clk_meters = args.with_clk_meters,
             lean            = args.lean,
+            rx_valid_gate   = not args.no_rx_valid_gate,
             **usb3_args)
         usb3_soc_build(parser, args, soc)
         return

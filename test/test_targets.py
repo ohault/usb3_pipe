@@ -260,6 +260,7 @@ def test_target_tang_x2(tmp_path):
         csr = elaborate("sipeed_tang_mega_138k_pro", out, ["--lanes", "2", "--role", role,
             "--with-clk-meters"] + args)
         assert "usb3_lanes_debug_xcvr_reinit" in csr and "usb3_rx1_freq_value" in csr
+        assert "usb3_gtr12_lane1_rx_invalid" in csr
         assert ("usb3_script" in csr) == (role == "host")
         verilog = next((out / "gateware").glob("*.v")).read_text()
         assert len(re.findall(r"\nGTR12_QUAD #\(", verilog)) == 1
@@ -271,6 +272,8 @@ def test_target_tang_x2(tmp_path):
         tcl = (out / "gateware" / "run.tcl").read_text()
         assert tcl.count("set_csr ") == 1
         assert "0x900b91,0x0000F300" in tcl
+        # RX words taken with the GTR12 RX_VLD_OUT (registered as the decoders outputs).
+        assert re.search(r"assign \w*rx_substitution_sink_valid = \w*rx_valid;", verilog)
 
 def test_target_tang_x2_lean(tmp_path):
     # Tang Gen 1x2 --lean: USB3LanesDebug status/control/re-initialization only (timings).
