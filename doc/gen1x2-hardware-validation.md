@@ -998,6 +998,16 @@ words, the builds failing timing); Gen 1x1 0 errors both ways. B2 (acorn1 Host <
 B4 Gen 1x1 cross-check 20/20. After B2 a deadlock: Tang in WarmReset, Acorn Host cycling Polling/WarmReset.
 Gen 1x2 on the Tang needs the lanes PHY off the 125MHz sys (Gen 1x1 runs the PIPE at 125MHz and the rest at
 62.5MHz).
+t16n (86f960e, Tang `--lanes 2 --lean`): sys Fmax 83.4MHz (JTAGBone instead of UARTBone 94.8MHz, Gowin
+place/route options +1.4MHz at most), the worst PHY-internal path (LTSSM state register -> next state, 12
+levels) within 0.1ns of the worst; 85-90% of the ~14300 failing paths on the SoC side (LTSSM state history
+built from registers, PRBS checker, counters, CSR bus); the sys clock already on the global network (3.3ns
+insertion, 0.03ns skew). Lean build at Gen 1x2: Tang -> Acorn 0 errors, Acorn -> Tang the same ~535M errors
+per 5s as the t16m build (different timing/placement: a logic fault). Gen 1x1 with the new debug features:
+Tang states decoded with its own table, 120/120 runs. Candidate cause: the GTR12 RX words decoded every rx
+cycle (RX_VLD_OUT ignored): a cycle without a word decodes a repeated word without 8b/10b error, a lane one
+word off after the deskew; RX words now gated by RX_VLD_OUT on the Tang `--lanes 2` builds (18bf9b4, A/B
+with `--no-rx-valid-gate`, `usb3_gtr12_lane{n}_rx_invalid` counters).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
