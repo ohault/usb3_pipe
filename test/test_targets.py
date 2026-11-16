@@ -251,6 +251,12 @@ def test_target_tang_rx_errors_count(tmp_path):
     assert "usb3_rx_errors_clear" in csr
     assert "usb3_tx_freq_value" in csr and "usb3_rx_freq_value" in csr
 
+def test_target_tang_x2_warm_analyzer(tmp_path):
+    # Tang Gen 1x2 split PRBS Device with the warm LiteScope group (Warm Reset detection per lane).
+    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path, ["--lanes", "2", "--with-analyzer",
+        "--analyzer-group", "warm"])
+    assert "analyzer_" in csr
+
 def test_target_tang_x2(tmp_path):
     # Tang Mega 138K Pro Gen 1x2 (SFP0/SFP1, Q1 lanes 0/1): one GTR12 quad instance/UPAR/register
     # configuration for both lanes, Lane 1 TX on the Lane 0 TX clock (sys), Host (scripted host)

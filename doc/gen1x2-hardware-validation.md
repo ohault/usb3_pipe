@@ -1068,6 +1068,18 @@ not detected (0/3). C: Tang lanes clock 95.4MHz (449 endpoints), sys 74.3MHz, RX
 mis-paired with the t16s Acorn (its deskew fix only in the Tang build: the mis-pairing is the Tang's receive).
 Fix: `RXErrorMonitor` back in the RX clock domain (reset with the RX), `rx_errors` held (`rx_errors_hold`)
 during a lanes RX errors re-initialization and its holdoff instead.
+t16u (66dce0f; report `build/hw_runs/mixed_t16/t16u/report_t16u.md` on the NUC): A 0/5 (new Acorn + new Tang: ~200
+Recoveries/s per side, deskew never aligned); bisection: the new Acorn trains with the t16s Tang (7/8: the t16t
+Acorn regression fixed), the failure follows the new Tang (same with the t16s Acorn). Cause: the deskew disarm on
+an error word (ed8749f), the first COM Symbols of a TS after an idle period arriving as K28.4 (t6 captures): the
+armed search dropped, never paired again. A2 (new Acorn + t16s Tang, 8 trainings): Acorn -> Tang clean 2/8, Tang
+-> Acorn 6/8, a Recovery re-pairs (not permanent), a re-init cleared it 8/14. B: Warm Reset 0/8 (5 default, 3 with
+the Tang RX re-init off: not the re-init). C: lanes clock 108.6MHz (180 failing endpoints). In simulation the two
+lanes split Device detects the Host Warm Reset in U0 at Gen 1x2 with crossed lanes (`sim.py --lanes 2
+--lanes-crossed --dev-pipe-cd --host-phy-reset 620000,12500 --host-port-reset --host-port-reset-timeout 6e-3`): the
+hardware miss is the GTR12 receive (idle/decode errors during the LFPS): `warm` LiteScope group added. Fixes
+(45d16b3): the deskew keeps an armed search on error words (gap only), marker flag stored in the deskew FIFOs, PRBS
+checker compare pipelined (lanes clock).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

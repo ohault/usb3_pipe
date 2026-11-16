@@ -918,7 +918,7 @@ def gen2_rx_analyzer_signals(rx_datapath):
 
 # USB3 Analyzer Groups -----------------------------------------------------------------------------
 
-USB3_ANALYZER_GROUPS = ["link", "lfps", "ts", "datapath", "phase", "u3", "lanes", "realign"]
+USB3_ANALYZER_GROUPS = ["link", "lfps", "ts", "datapath", "phase", "u3", "lanes", "realign", "warm"]
 
 def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
     """LiteScope probes groups of a USB3PHY/USB3SerDes (bench/usb3_analyzer.py), returns a dict
@@ -1005,6 +1005,14 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
             # a lane losing symbols at the end of a TS burst, before or in the RX word alignment.
             getattr(s.rx_datapath.cdc.source, name) for s in getattr(phy, "lanes_phys_serdes", [])
             if hasattr(s, "rx_datapath") for name in ["valid", "data", "ctrl"]]
+    if hasattr(phy, "lanes_phys_serdes"):
+        # Warm Reset detection per physical lane (levels: capture with litescope_cli --subsampling,
+        # the LFPS lasts ~100ms): electrical idle (filtered/raw), decode errors, RX reset, the
+        # Configuration Lane Warm Reset checker and the lanes swap.
+        groups["warm"] = link_signals + [phy.lane_swap, pipe.lfps_rx_reset] + [
+            getattr(s, name) for s in phy.lanes_phys_serdes
+            for name in ["rx_idle", "rx_idle_raw", "rx_errors", "rx_errors_hold", "rx_reset"]
+            if hasattr(s, name)]
     if serdes_debug is not None:
         groups["phase"] = link_signals + [
             serdes_debug.rx_tx_phase,

@@ -318,7 +318,10 @@ transceivers start-up). With `--monitor host|device|both`, the lanes noise monit
 re-initializes its transceivers during the runs when the noise rate stays high (`--monitor-ab`:
 odd loads only, even loads measuring only, for an interleaved comparison).
 The `lanes` and `realign` LiteScope groups capture the lanes words around the deskew and the
-Recovery triggers.
+Recovery triggers. The `warm` group captures, for each physical lane, the electrical idle (filtered and raw),
+the decode errors, their hold during a receive re-initialization and the receive reset, with the lanes
+swap and the Warm Reset detection of the Configuration Lane. A Warm Reset LFPS lasts about 100 ms:
+capture it with `litescope_cli --subsampling`.
 
 ## Gen 2 {#debug-gen2}
 
