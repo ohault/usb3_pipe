@@ -1018,6 +1018,12 @@ already received TS Ordered Sets for 90+ words; the armed deskew held Lane 0's f
 seen as a mismatch, and none in U0. Deterministic (12 retrains, same error rate). Fixed in `LaneDeskew`: a word
 dropped on a full FIFO while armed or aligned clears the pairing and flushes the FIFOs, the search re-armed on
 the next gap (the deskew-lost Recovery in U0 then pairs the lanes on its TS1); `test_deskew_late_lane_overflow`.
+t16p (0ba2a12, Tang PRBS x2 <-> acorn1 PRBS Host): no stable U0 any more (~64 Host and ~32 Tang Recoveries per
+second, deskew not aligned, no PRBS data), the ungated RX_VLD_OUT build the same; a 64-word deskew FIFO worse.
+Capture: in Recovery the lanes now paired right on the TS1s (Lane 1 one word ahead), then Lane 1's deskew input
+stalls for 20+ words while Lane 0 flows: Lane 0's FIFO overflows, the pairing cleared, no gap in the TS stream to
+re-pair, U0 entered unpaired and left after 9 words (deskew lost). The Lane 1 stall also caused the t16o
+mis-pairing. Suspect: the Lane 1 RX re-initialization on continuous decode errors (t16q).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
