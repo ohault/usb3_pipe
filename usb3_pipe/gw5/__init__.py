@@ -180,6 +180,17 @@ GW5_RX_CTLE_ATT_REG        = 0x9082d4
 GW5_TX_IDLE_VALUE   = 0x1
 GW5_TX_ACTIVE_VALUE = 0x7
 
+# RX CDR signal detect toggle (CDR re-acquisition): bit 16 set then cleared, as the register
+# configuration (q1.ln<n>.CDR.toggle_rxsd) and the CPLL rate change sequence.
+GW5_CDR_RXSD_ON  = 0x10000
+GW5_CDR_RXSD_OFF = 0x00000
+
+def gw5_cdr_rxsd_reg(lane, position="Q1"):
+    """Address of the CDR signal detect toggle register of a lane (Q0: 0x80033e, Q1: 0x90033e, 0x200
+    per lane, q1.ln<n>.CDR.toggle_rxsd)."""
+    assert position in ["Q0", "Q1"]
+    return {"Q0": 0x80033e, "Q1": 0x90033e}[position] + 0x200*lane
+
 def gw5_tx_idle_reg(lane, position="Q1"):
     """Address of the TX driver control register of a lane (Q0: 0x8003a4, Q1: 0x9003a4, 0x200 per
     lane, as listed by the Gowin IP generator)."""

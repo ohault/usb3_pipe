@@ -1030,6 +1030,15 @@ while Lane 0 receives 1.47M TS1/s; Lane 1's datapath stops delivering words (no 
 build: d800b7b and 86f960e stable in U0 (with the t16o mis-pairing), 18bf9b4 (RX_VLD_OUT gate) loops (held U0
 in t16o after ~1000 Recoveries), 0ba2a12 loops always; same GTR12 configuration in all. The RX_VLD_OUT gate is
 off by default again (`--rx-valid-gate`); next: Lane 1 alone at Gen 1x1 (single lane and merged configurations).
+t16r (00f218f): E1 Lane 1 path with its single lane configuration (Tang `--sfp 1` <-> acorn1 `--sfp 1`, Gen 1x1):
+20/20 (the SFP-1 <-> SFP1 path noisy on 2 of 3 trainings); E2 Lane 1 alone with the merged configuration on the
+two lanes build (Gen 1x1, Tang lane swap): clean (U0 in 0.09s, 0 PRBS errors both ways, 0 Recoveries); E3 both
+lanes at Gen 1x2: 4/4 fail, the Tang Lane 1 CDR locked in 2 of 40 samples (~75M decode errors/s, no TS1),
+Lane 0 clean. Lane 1 is silent until the Gen 1x2 negotiation and a GTR12 lane RX reset only resets its PCS: a
+CDR that did not lock is never restarted (the RX re-initializations on continuous errors useless). Tang
+`--lanes 2` builds now toggle the lane CDR signal detect through UPAR on each lane RX reset (`GW5CDRToggle`,
+`usb3_gtr12_lane{n}_cdr_toggles`, `--no-cdr-toggle`). Side finding: a Tang Gen 1x1 Device on lane swap stays in
+U0 when only the Host retrains (5/5).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

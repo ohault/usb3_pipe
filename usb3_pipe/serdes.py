@@ -589,6 +589,52 @@ class GW5UPARPort:
         self.we     = Signal()
         self.done   = Signal()
 
+class GW5CDRToggle(LiteXModule):
+    """GTR12 lane CDR re-acquisition: on a request (pulse, asynchronous: ex the lane RX reset rising
+    edge) the CDR signal detect toggle register (addr) is written with on_value then off_value
+    through UPAR (the transceiver RX reset only resets the PCS: a CDR that did not lock, ex: a Gen 1x2
+    Lane 1 silent until the Gen 1x2 negotiation, stays unlocked). A request during the writes is
+    served after them. count: requests served (debug)."""
+    def __init__(self, upar, addr, on_value, off_value):
+        self.request = Signal()   # i: Asynchronous (level edge detected here).
+        self.count   = Signal(16) # o
+
+        # # #
+
+        request   = Signal()
+        request_d = Signal()
+        pending   = Signal()
+        self.specials += MultiReg(self.request, request)
+        self.sync += request_d.eq(request)
+        value = Signal(32)
+        self.comb += [
+            upar.addr.eq(addr),
+            upar.wrdata.eq(value),
+        ]
+        self.fsm = fsm = FSM(reset_state="IDLE")
+        # A request taken in IDLE (cleared then), one arriving during the writes kept pending.
+        self.sync += If(request & ~request_d, pending.eq(1)).Elif(fsm.ongoing("IDLE"), pending.eq(0))
+        fsm.act("IDLE",
+            If(pending,
+                NextValue(value, on_value),
+                NextState("ON")
+            )
+        )
+        fsm.act("ON",
+            upar.we.eq(1),
+            If(upar.done,
+                NextValue(value, off_value),
+                NextState("OFF")
+            )
+        )
+        fsm.act("OFF",
+            upar.we.eq(1),
+            If(upar.done,
+                NextValue(self.count, self.count + 1),
+                NextState("IDLE")
+            )
+        )
+
 class GW5UPARArbiter(LiteXModule):
     """UPAR user requests (GW5UPARPort list) to a GTR12UPAR (addr/wrdata/we, done): a request (we
     held until done) is granted to one port until its done, the lowest port first."""
@@ -704,7 +750,7 @@ class GW5USB3SerDes(USB3SerDes):
     def __init__(self, platform, sys_clk, sys_clk_freq, lane=0, rx_idle_source="~astat5",
         with_upar=True, upar_clk=None, xcvr_cd="sys", refclk="100M", csr_config=None, tx_cdc=True,
         position=None, pll=None, gen2_capable=False, xcvr_clk_freq=None, quad_owner=None, tx_clk=None,
-        rx_valid_gate=False, with_rx_invalid_count=False):
+        rx_valid_gate=False, with_rx_invalid_count=False, with_cdr_toggle=False):
         USB3SerDes.__init__(self)
         assert with_upar # TX Electrical Idle through UPAR.
         # quad_owner: GW5USB3SerDes owning the quad (GTR12 instance, register configuration, UPAR) of this
@@ -725,6 +771,7 @@ class GW5USB3SerDes(USB3SerDes):
         from liteiclink.serdes.gtr12_gw5 import GTR12, gtr12_primitives
         from usb3_pipe.gw5 import gw5_usb3_csr_config, gw5_usb3_rate_writes
         from usb3_pipe.gw5 import gw5_tx_idle_reg, GW5_TX_IDLE_VALUE, GW5_TX_ACTIVE_VALUE
+        from usb3_pipe.gw5 import gw5_cdr_rxsd_reg, GW5_CDR_RXSD_ON, GW5_CDR_RXSD_OFF
         from usb3_pipe.gw5 import GW5_TX_LEVEL_REG, GW5_TX_LEVEL_DEFAULT, GW5_TX_CURSORS_REG
         from usb3_pipe.gw5 import GW5_TX_CURSORS_DEFAULT, GW5_TX_FFE_MANUAL_REG
         from usb3_pipe.gw5 import GW5_TX_FFE_MANUAL_VALUE, GW5_RX_CTLE_BOOST_REG, GW5_RX_CTLE_ATT_REG
@@ -871,6 +918,15 @@ class GW5USB3SerDes(USB3SerDes):
                 port.done.eq(sel & upar_port.done),
             ]
         (self if quad_owner is None else quad_owner).upar_ports.append(upar_port)
+        # CDR re-acquisition on each RX reset (with_cdr_toggle): own UPAR user of the quad,
+        # after the TX Electrical Idle writers (arbiter priority: LFPS bursts edges first).
+        if with_cdr_toggle:
+            cdr_port = GW5UPARPort()
+            self.cdr_toggle = cdr_toggle = ClockDomainsRenamer({"sys": xcvr_cd})(
+                GW5CDRToggle(cdr_port, gw5_cdr_rxsd_reg(lane, position), GW5_CDR_RXSD_ON,
+                    GW5_CDR_RXSD_OFF))
+            self.comb += cdr_toggle.request.eq(self.rx_reset | self.reinit)
+            (self if quad_owner is None else quad_owner).upar_ports.append(cdr_port)
 
         # LFPS -------------------------------------------------------------------------------------
         rx_idle = Signal()

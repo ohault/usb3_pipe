@@ -720,7 +720,7 @@ class USB3X2SoC(USB3BaseSoC):
     lanes arbitrated: Lane 1 bursts edges a UPAR write later)."""
     def __init__(self, platform, refclk="100M", csr_config=None, role="device", x2_capable=True,
         lanes_core=False, example="loopback", with_clk_meters=False, with_analyzer=False,
-        analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, rx_valid_gate=False, **kwargs):
+        analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, rx_valid_gate=False, cdr_toggle=True, **kwargs):
         sys_clk_freq  = 125e6
         xcvr_clk_freq = 62.5e6
 
@@ -751,7 +751,10 @@ class USB3X2SoC(USB3BaseSoC):
                 quad_owner     = None if lane == 0 else usb3_serdes[0],
                 tx_clk         = None if lane == 0 else usb3_serdes[0].gtr12.cd_tx.clk,
                 rx_valid_gate  = rx_valid_gate,
-                with_rx_invalid_count = True)
+                with_rx_invalid_count = True,
+                # CDR re-acquired on each lane RX reset (Lane 1 silent until the Gen 1x2
+                # negotiation: its CDR did not lock in two lanes operation, t16r).
+                with_cdr_toggle = cdr_toggle)
             usb3_serdes.append(serdes)
         gtr12 = usb3_serdes[0].gtr12
         # sys clock: the Lane 0 TX clock net itself (no alias: GowinSynthesis merges aliases, the
@@ -790,6 +793,11 @@ class USB3X2SoC(USB3BaseSoC):
                 description=f"Lane {n} GTR12 RX_VLD_OUT low cycles (rx clock, wrapping).")
             setattr(self, f"usb3_gtr12_lane{n}_rx_invalid", csr)
             self.comb += csr.status.eq(serdes.rx_invalid_count)
+            if hasattr(serdes, "cdr_toggle"):
+                csr = CSRStatus(16, name=f"usb3_gtr12_lane{n}_cdr_toggles",
+                    description=f"Lane {n} CDR re-acquisitions (signal detect toggles, gtr12 clock domain).")
+                setattr(self, f"usb3_gtr12_lane{n}_cdr_toggles", csr)
+                self.specials += MultiReg(serdes.cdr_toggle.count, csr.status)
         gtr12.upar.add_csr()
 
         # Analyzer ---------------------------------------------------------------------------------
@@ -823,6 +831,7 @@ def main():
     x2_group.add_argument("--role",       default="device",    help="USB3PHY role with --lanes 2.", choices=["device", "host"])
     x2_group.add_argument("--no-x2",      action="store_true", help="--lanes 2: not Gen 1x2 capable (Gen 1x1 on SFP0).")
     x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2: scripted USB host (Host role) or Device Core (Device role, --example) instead of the PRBS stand-ins.")
+    x2_group.add_argument("--no-cdr-toggle", action="store_true", help="--lanes 2: lanes RX resets without the CDR re-acquisition (GTR12 CDR signal detect toggle through UPAR, A/B).")
     x2_group.add_argument("--rx-valid-gate", action="store_true", help="--lanes 2: RX words taken only with the GTR12 RX_VLD_OUT (A/B: Lane 1 starved in training on hardware, t16q).")
     usb3_soc_args(parser, output_dir="build/sipeed_tang_mega_138k_pro")
     args = parser.parse_args()
@@ -858,6 +867,7 @@ def main():
             with_clk_meters = args.with_clk_meters,
             lean            = args.lean,
             rx_valid_gate   = args.rx_valid_gate,
+            cdr_toggle      = not args.no_cdr_toggle,
             **usb3_args)
         usb3_soc_build(parser, args, soc)
         return

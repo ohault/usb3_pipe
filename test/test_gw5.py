@@ -11,7 +11,7 @@ from migen import *
 from litex.gen import *
 
 from usb3_pipe.gw5    import gw5_usb3_rate_writes, gw5_usb3_csr_config, gw5_usb3_csr_config_x2
-from usb3_pipe.serdes import GW5RateSequencer, GW5TXElectricalIdle, GW5UPARPort, GW5UPARArbiter
+from usb3_pipe.serdes import GW5RateSequencer, GW5TXElectricalIdle, GW5UPARPort, GW5UPARArbiter, GW5CDRToggle
 
 class FakeUPAR(LiteXModule):
     """GTR12UPAR user port model: a write takes 3 cycles once granted."""
@@ -62,6 +62,36 @@ class TestGW5RateSequencer(unittest.TestCase):
         run_simulation(dut, generator())
         expected = [(1, a, v10) for a, v5, v10 in writes] + [(0, a, v5) for a, v5, v10 in writes]
         self.assertEqual(log, expected)
+
+class TestGW5CDRToggle(unittest.TestCase):
+    def test_toggle_with_tx_idle(self):
+        # Lane CDR re-acquisition (signal detect bit 16 set then cleared) on a RX reset rising edge,
+        # sharing the UPAR with the lane TX Electrical Idle writer (arbiter), a request during the
+        # writes served after them: both toggles complete, the TX idle writes still served.
+        upar   = FakeUPAR()
+        ports  = [GW5UPARPort(), GW5UPARPort()]
+        idle   = GW5TXElectricalIdle(ports[0], 0x9003a4, 1, 7)
+        toggle = GW5CDRToggle(ports[1], 0x90053e, 0x10000, 0)
+        dut    = GW5UPARArbiter(ports, upar)
+        dut.submodules += upar, idle, toggle
+        log    = []
+        def generator():
+            for step in range(120):
+                if step == 5:
+                    yield toggle.request.eq(1)
+                    yield idle.idle.eq(0)
+                if step == 8:
+                    yield toggle.request.eq(0)
+                if step == 12:
+                    yield toggle.request.eq(1) # During the first toggle writes.
+                if (yield upar.we) and not (yield upar.busy) and not (yield upar.done):
+                    log.append(((yield upar.addr), (yield upar.wrdata)))
+                yield
+            self.assertEqual((yield toggle.count), 2)
+        run_simulation(dut, generator())
+        toggles = [w for w in log if w[0] == 0x90053e]
+        self.assertEqual(toggles, [(0x90053e, 0x10000), (0x90053e, 0), (0x90053e, 0x10000), (0x90053e, 0)])
+        self.assertIn((0x9003a4, 7), log)
 
 class TestGW5CSRMerge(unittest.TestCase):
     def test_x2_merge(self):
