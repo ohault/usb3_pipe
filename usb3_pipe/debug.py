@@ -235,8 +235,18 @@ class USB3LanesDebug(LiteXModule):
     def __init__(self, phy, serdes, link=None, reinit_cycles=1024, monitor_tick_cycles=None,
         with_counters=True):
         # with_counters=False: status/control/re-initialization only, no event/RX errors counters
-        # nor noise monitor (lean builds: timings on slow fabrics).
+        # nor noise monitor (lean builds: timings on slow fabrics). With a PHY lanes logic in its
+        # pipe_cd: status resynchronized to sys, re-initialization to pipe_cd, no counters.
         assert len(serdes) == 2
+        cd = getattr(phy, "pipe_cd", None)
+        if cd is not None:
+            with_counters = False
+        def level(s):
+            if cd is None:
+                return s
+            o = Signal(len(s))
+            self.specials += MultiReg(s, o)
+            return o
         with_rx_drop = hasattr(link, "rx_drop")
         self._clear   = CSR() # Clear counters (write).
         self._control = CSRStorage(fields=[
@@ -269,11 +279,11 @@ class USB3LanesDebug(LiteXModule):
         self.comb += [
             self._status.fields.x2.eq(phy.x2),
             self._status.fields.gen2.eq(phy.gen2),
-            self._status.fields.deskew_aligned.eq(phy.deskew_aligned),
-            self._status.fields.lane_swap.eq(phy.lane_swap),
-            self._status.fields.ready.eq(Cat(*[s.ready for s in serdes])),
-            self._status.fields.rx_idle.eq(Cat(*[s.rx_idle for s in serdes])),
-            self._status.fields.rx_polarity.eq(Cat(*[s.rx_polarity for s in serdes])),
+            self._status.fields.deskew_aligned.eq(level(phy.deskew_aligned)),
+            self._status.fields.lane_swap.eq(level(phy.lane_swap)),
+            self._status.fields.ready.eq(level(Cat(*[s.ready for s in serdes]))),
+            self._status.fields.rx_idle.eq(level(Cat(*[s.rx_idle for s in serdes]))),
+            self._status.fields.rx_polarity.eq(level(Cat(*[s.rx_polarity for s in serdes]))),
         ]
 
         if hasattr(phy, "lanes_idle_recovery"):
@@ -388,7 +398,13 @@ class USB3LanesDebug(LiteXModule):
         ).Elif(reinit != 0,
             reinit.eq(reinit - 1)
         )
-        self.comb += [s.reinit.eq(reinit != 0) for s in serdes if hasattr(s, "reinit")]
+        for s in serdes:
+            if not hasattr(s, "reinit"):
+                continue
+            if cd is None:
+                self.comb += s.reinit.eq(reinit != 0)
+            else:
+                self.specials += MultiReg(reinit != 0, s.reinit, cd)
 
         # Per SerDes transceiver status (A7USB3SerDes: ready, Quad PLL lock/reference clock lost,
         # TX/RX buffer status, CDR lock) and DRP access (channel attributes/status read back between

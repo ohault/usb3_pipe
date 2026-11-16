@@ -504,7 +504,9 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     example       = "loopback",
     with_lpm      = False,
     max_burst     = 8,
-    with_counters = True):
+    with_counters = True,
+    phy_cd        = None,
+    phy_clk_freq  = None):
     """Add a Gen 1x2 link on serdes (2 lanes, Lane 0: Configuration Lane) to soc: USB3PHY(lanes=2) in
     the Host or Device role + debug (USB3PHYDebug on Lane 0, USB3LanesDebug), PRBS Link-Layer stand-ins
     (PRBSLinkTester on the 64-bit link words) and LEDs (SerDes ready, U0, x2 negotiated).
@@ -526,8 +528,13 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
       Gen 1x2 with a Gen 1x2 host, SuperSpeed at Gen 1x1 otherwise.
     - other examples (32-bit endpoints): USB3PHYX1Link, the PHY not x2 capable: Gen 1x1.
     LEDs: SerDes ready, U0, lanes swapped. with_counters=False: USB3LanesDebug without its event/RX
-    errors counters and noise monitor (lean builds)."""
+    errors counters and noise monitor (lean builds).
+
+    phy_cd: the PHY lanes logic (PIPEs, lanes datapath, SerDes renamed by the caller) and the PRBS
+    stand-ins in phy_cd at phy_clk_freq, the LTSSM/SoC in sys (USB3PHY lanes=2 pipe_cd: FPGAs where
+    the LTSSM can't reach 125MHz, ex: Tang Mega 138K Pro). PRBS stand-ins only (no Link Layer)."""
     sys_clk_freq = soc.sys_clk_freq
+    assert (phy_cd is None) or (not with_core), "phy_cd: PRBS stand-ins only."
     assert len(serdes) == 2
     host_script = with_core and (role == "host")
     lanes_x2    = host_script or (with_core and (example in ["loopback", "wishbone", "bench"]))
@@ -545,7 +552,9 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
         role                 = role,
         with_endianness_swap = False,
         lanes                = 2,
-        x2_capable           = x2_capable)
+        x2_capable           = x2_capable,
+        pipe_cd              = phy_cd,
+        pipe_clk_freq        = phy_clk_freq)
     add_ltssm_states_constants(soc, usb3_phy)
     if (not with_core) or host_script:
         soc.comb += usb3_phy.link_activity.eq(1) # No (native) Link Layer: no PM activity.
@@ -572,7 +581,7 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
             max_burst=max_burst)
     else:
         # PRBS Link-Layer Stand-Ins ----------------------------------------------------------------
-        soc.usb3_prbs = PRBSLinkTester(usb3_phy, data_width=64)
+        soc.usb3_prbs = PRBSLinkTester(usb3_phy, data_width=64, cd=phy_cd or "sys")
 
     # Lanes Debug (with the USB3PHYX2Link RX buffer overflow/drops, transceivers re-initialization
     # held 10us) ------------------------------------------------------------------------------------

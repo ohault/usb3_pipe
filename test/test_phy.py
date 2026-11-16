@@ -757,6 +757,18 @@ class TestPHYX2(unittest.TestCase):
         self.run_sim("x1_runtime", ["--dev-x2-disable", "--lanes-crossed", "--lanes-tx-inverted"],
             mode="x1", swap=True)
 
+    def test_phy_x2_dev_pipe_cd(self):
+        # Device Gen 1x2 lanes logic (PIPEs, lanes datapath) and PRBS stand-ins at the SerDes
+        # frequency, its LTSSM/SuperSpeedPlus Polling at half of it (USB3PHY lanes=2 pipe_cd: Tang
+        # Mega 138K Pro Gen 1x2), crossed and inverted lanes.
+        self.run_sim("dev_pipe_cd", ["--dev-pipe-cd", "--lanes-crossed", "--lanes-tx-inverted"],
+            swap=True)
+
+    def test_phy_x2_dev_pipe_cd_x1(self):
+        # The same, Gen 1x1 negotiated (single lane on the swapped Lane 0).
+        self.run_sim("dev_pipe_cd_x1", ["--dev-pipe-cd", "--dev-x2-disable", "--lanes-crossed"],
+            mode="x1", swap=True)
+
     @pytest.mark.slow
     def test_phy_x2_host_retrain_warm_reset(self):
         # Gen 1x1 negotiated with crossed lanes (Device Lane 0 on its SerDes 1), then the Host PHY

@@ -157,7 +157,8 @@ The main options are below; [Build options](#build-options) lists them all.
 | `--lane-slip`, `--lane-com-error`, `--lane-rx-log` | With `--lanes 2`: 2 symbols dropped by a host lane, the first 2 COM symbols of a host lane word as decode errors or data symbols, decoded lane words |
 | `--lanes-reinit` | With `--lanes 2`: `CYCLE,SIDE[,CYCLES]`, both transceivers of a side re-initialized (transmit electrical idle, received words lost) |
 | `--link-words N` | Device link layer on 32, 64 or 128-bit words |
-| `--dev-pipe-cd` | Device LTSSM, link layer and core at half the PIPE frequency |
+| `--dev-pipe-cd` | Device LTSSM, link layer and core at half the PIPE frequency; with `--lanes 2` (PRBS stand-ins), the device lanes logic and stand-ins at the PIPE frequency and its LTSSM at half of it |
+| `--host-phy-reset` | `C[,N]`: host PHY held in reset alone for N cycles from cycle C (the device stays in U0 until the host port reset Warm Reset; `--host-port-reset-timeout` sets that timeout in seconds) |
 | `--host-pm`, `--host-lpm` | Host U1 and U2 requests or entries after the enumeration |
 | `--host-recovery` | Host-directed Recovery from U0 after the script |
 | `--host-hot-reset N` | `N` host-directed Hot Resets from U0, back to back |

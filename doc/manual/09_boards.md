@@ -251,10 +251,12 @@ IDE 1.9.12. The clocking changes a few defaults of the shared options:
 device core. Both lanes share one GTR12 instance, one UPAR and one register configuration: the
 lane 0 and lane 1 configurations merged (`gw5_csr_merge_lanes`), or `usb3_5g_x2.csr` once generated
 from `usb3_5g_x2.toml` (the 1.9.12 tools do not accept the 1.9.10 TOML files), or `--serdes-csr`.
-`sys` runs at 125 MHz on the lane 0 TX clock, so the bridge only answers once the dock reference
-clock is programmed. These builds do not reach 125 MHz on the GW5A (72 to 80 MHz measured): the
-transmitted lanes are clean, the received words are corrupted after the 8b/10b decode. `--lean`
-leaves out the lanes event/error counters and the noise monitor (timing measurements).
+With the PRBS stand-ins (default), the lanes logic (PIPEs, lanes datapath, transceiver logic) and the
+stand-ins run at 125 MHz on the lane 0 TX clock, and the LTSSM and the SoC at 62.5 MHz, as the Gen 1x1
+build splits its PHY; the lanes debug registers then have no event counters. With `--lanes-core`
+(scripted host or device core) everything runs at 125 MHz on the lane 0 TX clock, so the bridge only
+answers once the dock reference clock is programmed; these builds do not reach 125 MHz on the GW5A
+(69 to 80 MHz measured). `--lean` leaves out the lanes event/error counters and the noise monitor.
 `usb3_gtr12_lane{n}_rx_invalid` counts the cycles without a word in each lane's GTR12 receive
 interface FIFO (`RX_VLD_OUT` low); `--rx-valid-gate` takes the RX words only with it (on hardware it
 starved lane 1 during the training). A lane receive reset only resets the GTR12 PCS: these builds

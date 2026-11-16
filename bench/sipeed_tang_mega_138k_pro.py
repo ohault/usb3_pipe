@@ -713,7 +713,13 @@ class USB3X2SoC(USB3BaseSoC):
     """Gen 1x2 on the dock SFP0 (Lane 0, GTR12 Q1 lane 0) and SFP1 (Lane 1, Q1 lane 1): PRBS Link-Layer
     stand-ins or, with lanes_core, the scripted host (Host role) / Device Core (Device role), as the
     Acorn --lanes 2 builds (add_usb3_lanes_link). x2_capable=False: Gen 1x1 on SFP0 (Host: also
-    the runtime Gen 1x2 control). sys on the Lane 0 TX clock at 125MHz (_CRGX2).
+    the runtime Gen 1x2 control).
+
+    Clocking: PRBS stand-ins (default): the lanes logic (PIPEs, lanes datapath, SerDes logic) and the
+    PRBS stand-ins in "pipe" on the Lane 0 TX clock (125MHz), the LTSSM/SoC in sys at 62.5MHz
+    (USB3PHY lanes=2 pipe_cd: the LTSSM and the SoC don't reach 125MHz on the GW5A, t16n), the GTR12
+    control/UPAR in sys. lanes_core: everything in sys on the Lane 0 TX clock at 125MHz (_CRGX2,
+    timings not met: 69-80MHz measured).
 
     The two lanes share the quad: one GTR12 instance, one register configuration with both lanes
     (csr_config, default usb3_pipe/gw5 usb3_5g_x2.csr), one UPAR (TX Electrical Idle writes of both
@@ -721,11 +727,24 @@ class USB3X2SoC(USB3BaseSoC):
     def __init__(self, platform, refclk="100M", csr_config=None, role="device", x2_capable=True,
         lanes_core=False, example="loopback", with_clk_meters=False, with_analyzer=False,
         analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, rx_valid_gate=False, cdr_toggle=True, **kwargs):
-        sys_clk_freq  = 125e6
+        split         = not lanes_core # LTSSM/SoC at 62.5MHz, lanes logic at 125MHz.
+        sys_clk_freq  = 62.5e6 if split else 125e6
         xcvr_clk_freq = 62.5e6
+        lanes_clk_freq = 125e6
 
         # CRG / SoC --------------------------------------------------------------------------------
-        self.crg = _CRGX2(platform, xcvr_clk_freq)
+        if split:
+            self.crg = _CRG(platform, sys_clk_freq)
+            self.cd_gtr12 = ClockDomain()
+            self.cd_pipe  = ClockDomain()
+            self.comb += [
+                self.cd_gtr12.clk.eq(self.crg.cd_sys.clk),
+                self.cd_gtr12.rst.eq(self.crg.cd_sys.rst),
+            ]
+            gtr12_clk = self.crg.cd_sys.clk
+        else:
+            self.crg = _CRGX2(platform, xcvr_clk_freq)
+            gtr12_clk = self.crg.cd_gtr12.clk
         USB3BaseSoC.__init__(self, platform, sys_clk_freq, **kwargs)
 
         # SFPs -------------------------------------------------------------------------------------
@@ -739,10 +758,10 @@ class USB3X2SoC(USB3BaseSoC):
         usb3_serdes = []
         for lane in range(2):
             serdes = GW5USB3SerDes(platform,
-                sys_clk        = self.crg.cd_gtr12.clk, # Asynchronous to the TX/RX clocks.
-                sys_clk_freq   = sys_clk_freq,
+                sys_clk        = gtr12_clk, # Asynchronous to the TX/RX clocks.
+                sys_clk_freq   = lanes_clk_freq,
                 lane           = lane,
-                upar_clk       = self.crg.cd_gtr12.clk,
+                upar_clk       = gtr12_clk,
                 xcvr_cd        = "gtr12",
                 xcvr_clk_freq  = xcvr_clk_freq,
                 tx_cdc         = False, # sys is the Lane 0 TX clock.
@@ -757,12 +776,18 @@ class USB3X2SoC(USB3BaseSoC):
                 with_cdr_toggle = cdr_toggle)
             usb3_serdes.append(serdes)
         gtr12 = usb3_serdes[0].gtr12
-        # sys clock: the Lane 0 TX clock net itself (no alias: GowinSynthesis merges aliases, the
-        # constraints then miss their nets), asynchronous to the lanes RX clocks.
-        self.crg.cd_sys.clk = gtr12.cd_tx.clk
+        # Lanes clock (pipe with split, else sys): the Lane 0 TX clock net itself (no alias:
+        # GowinSynthesis merges aliases, the constraints then miss their nets), asynchronous to the
+        # lanes RX clocks (and to sys with split).
+        lanes_cd = self.cd_pipe if split else self.crg.cd_sys
+        lanes_cd.clk = gtr12.cd_tx.clk
         platform.add_false_path_constraints(gtr12.cd_tx.clk,
             *[serdes.gtr12.cd_rx.clk for serdes in usb3_serdes])
-        self.specials += AsyncResetSynchronizer(self.crg.cd_sys, ~self.crg.por_done | ~gtr12.pll_lock)
+        if split:
+            self.specials += AsyncResetSynchronizer(self.cd_pipe, self.crg.cd_sys.rst | ~gtr12.pll_lock)
+            usb3_serdes = [ClockDomainsRenamer({"sys": "pipe"})(serdes) for serdes in usb3_serdes]
+        else:
+            self.specials += AsyncResetSynchronizer(self.crg.cd_sys, ~self.crg.por_done | ~gtr12.pll_lock)
         # Lane 0 TX kept enabled through the transceivers re-initializations (xcvr_reinit: RX only):
         # its TX clock is sys.
         self.comb += gtr12.tx_enable.eq(usb3_serdes[0].enable)
@@ -775,7 +800,9 @@ class USB3X2SoC(USB3BaseSoC):
             leds_inverted = True,
             with_core     = lanes_core,
             example       = example,
-            with_counters = not lean)
+            with_counters = not lean,
+            phy_cd        = "pipe" if split else None,
+            phy_clk_freq  = lanes_clk_freq)
 
         # Clocks frequency meters (Hz): Lane 0 TX (sys), lanes RX fabric clocks (the RX 8b/10b errors
         # by type are the lane{n}_rx_* counters of USB3LanesDebug, as on the Acorn).
