@@ -757,6 +757,29 @@ class TestPHYX2(unittest.TestCase):
         self.run_sim("x1_runtime", ["--dev-x2-disable", "--lanes-crossed", "--lanes-tx-inverted"],
             mode="x1", swap=True)
 
+    @pytest.mark.slow
+    def test_phy_x2_host_retrain_warm_reset(self):
+        # Gen 1x1 negotiated with crossed lanes (Device Lane 0 on its SerDes 1), then the Host PHY
+        # held in reset alone (bench: usb3_debug.py retrain on the Host board, t16r): the Device stays
+        # in U0 (no Link Layer timeout with the PRBS stand-ins) until the Host port reset Warm Reset,
+        # detected on its swapped Lane 0 after tResetDelay (~25ms): both sides train again to U0, PRBS
+        # completed (~15M cycles).
+        cmd = [sys.executable, str(ROOT / "sim.py"), "--lanes", "2", "--lanes-crossed",
+            "--dev-x2-disable", "--prbs-words", "400000", "--host-phy-reset", "620000,12500",
+            "--host-port-reset", "--host-port-reset-timeout", "6e-3",
+            "--output-dir", str(get_output_dir(self, "host_retrain"))]
+        p = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, timeout=1800)
+        out  = p.stdout or ""
+        tail = "\n---- tail ----\n" + out[-4000:]
+        self.assertEqual(p.returncode, 0, tail)
+        self.assertNotIn("Simulation timeout", out, tail)
+        after = out[out.index("HOST PHY RESET RELEASED"):]
+        self.assertRegex(after, r"HOST port reset \(Warm Reset requested\)", tail)
+        self.assertRegex(after, r"DEV\s*entering WarmReset state", tail)
+        self.assertEqual(len(re.findall(r"DEV\s*entering U0 state", out)), 2, tail)
+        self.assertRegex(out, r"HOST PRBS:\s*\d+ words,\s*\d+ packets,\s*0 errors", tail)
+
     def test_phy_x2_fallback_ss(self):
         # Gen 1x1 SuperSpeed Device (no SCD): SuperSpeed fallback of the Host, Lane 0 only.
         self.run_sim("fallback_ss", ["--dev-mode", "ss"], mode="ss")

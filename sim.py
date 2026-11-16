@@ -386,7 +386,8 @@ class USB3PIPESim(SoCMini):
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
         host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None, lane_skp_error=None,
-        lane_slip=None, lane_rx_log=None, lane_com_error=None, lanes_reinit=None, host_phy_reset=None):
+        lane_slip=None, lane_rx_log=None, lane_com_error=None, lanes_reinit=None, host_phy_reset=None,
+        host_port_reset_timeout=None):
         assert lanes in [1, 2]
         assert (link_words == 1) or (lanes == 1)
         assert (not gen2) or ((lanes == 1) and gen2_capable)
@@ -697,7 +698,7 @@ class USB3PIPESim(SoCMini):
             _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench"))
             from usb3_soc import USB3HostPortReset
             self.host_port_reset = USB3HostPortReset(phys["host"], sys_clk_freq=sys_clk_freq,
-                timeout=0.5/timer_scale)
+                timeout=(0.5/timer_scale) if host_port_reset_timeout is None else host_port_reset_timeout)
             port_reset_d = Signal()
             self.sync += [
                 port_reset_d.eq(phys["host"].warm_reset_req),
@@ -1137,6 +1138,7 @@ def main():
     parser.add_argument("--host-start-delay", default=0, help="Host PHY held in reset for N cycles (the Device trains alone first, ex: --timer-scale 100 --host-start-delay 600000: Device in Compliance).")
     parser.add_argument("--dev-x2-disable", action="store_true", help="--lanes 2: Device Gen 1x2 capability disabled at runtime (x2_enable = 0): Gen 1x1 negotiated.")
     parser.add_argument("--host-script",   default=None, type=int, help="--lanes 2 --lanes-core: hardware scripted host (bench/usb3_soc.py USB3HostScript), its run enabled after N cycles (idle before, as on the boards).")
+    parser.add_argument("--host-port-reset-timeout", default=None, help="--host-port-reset timeout (s, default: 0.5/timer-scale).")
     parser.add_argument("--host-port-reset", action="store_true", help="Host port reset policy: Warm Reset when U0 is not reached (bench/usb3_soc.py USB3HostPortReset).")
     parser.add_argument("--host-itp",      action="store_true", help="Host model Isochronous Timestamp Packets between the transfers.")
     parser.add_argument("--dev-pipe-cd",   action="store_true", help="Device LTSSM/Link Layer/Core at half the PIPE frequency (USB3PHY pipe_cd, 64-bit Link Layer words).")
@@ -1193,6 +1195,7 @@ def main():
         host_start_delay      = int(args.host_start_delay),
         host_phy_reset        = None if args.host_phy_reset is None else tuple(int(v) for v in args.host_phy_reset.split(",")),
         host_port_reset       = args.host_port_reset,
+        host_port_reset_timeout = None if args.host_port_reset_timeout is None else float(args.host_port_reset_timeout),
         dev_x2_disable        = args.dev_x2_disable,
         host_script_delay     = args.host_script,
         host_burst_out        = int(args.host_burst_out),

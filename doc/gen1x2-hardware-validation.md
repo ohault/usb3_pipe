@@ -1039,6 +1039,11 @@ CDR that did not lock is never restarted (the RX re-initializations on continuou
 `--lanes 2` builds now toggle the lane CDR signal detect through UPAR on each lane RX reset (`GW5CDRToggle`,
 `usb3_gtr12_lane{n}_cdr_toggles`, `--no-cdr-toggle`). Side finding: a Tang Gen 1x1 Device on lane swap stays in
 U0 when only the Host retrains (5/5).
+Not reproduced in simulation (`sim.py --lanes 2 --lanes-crossed --dev-x2-disable --host-phy-reset 620000,12500
+--host-port-reset --host-port-reset-timeout 6e-3`, `test_phy_x2_host_retrain_warm_reset`, slow): the Device stays
+in U0 while the Host retrains (no Link Layer timeout with the PRBS stand-ins), then detects the Host port reset
+Warm Reset on its swapped Lane 0 after ~25ms (tResetDelay) and both train again: on the Tang, the Warm Reset
+LFPS detection on the GTR12 lane 1 in U0 is the suspect (to check with t16s).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
