@@ -202,7 +202,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   for the config and 8 identical for a detection (spec, kept; the Loopback seen was a state table misdecode:
   Tang Gen 1x1 has no U1/U2 states); Gen 1x2 Acorn <-> Tang (t16m B): U0 at Gen 1x2, Tang TX clean (0 errors at
   the Acorn), Tang RX lanes data corrupt after decode: the Tang --lanes 2 builds reach only 72-80MHz for the
-  125MHz sys (lanes PHY needs a split clocking like Gen 1x1 pipe_cd). Next: TX buffer bypass/phase, CDR/LPM.
+  125MHz sys (LTSSM state -> next state the worst PHY path, t16n); the Tang Gen 1x2 RX
+  corruption was `LaneDeskew` pairing the lanes a TS Ordered Set apart when Lane 1 aligns late (t16o, fixed: FIFO
+  overflow while armed/aligned clears and flushes). Next: TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
@@ -223,6 +225,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
 - `pip` installs from git and `litex_setup.py` may be refused: the preinstalled PyPI migen (0.9.2)
   cannot simulate `SyncFIFO` memories (about 78 tests fail identically on `master`: compare the
   failure lists with an upstream worktree before blaming a change).
+- The SyncFIFO simulation failures come from a Migen lowering bug (a memory write-only port has no
+  `dat_r`: `migen/fhdl/simplify.py` reads it): a local, uncommitted guard in the Migen copy used by the
+  session (`if port.dat_r is None: pass` before the read statement) lets those tests run.
 - `sim.py` needs `pythondata_misc_tapcfg` (only for the LiteX sim Ethernet modules): a local stub
   package on `PYTHONPATH` (header + functions returning -1) is enough.
 - Remote branch deletions are refused by the session git proxy: the user deletes/renames branches.

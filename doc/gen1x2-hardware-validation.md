@@ -1008,6 +1008,16 @@ Tang states decoded with its own table, 120/120 runs. Candidate cause: the GTR12
 cycle (RX_VLD_OUT ignored): a cycle without a word decodes a repeated word without 8b/10b error, a lane one
 word off after the deskew; RX words now gated by RX_VLD_OUT on the Tang `--lanes 2` builds (18bf9b4, A/B
 with `--no-rx-valid-gate`, `usb3_gtr12_lane{n}_rx_invalid` counters).
+t16o (LiteScope on the Tang `--lanes 2 --lean` JTAGBone build, 128-deep analyzer: the default depth missed
+timing at 50.5MHz): RX_VLD_OUT not the cause (rx_invalid +0 in U0 on both lanes, gated and ungated builds the
+same 6.75G errors per 60s); every Tang lane counter 0 over 30s at Gen 1x2. Cause: `LaneDeskew` paired the lanes
+one TS Ordered Set (4 words) apart: in U0 each destriped word joined Lane 0 word n with Lane 1 word n+4. In
+the training, the Tang Lane 1 was not word aligned yet (garbage, no marker: counted as a gap) while Lane 0
+already received TS Ordered Sets for 90+ words; the armed deskew held Lane 0's first marker, its FIFO filled
+(words dropped), and Lane 1's first marker was paired with that stale one; markers every 4 words, so never
+seen as a mismatch, and none in U0. Deterministic (12 retrains, same error rate). Fixed in `LaneDeskew`: a word
+dropped on a full FIFO while armed or aligned clears the pairing and flushes the FIFOs, the search re-armed on
+the next gap (the deskew-lost Recovery in U0 then pairs the lanes on its TS1); `test_deskew_late_lane_overflow`.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

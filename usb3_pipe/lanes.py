@@ -104,7 +104,12 @@ class LaneDeskew(LiteXModule):
     paired.
 
     The sinks are never held (continuous lanes streams, a held lane would overflow the SerDes RX
-    buffers): words received with a full FIFO are dropped.
+    buffers): words received with a full FIFO are dropped. A word dropped while armed (a lane held
+    on its first marker more than depth words: the other lane's first marker is not the same one,
+    ex: that lane not word aligned yet, its garbage counted as a gap) or while aligned (the lanes
+    skewed beyond depth) clears the pairing, the search re-armed on the next gap: else a stale
+    marker would be paired, the lanes Ordered Sets apart (periodic markers: never seen as a
+    mismatch; Tang Mega 138K Pro Lane 1 late, every destriped word corrupted in U0).
     """
     def __init__(self, marker_data, marker_ctrl, depth=8, gap=16):
         self.sinks   = sinks   = [stream.Endpoint(lane_layout()) for _ in range(2)]
@@ -115,8 +120,12 @@ class LaneDeskew(LiteXModule):
 
         # # #
 
-        self.fifos = fifos = [stream.SyncFIFO(lane_layout(), depth) for _ in range(2)]
+        # FIFOs flushed on an overflow clear (else full: drained one word per cycle while searching
+        # as they are filled, stale words before the next markers).
+        flush = Signal()
+        self.fifos = fifos = [ResetInserter()(stream.SyncFIFO(lane_layout(), depth)) for _ in range(2)]
         self.submodules += fifos
+        self.comb += [fifo.reset.eq(flush) for fifo in fifos]
         heads = []
         gaps  = []
         for lane in range(2):
@@ -148,9 +157,14 @@ class LaneDeskew(LiteXModule):
         # without paired markers in between).
         both     = Signal()
         mismatch = Signal()
-        self.comb += both.eq(fifos[0].source.valid & fifos[1].source.valid)
+        overflow = Signal() # A word received with a full FIFO (dropped).
+        self.comb += [
+            both.eq(fifos[0].source.valid & fifos[1].source.valid),
+            overflow.eq(Reduce("OR", [sinks[n].valid & ~fifos[n].sink.ready for n in range(2)])),
+            flush.eq(overflow & (armed | aligned)),
+        ]
         self.sync += [
-            If(self.clear,
+            If(self.clear | (overflow & (armed | aligned)),
                 aligned.eq(0),
                 armed.eq(0),
                 mismatch.eq(0)

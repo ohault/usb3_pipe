@@ -227,6 +227,32 @@ class TestLanes(unittest.TestCase):
         self.assertEqual(trace[-1][0], 1)
         self.assertEqual(self.run_deskew([lane0, lane1])[-len(idle):], idle)
 
+    def test_deskew_late_lane_overflow(self):
+        # Lane 1 not word aligned yet while Lane 0 already receives the TS Ordered Sets (Tang Mega
+        # 138K Pro Lane 1, t16o): Lane 1 garbage (no marker: counted as a gap), its first marker
+        # 10 Ordered Sets after Lane 0's. Lane 0's first marker held while armed fills its FIFO
+        # (words dropped): the pairing would join Lane 1's first marker with a stale Lane 0 one, the
+        # destriped words then off by Ordered Sets (markers every 4 words: never seen as a mismatch).
+        # The overflow clears the search: re-armed on the next gap (Logical Idle), the next TS paired.
+        rng    = random.Random(5)
+        marker = (0xbcbcbcbcbcbcbcbc, 0xff)
+        def ts(n):
+            r = []
+            for _ in range(n):
+                r += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
+            return r
+        gap, first = [(0, 0)]*20, ts(30)
+        idle = [(0, 0)]*24
+        last = ts(4)
+        data = [(rng.getrandbits(64), rng.getrandbits(8) & 0x7f) for _ in range(16)]
+        late = 40 # Lane 1 words before its word alignment (Lane 0 already in its TS).
+        garbage = [(rng.getrandbits(32) & 0x7f7f7f7f, 0) for _ in range(late)]
+        lane0 = [self.stripe(w, 0) for w in gap + first + idle + last + data]
+        lane1 = [self.stripe(w, 1) for w in gap] + garbage + \
+            [self.stripe(w, 1) for w in first[late:] + idle + last + data]
+        out = self.run_deskew([lane0, lane1], cycles=400)
+        self.assertEqual(out, last + data)
+
     def test_deskew_lost_on_lane_shift(self):
         # Lane 0 one word late from the middle of the TS stream (word dropped on Lane 1: lanes no
         # longer paired, a mismatch at each Ordered Set): pairing lost (second mismatch), search
