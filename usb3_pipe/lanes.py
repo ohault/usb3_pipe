@@ -112,7 +112,9 @@ class LaneDeskew(LiteXModule):
     mismatch; Tang Mega 138K Pro Lane 1 late, every destriped word corrupted in U0).
 
     error_symbol: K Symbol substituted for the RX decode errors (K28.4): a word with one is not counted
-    in a gap and disarms the search (a lane not word aligned yet receives garbage without marker: as a gap, its first marker
+    in a gap, an armed search is kept (the first COM Symbols of a TS Ordered Set after an idle period
+    often arrive as K28.4 on hardware: disarming on them, the lanes were never paired again, t16u)
+    (a lane not word aligned yet receives garbage without marker: as a gap, its first marker
     then paired with a later Ordered Set of the other lane, the lanes Ordered Sets apart without any
     FIFO overflow, t16s).
     """
@@ -128,12 +130,14 @@ class LaneDeskew(LiteXModule):
         # FIFOs flushed on an overflow clear (else full: drained one word per cycle while searching
         # as they are filled, stale words before the next markers).
         flush = Signal()
-        self.fifos = fifos = [ResetInserter()(stream.SyncFIFO(lane_layout(), depth)) for _ in range(2)]
+        # Marker flag computed on the sink side and stored with the word (timing: the heads are a
+        # single FIFO output bit, not a word compare).
+        self.fifos = fifos = [ResetInserter()(stream.SyncFIFO(lane_layout() + [("marker", 1)], depth))
+            for _ in range(2)]
         self.submodules += fifos
         self.comb += [fifo.reset.eq(flush) for fifo in fifos]
-        heads  = []
-        gaps   = []
-        errors = []
+        heads = []
+        gaps  = []
         for lane in range(2):
             head      = Signal()
             gap_count = Signal(max=gap + 1)
@@ -142,9 +146,8 @@ class LaneDeskew(LiteXModule):
                 sinks[lane].connect(fifos[lane].sink, omit={"ready"}),
                 sinks[lane].ready.eq(1),
                 marker_in.eq((sinks[lane].data == marker_data) & (sinks[lane].ctrl == marker_ctrl)),
-                head.eq(fifos[lane].source.valid &
-                    (fifos[lane].source.data == marker_data) &
-                    (fifos[lane].source.ctrl == marker_ctrl)),
+                fifos[lane].sink.marker.eq(marker_in),
+                head.eq(fifos[lane].source.valid & fifos[lane].source.marker),
             ]
             # Words without marker (nor error Symbol) received on the lane (saturated to gap).
             error_in = Signal()
@@ -160,7 +163,6 @@ class LaneDeskew(LiteXModule):
             )
             heads.append(head)
             gaps.append(gap_count == gap)
-            errors.append(error_in)
         self.heads = heads
 
         # Search armed after a gap on both lanes (no marker in the FIFOs, dropped while searching),
@@ -181,9 +183,7 @@ class LaneDeskew(LiteXModule):
                 mismatch.eq(0)
             ).Elif(~aligned,
                 mismatch.eq(0),
-                If(errors[0] | errors[1],
-                    armed.eq(0)
-                ).Elif(gaps[0] & gaps[1],
+                If(gaps[0] & gaps[1],
                     armed.eq(1)
                 ).Elif(armed & heads[0] & heads[1],
                     aligned.eq(1),

@@ -154,25 +154,50 @@ class PRBSPacketChecker(LiteXModule):
         ).Elif(valid & is_start,
             synced.eq(1),
         )
+        # Packet/idle errors (err) at the word, data word check (PRBS successor, control Symbols)
+        # pipelined (timing: xorshift -> compare -> errors counter in a single cycle did not meet
+        # 125MHz on the Tang Mega 138K Pro lanes clock, t16s): the expected word and the received
+        # word registered, then their mismatch registered, then counted.
+        err    = Signal()
+        chk    = Signal()
+        chk_d  = Signal()
+        cerr   = Signal()
+        cerr_d = Signal()
+        data_d = Signal(data_width)
+        exp_d  = Signal(data_width)
+        mism   = Signal()
+        self.comb += If(self.enable & valid & (synced | is_start),
+            If(is_start,
+                err.eq(in_packet)
+            ).Elif(is_end,
+                err.eq(~in_packet)
+            ).Elif(in_packet,
+                chk.eq(prev_ok),
+                cerr.eq(ctrl != 0)
+            ).Elif(~is_idle,
+                err.eq(1)
+            )
+        )
         self.sync += If(self.enable & valid & (synced | is_start),
             If(is_start,
-                If(in_packet, self.errors.eq(self.errors + 1)),
                 in_packet.eq(1)
             ).Elif(is_end,
-                If(~in_packet, self.errors.eq(self.errors + 1)),
                 in_packet.eq(0),
                 self.packets.eq(self.packets + 1)
             ).Elif(in_packet,
                 self.words.eq(self.words + 1),
                 prev.eq(data),
                 prev_ok.eq(1),
-                If((ctrl != 0) | (prev_ok & (data != prev_next)),
-                    self.errors.eq(self.errors + 1)
-                )
-            ).Elif(~is_idle,
-                self.errors.eq(self.errors + 1)
             )
         )
+        self.sync += [
+            chk_d.eq(chk),
+            cerr_d.eq(cerr),
+            data_d.eq(data),
+            exp_d.eq(prev_next),
+            mism.eq(cerr_d | (chk_d & (data_d != exp_d))),
+            self.errors.eq(self.errors + err + mism),
+        ]
 
 # Link Tester (PRBS Packets, CSRs) -----------------------------------------------------------------
 
