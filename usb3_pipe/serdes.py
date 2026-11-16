@@ -50,6 +50,7 @@ class USB3SerDes(LiteXModule):
         self.rx_polarity = Signal()   # i
         self.rx_idle     = Signal()   # o
         self.rx_errors   = Signal()   # o: RX decode errors (Warm Reset LFPS detection).
+        self.rx_errors_hold = Signal() # i: rx_errors held at 1 (RX re-initialization in progress).
 
         self.tx_skp_enable = Signal(reset=1) # i
         self.rx_align      = Signal()        # i
@@ -195,17 +196,14 @@ class USB3SerDes(LiteXModule):
         self.rx_idle_stretch = self.rx_idle_filter.stretch_cycles
         self.rx_idle_raw     = self.rx_idle_filter.raw # Unfiltered (debug: glitches in U0).
         self.comb += self.rx_idle.eq(self.rx_idle_filter.idle)
-        # Decode errors monitor in a reset-less RX clock domain: kept through the RX resets (Gen 1x2:
-        # the lanes RX errors re-initializations of a lane receiving a Warm Reset LFPS in U0 cleared it
-        # every ~110us, the Warm Reset, detected after ~18ms of errors, was never seen, t16s).
-        self.cd_rx_errors = ClockDomain(reset_less=True)
-        self.comb += self.cd_rx_errors.clk.eq(ClockSignal("rx"))
-        self.rx_error_monitor = RXErrorMonitor(xcvr.decoders, clock_domain="rx_errors")
+        self.rx_error_monitor = RXErrorMonitor(xcvr.decoders, clock_domain="rx")
         # At 10Gbps (Gen 2, raw 128b/132b words), the 8b/10b decode errors are always set: Gen 2 RX
         # errors (block alignment lost) instead (a Warm Reset LFPS on a Gen 2 link would otherwise
         # be detected after tResetDelay in U0).
+        # rx_errors_hold: rx_errors held during a RX re-initialization (Gen 1x2 lanes RX errors
+        # re-initializations, see USB3PHY.add_rx_errors_monitors).
         self.comb += self.rx_errors.eq(Mux(self.rate_10g, self.gen2_rx_errors,
-            self.rx_error_monitor.errors))
+            self.rx_error_monitor.errors) | self.rx_errors_hold)
 
     def add_timing_constraints(self, platform, sys_clk, xcvr, with_tx=True):
         """Transceiver TX/RX clocks constraints (with_tx: False when the TX clock is shared with

@@ -497,6 +497,15 @@ class USB3PHY(LiteXModule):
                 )
             ]
             L.comb += request.eq(reset != 0)
+            # rx_errors held during the re-initialization and its holdoff (not monitored): a lane
+            # receiving a Warm Reset LFPS in U0 decodes errors continuously and is re-initialized
+            # every ~110us, the RX reset clearing the decode errors monitor: the Warm Reset
+            # (ResetDetectDelay of continuous LFPS) was never detected (two lanes Tang build, t16s).
+            # The monitor itself stays in the RX clock domain reset with the RX: reset-less, it kept
+            # its errors through a RX reset without RX clock (Acorn GTP: re-initialization loop,
+            # no training, t16t).
+            if hasattr(s, "rx_errors_hold"):
+                L.comb += s.rx_errors_hold.eq((reset != 0) | (hold != 0))
             requests.append(request)
         return requests
 

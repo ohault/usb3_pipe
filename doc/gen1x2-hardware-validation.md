@@ -1058,6 +1058,16 @@ reset-less RX clock domain (the lanes RX errors re-initializations of a lane rec
 cleared it every ~110us, never reaching tResetDelay); `LaneDeskew` `error_symbol`: a word with a decode error (K28.4)
 breaks the gap and disarms the search (a not yet word aligned lane's garbage counted as a gap: its first COM paired
 with a later TS of the other lane, the lanes an Ordered Set apart, `test_deskew_late_lane_errors_no_gap`).
+t16t (ed8749f; report `build/hw_runs/mixed_t16/t16t/report_t16t.md` on the NUC): A, Gen 1x2 PRBS with the
+new Acorn Host: 0/5, no U0 (the Acorn sees almost no TS1, decode errors on both lanes; the Tang Lane 1 never
+locks); the t16s Tang build fails the same with it and locks again 20/20 with the t16s Acorn: the Acorn build.
+The reset-less `RXErrorMonitor` is the suspect (the deskew only runs after the Gen 1x2 negotiation): through a
+GTP RX reset (RX clock stopped) it kept its errors, the lanes RX errors re-initialization saw them after its
+holdoff and re-initialized again, a loop. B, Warm Reset with the lanes swapped (new Tang, t16s Acorn): still
+not detected (0/3). C: Tang lanes clock 95.4MHz (449 endpoints), sys 74.3MHz, RX met. Acorn -> Tang still
+mis-paired with the t16s Acorn (its deskew fix only in the Tang build: the mis-pairing is the Tang's receive).
+Fix: `RXErrorMonitor` back in the RX clock domain (reset with the RX), `rx_errors` held (`rx_errors_hold`)
+during a lanes RX errors re-initialization and its holdoff instead.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
