@@ -196,7 +196,13 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   (both Q1 lanes in one GTR12 instance, `GW5UPARArbiter`, `gw5_gtr12_share_quad`, sys on the Lane 0 TX clock at
   125MHz, `usb3_5g_x2.toml`; its `.csr` to generate on the NUC). Wiring: acorn1 (1-3) SFP-0 <-> Tang SFP0, acorn1
   SFP-1 <-> acorn2 (1-5) SFP-1 (Gen 1x2 Acorn/Tang needs acorn SFP-1 <-> Tang SFP1). NUC session for this bench:
-  reactive-turtle (t16j nested Gen 1x1, t16k single-lane combinations + x2 .csr). Next: TX buffer bypass/phase, CDR/LPM.
+  reactive-turtle. Results: t16j (Gen 1x1 Acorn Host <-> Tang Device, 426/500):
+  the noise follows the Acorn re-inits in both directions, not the Tang loads; t16k Acorn <-> Acorn over SFP-1
+  200/200; t16l/t16m Tang Host <-> Acorn Device Gen 1x1 20/20..100/100; TS2 checker now needs 2 identical TS2s
+  for the config and 8 identical for a detection (spec, kept; the Loopback seen was a state table misdecode:
+  Tang Gen 1x1 has no U1/U2 states); Gen 1x2 Acorn <-> Tang (t16m B): U0 at Gen 1x2, Tang TX clean (0 errors at
+  the Acorn), Tang RX lanes data corrupt after decode: the Tang --lanes 2 builds reach only 72-80MHz for the
+  125MHz sys (lanes PHY needs a split clocking like Gen 1x1 pipe_cd). Next: TX buffer bypass/phase, CDR/LPM.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

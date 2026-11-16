@@ -961,12 +961,13 @@ p 3e-6: the Acorn re-init restarts its TX, RX and Quad PLL together); Tang RX: c
 per run) or whole numbers of ~153550-error episodes (fixed-length bursts); Acorn RX three groups (~1e2,
 3e3-9e3, 3e4-1e5). After every Tang reload the Acorn Host stayed in U0 (no partner loss detected) and
 the Tang went to Compliance: a Host link reset needed (draw 0 = load + Host reset). Post-script Recovery
-bursts (3/50 draws, ~3s, ~400 Recovery cycles/s): Host Hot Reset, the Tang to WarmReset then Loopback.
-Cause found in the TS2 checker: the Link Functionality Symbol (Reset/Loopback bits) excluded from the
-Ordered Set compare and reported from any single TS2 received without 8b/10b error, a bit error there
-decoding as a valid Symbol (disparity errors) directing Loopback or a Hot Reset; fixed: the config
-reported when two consecutive TS2s carry it, a detection on 8 identical TS2s (7.5.4.9.2,
-`test_ts2_checker_link_config_corrupted`).
+bursts (3/50 draws, ~3s, ~400 Recovery cycles/s): reported as the Tang going WarmReset then Loopback,
+but decoded with the U1/U2 LTSSM state table (the Tang Gen 1x1 PHY has no U1/U2 states: every state
+from 7 up 2 lower): a normal Hot Reset, no WarmReset/Loopback (t16m correction). Reviewing it found
+a real weakness, fixed anyway: the TS2 Link Functionality Symbol (Reset/Loopback bits) excluded from
+the Ordered Set compare and reported from any single TS2 received without 8b/10b error (a bit error
+there can decode as a valid Symbol); now reported when two consecutive TS2s carry it, a detection on
+8 identical TS2s (7.5.4.9.2, `test_ts2_checker_link_config_corrupted`).
 t16k (Gen 1x1 over the SFP-1 cable, `bench/acorn.py --sfp 1`, 5 Device loads x 20 runs): acorn1 Host <->
 acorn2 Device 100/100, acorn2 Host <-> acorn1 Device 100/100, 2 Recoveries per run (the script's resets),
 idle U0 silent; Acorn WNS +0.165/+0.118/+0.086ns. The Acorn Host does not leave U0 when the Device is
@@ -979,6 +980,24 @@ two build fixes (lane CPLL lock single driver, lane 1 TX clock alias not kept); 
 for 125MHz, WNS -4.11ns) but 5/5 loads to U0 and 100/100 runs, idle U0 silent; one load noisy in the Tang
 TX -> Acorn RX direction (~234k disparity errors, 20/20); after some loads 2-14s of training cycles before
 U0.
+t16m phase A (d800b7b): Acorn builds WNS +0.199..+0.313ns, Tang Gen 1x1 Device -0.045ns (one RX error
+counter carry), Tang `--lanes 2` builds fail 125MHz (Device PRBS 71.6MHz/-5.96ns, Host 79.9MHz/-4.52ns,
+Device Core 73.1MHz/-5.67ns: LanesNoiseMonitor 32-bit subtraction, Link RX aligner, CSR read mux; mostly
+routing, the sys clock straight from the GTR12 TX clock ~3.3ns late with a 9493 fanout). A2 (acorn1 Host <->
+Tang Gen 1x1 Device, 5 loads x 3 draws x 10 runs): 146/150, the 4 failures 2s timeouts on one very noisy
+draw (~80 U0 exits per run, ~2e7 decode errors per run); the t16j failures all showed step 826 (the script
+step counter is reset on an error: the failing step is lost); after the script a failed Recovery back to
+Polling and U0 within ~100ms on 11/15 draws; noise unchanged by the TS2 fix (recurring ~247.9k disparity
+error bursts at the Tang). A3: merged lanes configuration, Tang Host x2 build at Gen 1x1 <-> acorn1 Device
+20/20, Lane 1 RX clock 124.64MHz (32.15MHz with the lane 0 `.csr`), Lane 1 PLL locked (no cable).
+t16m phase B (Gen 1x2 Acorn <-> Tang, acorn1 SFP-0/SFP-1 <-> Tang SFP0/SFP1): B1 PRBS: U0 at Gen 1x2 at the
+first try, the Acorn receives 37GB from the Tang with 0 errors, the Tang PRBS checker ~535M errors per 5s
+(constant to 0.01%, per lane 8b/10b counters unchanged: after the decode, in the deskew/lanes merge/64-bit
+words, the builds failing timing); Gen 1x1 0 errors both ways. B2 (acorn1 Host <-> Tang Device Core) and B3
+(Tang Host <-> acorn1 Device): no lasting U0 (U0 at Gen 1x2 ~70 times in 15s, each lost through Recovery);
+B4 Gen 1x1 cross-check 20/20. After B2 a deadlock: Tang in WarmReset, Acorn Host cycling Polling/WarmReset.
+Gen 1x2 on the Tang needs the lanes PHY off the 125MHz sys (Gen 1x1 runs the PIPE at 125MHz and the rest at
+62.5MHz).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
