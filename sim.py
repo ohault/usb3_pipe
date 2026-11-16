@@ -386,7 +386,7 @@ class USB3PIPESim(SoCMini):
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
         host_lbad_test=False, host_burst_duplex=0, host_burst_duplex_skp=False,
         host_recovery_mid=False, host_recovery_cut=False, dev_link_ppm=None, lane_skp_error=None,
-        lane_slip=None, lane_rx_log=None, lane_com_error=None, lanes_reinit=None):
+        lane_slip=None, lane_rx_log=None, lane_com_error=None, lanes_reinit=None, host_phy_reset=None):
         assert lanes in [1, 2]
         assert (link_words == 1) or (lanes == 1)
         assert (not gen2) or ((lanes == 1) and gen2_capable)
@@ -667,13 +667,28 @@ class USB3PIPESim(SoCMini):
 
         # Host started late (PHY held in reset): the Device trains alone (ex: Device board loaded
         # first, its Polling.LFPS timing out to Compliance before the Host starts).
+        host_resets = []
         if host_start_delay:
             host_held = Signal(reset=1)
             self.sync += If(host_held & (timer == int(host_start_delay)),
                 Display("[%08d] HOST started", timer),
                 host_held.eq(0),
             )
-            self.comb += phys["host"].reset.eq(host_held)
+            host_resets.append(host_held)
+
+        # Host PHY held in reset for CYCLES from CYCLE (the Host retrained alone, as
+        # bench/usb3_debug.py retrain on the Host board: the Device in U0 sees the Host leave).
+        if host_phy_reset is not None:
+            cycle, cycles = (tuple(host_phy_reset) + (12500,))[:2]
+            held = Signal()
+            self.comb += held.eq((timer >= cycle) & (timer < cycle + cycles))
+            self.sync += [
+                If(timer == cycle, Display("[%08d] HOST PHY RESET", timer)),
+                If(timer == cycle + cycles, Display("[%08d] HOST PHY RESET RELEASED", timer)),
+            ]
+            host_resets.append(held)
+        if host_resets:
+            self.comb += phys["host"].reset.eq(Reduce("OR", host_resets))
 
         # Host port reset policy (bench/usb3_soc.py USB3HostPortReset: Warm Reset when U0 is not
         # reached, as the host software), timeout scaled with the LTSSM timers.
@@ -1118,6 +1133,7 @@ def main():
     parser.add_argument("--host-hot-reset", default=0, type=int, help="Host directed to N Hot Resets from U0 after the script, each one at the U0 entry after the previous one (back to U0 on both sides).")
     parser.add_argument("--host-recovery", action="store_true", help="Host directed to Recovery from U0 after the script (back to U0 on both sides).")
     parser.add_argument("--host-deskew-clear", action="store_true", help="With --host-recovery --lanes 2: Host deskew cleared in Recovery.Idle (U0 entered without deskew).")
+    parser.add_argument("--host-phy-reset", default=None, help="CYCLE[,CYCLES]: Host PHY held in reset for CYCLES (default 12500) from CYCLE (the Host retrained alone, the Device in U0).")
     parser.add_argument("--host-start-delay", default=0, help="Host PHY held in reset for N cycles (the Device trains alone first, ex: --timer-scale 100 --host-start-delay 600000: Device in Compliance).")
     parser.add_argument("--dev-x2-disable", action="store_true", help="--lanes 2: Device Gen 1x2 capability disabled at runtime (x2_enable = 0): Gen 1x1 negotiated.")
     parser.add_argument("--host-script",   default=None, type=int, help="--lanes 2 --lanes-core: hardware scripted host (bench/usb3_soc.py USB3HostScript), its run enabled after N cycles (idle before, as on the boards).")
@@ -1175,6 +1191,7 @@ def main():
         host_hot_reset        = args.host_hot_reset,
         host_deskew_clear     = args.host_deskew_clear,
         host_start_delay      = int(args.host_start_delay),
+        host_phy_reset        = None if args.host_phy_reset is None else tuple(int(v) for v in args.host_phy_reset.split(",")),
         host_port_reset       = args.host_port_reset,
         dev_x2_disable        = args.dev_x2_disable,
         host_script_delay     = args.host_script,
