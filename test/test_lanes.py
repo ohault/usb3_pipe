@@ -116,10 +116,10 @@ class TestLanes(unittest.TestCase):
         run_simulation(dut, [lane_gen(dut, 0), lane_gen(dut, 1), checker(dut)])
         self.assertEqual(out, [marker_word] + words)
 
-    def run_deskew(self, lanes, cycles=300):
+    def run_deskew(self, lanes, cycles=300, error_symbol=None):
         class DUT(LiteXModule):
             def __init__(self):
-                self.deskew    = LaneDeskew(0xbcbcbcbc, 0b1111)
+                self.deskew    = LaneDeskew(0xbcbcbcbc, 0b1111, error_symbol=error_symbol)
                 self.destriper = LaneDestriper()
                 for lane in range(2):
                     self.comb += self.deskew.sources[lane].connect(self.destriper.sinks[lane])
@@ -252,6 +252,36 @@ class TestLanes(unittest.TestCase):
             [self.stripe(w, 1) for w in first[late:] + idle + last + data]
         out = self.run_deskew([lane0, lane1], cycles=400)
         self.assertEqual(out, last + data)
+
+    def test_deskew_late_lane_errors_no_gap(self):
+        # Lane 1 not word aligned yet (garbage with decode errors substituted, K28.4) while Lane 0
+        # already receives the TS Ordered Sets, its first marker one Ordered Set later than Lane 0's
+        # (within the FIFOs depth: no overflow, t16s). The garbage with errors is not a gap and
+        # disarms a search armed before it: no pairing until a clean gap on both lanes (Logical
+        # Idle), the next TS paired.
+        rng    = random.Random(6)
+        marker = (0xbcbcbcbcbcbcbcbc, 0xff)
+        sub    = (0x9c9c9c9c9c9c9c9c, 0xff)
+        def ts(n):
+            r = []
+            for _ in range(n):
+                r += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
+            return r
+        gap, first = [(0, 0)]*20, ts(10)
+        idle = [(0, 0)]*24
+        last = ts(4)
+        data = [(rng.getrandbits(64), rng.getrandbits(8) & 0x7f) for _ in range(16)]
+        late = 4 # One Ordered Set.
+        garbage = [self.stripe(sub, 1) if i % 3 == 0 else (rng.getrandbits(32) & 0x7f7f7f7f, 0)
+            for i in range(24 + late)]
+        lane0 = [self.stripe(w, 0) for w in gap + [(0, 0)]*24 + first + idle + last + data]
+        lane1 = [self.stripe(w, 1) for w in gap] + garbage + \
+            [self.stripe(w, 1) for w in first[late:] + idle + last + data]
+        out = self.run_deskew([lane0, lane1], cycles=400, error_symbol=0x9c)
+        self.assertEqual(out, last + data)
+        # Without the error Symbol check, the garbage is a gap: the lanes paired one Ordered Set apart.
+        out = self.run_deskew([lane0, lane1], cycles=400)
+        self.assertNotEqual(out[-len(data):], data)
 
     def test_deskew_lost_on_lane_shift(self):
         # Lane 0 one word late from the middle of the TS stream (word dropped on Lane 1: lanes no

@@ -207,7 +207,11 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   overflow while armed/aligned clears and flushes). Tang Gen 1x2 PRBS builds now split (USB3PHY lanes=2 pipe_cd:
   lanes logic/PRBS at 125MHz on the Lane 0 TX clock, LTSSM/SoC at 62.5MHz; `sim.py --lanes 2 --dev-pipe-cd`,
   `test_phy_x2_dev_pipe_cd*`); `--lanes-core` builds still single 125MHz domain. Lane 1 CDR re-acquisition on RX
-  resets (`GW5CDRToggle`, t16r). t16s (CDR toggle, split builds) pending: bench reserved for White Rabbit. Next: TX buffer bypass/phase, CDR/LPM.
+  resets (`GW5CDRToggle`, t16r). t16s (387554e): split builds sys met, lanes clock 99.9MHz/125 (PRBS checker compare, deskew); CDR toggle harmful
+  (9/9 no U0, now `--cdr-toggle`, off); without it Gen 1x2 Acorn <-> Tang U0 11/11, Tang -> Acorn clean 10/11, Acorn ->
+  Tang 3/11 (deskew mis-pairing without overflow; clean runs 610MB/s 0 errors); two lanes Tang build blind to the
+  Warm Reset. Fixes: reset-less `RXErrorMonitor` (lanes RX re-inits cleared it), deskew `error_symbol` (decode
+  error words break the gap/disarm). Next: t16t (re-check), lanes clock timing, Device Core on the split design.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

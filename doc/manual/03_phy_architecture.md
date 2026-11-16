@@ -325,7 +325,10 @@ so a lane never sends a word the other lane does not send. Each lane has its own
 and its own polarity.
 
 On receive, the deskew pairs the first COM symbols of each lane after a gap, the TSEQ before the
-TS1 or the Logical Idle before a Recovery, whatever the lanes latencies (`LaneDeskew`). The
+TS1 or the Logical Idle before a Recovery, whatever the lanes latencies (`LaneDeskew`). A word holding a
+decode error (K28.4) is not part of a gap and disarms the search: a lane that is not word aligned
+yet receives garbage without COM symbols, and its first COM symbol would otherwise be paired with a
+later training sequence of the other lane. The
 destriper then rebuilds the words (`LaneDestriper`). In U0 the PHY goes to Recovery when the
 deskew is lost, when a lane stays in electrical idle for 10 µs, when a lane realigns its words,
 or when a lane receives a run of SKP symbols of odd length. SKP ordered sets are two symbols, so

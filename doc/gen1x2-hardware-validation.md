@@ -1044,6 +1044,20 @@ Not reproduced in simulation (`sim.py --lanes 2 --lanes-crossed --dev-x2-disable
 in U0 while the Host retrains (no Link Layer timeout with the PRBS stand-ins), then detects the Host port reset
 Warm Reset on its swapped Lane 0 after ~25ms (tResetDelay) and both train again: on the Tang, the Warm Reset
 LFPS detection on the GTR12 lane 1 in U0 is the suspect (to check with t16s).
+t16s (387554e, split clocking: Tang lanes logic at 125MHz on the Lane 0 TX clock, LTSSM/SoC at 62.5MHz;
+report `build/hw_runs/mixed_t16/t16s/report_t16s.md` on the NUC): sys 74.7MHz for 62.5MHz and RX clocks met, the
+lanes clock 99.9MHz for 125MHz (-343ns TNS over 443 endpoints, was -2897ns over 2094: PRBS checker 64-bit compare,
+deskew). Gen 1x2 PRBS Acorn Host <-> Tang Device with the CDR toggle: 9/9 fail (no U0, the Tang Lane 1 CDR never
+locks, ~400 toggles/s: the toggle keeps it from locking); without it (`--no-cdr-toggle`), 11 trainings: U0 at Gen
+1x2 every time, both lanes locked, deskew aligned, no Recovery; Tang -> Acorn clean 10/11, Acorn -> Tang clean 3/11
+(the other 8 mis-paired, ~3.16G errors/30s, also once on the Acorn side), the clean ones 610MB/s each way with 0
+errors. The mis-pairing forms without a FIFO overflow (0ba2a12 does not catch it). Warm Reset with lanes swapped:
+the two lanes Tang build never detects the Acorn Host Warm Reset (its Lane 1 sees the bursts, stays in U0), the
+single lane build on SFP1 does (+44). Fixes: the CDR toggle off by default (`--cdr-toggle`); `RXErrorMonitor` in a
+reset-less RX clock domain (the lanes RX errors re-initializations of a lane receiving the Warm Reset LFPS in U0
+cleared it every ~110us, never reaching tResetDelay); `LaneDeskew` `error_symbol`: a word with a decode error (K28.4)
+breaks the gap and disarms the search (a not yet word aligned lane's garbage counted as a gap: its first COM paired
+with a later TS of the other lane, the lanes an Ordered Set apart, `test_deskew_late_lane_errors_no_gap`).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

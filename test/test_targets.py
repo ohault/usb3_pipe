@@ -260,7 +260,8 @@ def test_target_tang_x2(tmp_path):
         csr = elaborate("sipeed_tang_mega_138k_pro", out, ["--lanes", "2", "--role", role,
             "--with-clk-meters"] + args)
         assert "usb3_lanes_debug_xcvr_reinit" in csr and "usb3_rx1_freq_value" in csr
-        assert "usb3_gtr12_lane1_rx_invalid" in csr and "usb3_gtr12_lane1_cdr_toggles" in csr
+        assert "usb3_gtr12_lane1_rx_invalid" in csr
+        assert "usb3_gtr12_lane1_cdr_toggles" not in csr # --cdr-toggle only.
         assert ("usb3_script" in csr) == (role == "host")
         verilog = next((out / "gateware").glob("*.v")).read_text()
         assert len(re.findall(r"\nGTR12_QUAD #\(", verilog)) == 1

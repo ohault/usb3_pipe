@@ -195,7 +195,12 @@ class USB3SerDes(LiteXModule):
         self.rx_idle_stretch = self.rx_idle_filter.stretch_cycles
         self.rx_idle_raw     = self.rx_idle_filter.raw # Unfiltered (debug: glitches in U0).
         self.comb += self.rx_idle.eq(self.rx_idle_filter.idle)
-        self.rx_error_monitor = RXErrorMonitor(xcvr.decoders, clock_domain="rx")
+        # Decode errors monitor in a reset-less RX clock domain: kept through the RX resets (Gen 1x2:
+        # the lanes RX errors re-initializations of a lane receiving a Warm Reset LFPS in U0 cleared it
+        # every ~110us, the Warm Reset, detected after ~18ms of errors, was never seen, t16s).
+        self.cd_rx_errors = ClockDomain(reset_less=True)
+        self.comb += self.cd_rx_errors.clk.eq(ClockSignal("rx"))
+        self.rx_error_monitor = RXErrorMonitor(xcvr.decoders, clock_domain="rx_errors")
         # At 10Gbps (Gen 2, raw 128b/132b words), the 8b/10b decode errors are always set: Gen 2 RX
         # errors (block alignment lost) instead (a Warm Reset LFPS on a Gen 2 link would otherwise
         # be detected after tResetDelay in U0).

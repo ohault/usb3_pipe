@@ -1070,7 +1070,8 @@ class USB3PHY(LiteXModule):
         # without COM words on both lanes (TSEQ in Polling.RxEQ, Logical Idle before Recovery), the
         # same TS1 Ordered Set on both lanes whatever the lanes latencies (6.4ns max lane-to-lane skew
         # at the receiver, Table 6-34, + per lane word alignment/SKP removal/RX buffers latencies).
-        deskew = self.lanes_add("deskew", LaneDeskew(COM.value*0x01010101, 0b1111, depth=deskew_depth))
+        deskew = self.lanes_add("deskew", LaneDeskew(COM.value*0x01010101, 0b1111, depth=deskew_depth,
+            error_symbol=SUB.value))
         destriper = self.lanes_add("destriper", LaneDestriper())
         rx_keep_open = Signal() # Partner's Logical Idle received in an Idle handshake state.
         rx_pass      = Signal()

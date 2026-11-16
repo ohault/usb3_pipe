@@ -259,11 +259,10 @@ answers once the dock reference clock is programmed; these builds do not reach 1
 (69 to 80 MHz measured). `--lean` leaves out the lanes event/error counters and the noise monitor.
 `usb3_gtr12_lane{n}_rx_invalid` counts the cycles without a word in each lane's GTR12 receive
 interface FIFO (`RX_VLD_OUT` low); `--rx-valid-gate` takes the RX words only with it (on hardware it
-starved lane 1 during the training). A lane receive reset only resets the GTR12 PCS: these builds
-also re-acquire the lane CDR on each one (signal detect toggle through UPAR, as the register
-configuration does at start-up; `usb3_gtr12_lane{n}_cdr_toggles`, `--no-cdr-toggle` without it), so
-that the receive re-initializations of the lanes datapath also restart a CDR that did not lock (lane 1
-is silent until the Gen 1x2 negotiation).
+starved lane 1 during the training). A lane receive reset only resets the GTR12 PCS: `--cdr-toggle`
+also re-acquires the lane CDR on each one (signal detect toggle through UPAR, as the register
+configuration does at start-up; `usb3_gtr12_lane{n}_cdr_toggles`). It is off by default: on hardware
+the repeated toggles kept lane 1 from locking.
 
 With `--lean` and the split clocking, a minimal `usb3_phy_status` register keeps the LTSSM state,
 U0 and the transceiver ready. The UVC, Isochronous and composite examples need 32-bit link words,
