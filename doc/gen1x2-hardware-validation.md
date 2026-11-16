@@ -952,6 +952,33 @@ QPLL1) TX fabric clock 125.0065MHz, RX 125.0151MHz. Host t15 build in Gen 1x1 (`
 20/20 scripted runs (0 errors/timeouts), Host Recoveries 1 -> 671, Tang RX errors decode +63674, disparity +924,
 COM-preceding disparity +331; after the script a Recovery burst (Host 671 -> 5366, Tang 847 -> 6071 within ~1 min),
 then quiet (0 Recoveries/errors over 10.7s). Open: that burst; then the nested Acorn Host re-inits x Tang reloads.
+t16j (2026-11-15, nested, Gen 1x1, 10 Tang loads x 5 draws (load, then 4 acorn1 xcvr re-inits) x 10 runs):
+426/500 runs (74 failed, no timeout, not following the draw noise); the line noise follows the Acorn
+re-inits in both directions, not the Tang loads (Tang load share of log(1 + disparity errors per run):
+Acorn TX -> Tang RX 23%, ANOVA p 0.24; Tang TX -> Acorn RX 20%, p 0.38; Acorn RX class kept across Tang
+reloads 9/9 vs across Acorn re-inits 23/40, Fisher p 0.014), both directions noisy together (24/25 draws,
+p 3e-6: the Acorn re-init restarts its TX, RX and Quad PLL together); Tang RX: clean draws (17-92 errors
+per run) or whole numbers of ~153550-error episodes (fixed-length bursts); Acorn RX three groups (~1e2,
+3e3-9e3, 3e4-1e5). After every Tang reload the Acorn Host stayed in U0 (no partner loss detected) and
+the Tang went to Compliance: a Host link reset needed (draw 0 = load + Host reset). Post-script Recovery
+bursts (3/50 draws, ~3s, ~400 Recovery cycles/s): Host Hot Reset, the Tang to WarmReset then Loopback.
+Cause found in the TS2 checker: the Link Functionality Symbol (Reset/Loopback bits) excluded from the
+Ordered Set compare and reported from any single TS2 received without 8b/10b error, a bit error there
+decoding as a valid Symbol (disparity errors) directing Loopback or a Hot Reset; fixed: the config
+reported when two consecutive TS2s carry it, a detection on 8 identical TS2s (7.5.4.9.2,
+`test_ts2_checker_link_config_corrupted`).
+t16k (Gen 1x1 over the SFP-1 cable, `bench/acorn.py --sfp 1`, 5 Device loads x 20 runs): acorn1 Host <->
+acorn2 Device 100/100, acorn2 Host <-> acorn1 Device 100/100, 2 Recoveries per run (the script's resets),
+idle U0 silent; Acorn WNS +0.165/+0.118/+0.086ns. The Acorn Host does not leave U0 when the Device is
+reloaded (the new Device then in Compliance, a Host link reset needed), as with the Tang. Three boards
+wired, a Device can train with the other board on its other cage (two Devices): the unused board held in
+reset. The 1.9.12.04 `serdes_toml_to_csr` rejects the 1.9.10 TOMLs (and Gowin's own examples): no generated
+two lanes `.csr`; the lane 0/1 configurations merged instead (`gw5_csr_merge_lanes`).
+t16l (Tang `--lanes 2 --role host --lanes-core --no-x2`, Gen 1x1 on SFP0, lane 0 `.csr`; acorn1 Device):
+two build fixes (lane CPLL lock single driver, lane 1 TX clock alias not kept); sys timing fails (82.6MHz
+for 125MHz, WNS -4.11ns) but 5/5 loads to U0 and 100/100 runs, idle U0 silent; one load noisy in the Tang
+TX -> Acorn RX direction (~234k disparity errors, 20/20); after some loads 2-14s of training cycles before
+U0.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

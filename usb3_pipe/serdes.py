@@ -620,13 +620,20 @@ def gw5_gtr12_share_quad(owner, gtr12, lane, tx_clk=None):
         if any(p in k for p in prefixes) and not isinstance(v, Constant):
             owner.gtr12_params[k] = v
     gtr12.do_finalize = lambda: None
+    # Lane CPLL lock from the owner's instance into its own signal: plls_lock then has a single
+    # (combinatorial) driver, not a mix of instance output and assignment (invalid Verilog).
+    cpll_lock = Signal()
+    owner.gtr12_params[f"o_FABRIC_LANE{lane}_CMU_OK_O"] = cpll_lock
     gtr12.comb += [
-        gtr12.plls_lock[:2].eq(owner.plls_lock[:2]),
+        gtr12.plls_lock.eq(Cat(owner.plls_lock[:2], cpll_lock)),
         gtr12.refclk_det.eq(owner.refclk_det),
     ]
     if tx_clk is not None:
         del owner.gtr12_params[f"o_LANE{lane}_PCS_TX_O_FABRIC_CLK"]
         owner.gtr12_params[f"i_LANE{lane}_FABRIC_TX_CLK"] = tx_clk
+        # Alias of tx_clk: not kept, so that synthesis merges it into tx_clk (both kept: the merged
+        # net can take the alias name and lose tx_clk's timing constraint).
+        gtr12.cd_tx.clk.attr.discard(("syn_keep", 1))
         gtr12.comb += gtr12.cd_tx.clk.eq(tx_clk)
 
 class GW5TXElectricalIdle(LiteXModule):

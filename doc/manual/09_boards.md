@@ -248,9 +248,11 @@ IDE 1.9.12. The clocking changes a few defaults of the shared options:
 
 `--lanes 2` (experimental) builds a Gen 1x2 PHY on SFP0 (lane 0) and SFP1 (lane 1), as the Acorn
 `--lanes 2` builds: PRBS stand-ins, or with `--lanes-core` the scripted host (`--role host`) or the
-device core. Both lanes share one GTR12 instance, one UPAR and one register configuration
-(`usb3_5g_x2.csr`, generated from `usb3_5g_x2.toml`, or `--serdes-csr`); `sys` runs at 125 MHz on
-the lane 0 TX clock, so the bridge only answers once the dock reference clock is programmed.
+device core. Both lanes share one GTR12 instance, one UPAR and one register configuration: the
+lane 0 and lane 1 configurations merged (`gw5_csr_merge_lanes`), or `usb3_5g_x2.csr` once generated
+from `usb3_5g_x2.toml` (the 1.9.12 tools do not accept the 1.9.10 TOML files), or `--serdes-csr`.
+`sys` runs at 125 MHz on the lane 0 TX clock, so the bridge only answers once the dock reference
+clock is programmed.
 
 With `--lean` and the split clocking, a minimal `usb3_phy_status` register keeps the LTSSM state,
 U0 and the transceiver ready. The UVC, Isochronous and composite examples need 32-bit link words,
