@@ -254,11 +254,10 @@ from `usb3_5g_x2.toml` (the 1.9.12 tools do not accept the 1.9.10 TOML files), o
 `sys` runs at 125 MHz on the lane 0 TX clock, so the bridge only answers once the dock reference
 clock is programmed. These builds do not reach 125 MHz on the GW5A (72 to 80 MHz measured): the
 transmitted lanes are clean, the received words are corrupted after the 8b/10b decode. `--lean`
-leaves out the lanes event/error counters and the noise monitor (timing measurements). The RX
-words of each lane are taken only when the GTR12 receive interface FIFO has one (`RX_VLD_OUT`,
-`usb3_gtr12_lane{n}_rx_invalid` counts the cycles without; `--no-rx-valid-gate` takes them every
-cycle, as the Gen 1x1 builds): a cycle without a word would otherwise decode a repeated word without
-an 8b/10b error and leave that lane one word off the other.
+leaves out the lanes event/error counters and the noise monitor (timing measurements).
+`usb3_gtr12_lane{n}_rx_invalid` counts the cycles without a word in each lane's GTR12 receive
+interface FIFO (`RX_VLD_OUT` low); `--rx-valid-gate` takes the RX words only with it (on hardware it
+starved lane 1 during the training).
 
 With `--lean` and the split clocking, a minimal `usb3_phy_status` register keeps the LTSSM state,
 U0 and the transceiver ready. The UVC, Isochronous and composite examples need 32-bit link words,

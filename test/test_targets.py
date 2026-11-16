@@ -272,8 +272,7 @@ def test_target_tang_x2(tmp_path):
         tcl = (out / "gateware" / "run.tcl").read_text()
         assert tcl.count("set_csr ") == 1
         assert "0x900b91,0x0000F300" in tcl
-        # RX words taken with the GTR12 RX_VLD_OUT (registered as the decoders outputs).
-        assert re.search(r"assign \w*rx_substitution_sink_valid = \w*rx_valid;", verilog)
+
 
 def test_target_tang_x2_lean(tmp_path):
     # Tang Gen 1x2 --lean: USB3LanesDebug status/control/re-initialization only (timings).

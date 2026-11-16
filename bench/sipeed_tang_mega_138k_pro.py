@@ -720,7 +720,7 @@ class USB3X2SoC(USB3BaseSoC):
     lanes arbitrated: Lane 1 bursts edges a UPAR write later)."""
     def __init__(self, platform, refclk="100M", csr_config=None, role="device", x2_capable=True,
         lanes_core=False, example="loopback", with_clk_meters=False, with_analyzer=False,
-        analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, rx_valid_gate=True, **kwargs):
+        analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, rx_valid_gate=False, **kwargs):
         sys_clk_freq  = 125e6
         xcvr_clk_freq = 62.5e6
 
@@ -823,7 +823,7 @@ def main():
     x2_group.add_argument("--role",       default="device",    help="USB3PHY role with --lanes 2.", choices=["device", "host"])
     x2_group.add_argument("--no-x2",      action="store_true", help="--lanes 2: not Gen 1x2 capable (Gen 1x1 on SFP0).")
     x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2: scripted USB host (Host role) or Device Core (Device role, --example) instead of the PRBS stand-ins.")
-    x2_group.add_argument("--no-rx-valid-gate", action="store_true", help="--lanes 2: RX words taken every rx cycle, not only with the GTR12 RX_VLD_OUT (A/B).")
+    x2_group.add_argument("--rx-valid-gate", action="store_true", help="--lanes 2: RX words taken only with the GTR12 RX_VLD_OUT (A/B: Lane 1 starved in training on hardware, t16q).")
     usb3_soc_args(parser, output_dir="build/sipeed_tang_mega_138k_pro")
     args = parser.parse_args()
     if args.lanes == 1:
@@ -857,7 +857,7 @@ def main():
             example         = example,
             with_clk_meters = args.with_clk_meters,
             lean            = args.lean,
-            rx_valid_gate   = not args.no_rx_valid_gate,
+            rx_valid_gate   = args.rx_valid_gate,
             **usb3_args)
         usb3_soc_build(parser, args, soc)
         return

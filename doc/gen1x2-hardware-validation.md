@@ -1024,6 +1024,12 @@ Capture: in Recovery the lanes now paired right on the TS1s (Lane 1 one word ahe
 stalls for 20+ words while Lane 0 flows: Lane 0's FIFO overflows, the pairing cleared, no gap in the TS stream to
 re-pair, U0 entered unpaired and left after 9 words (deskew lost). The Lane 1 stall also caused the t16o
 mis-pairing. Suspect: the Lane 1 RX re-initialization on continuous decode errors (t16q).
+t16q: not the RX re-initialization (all Recovery/re-init controls off: the same loop, ~63 Host and ~32 Tang
+Recoveries/s). In the loop the Tang Lane 1 decodes errors on more than half of its cycles (~70M/s, 0.2 TS1/s)
+while Lane 0 receives 1.47M TS1/s; Lane 1's datapath stops delivering words (no electrical idle). By Tang
+build: d800b7b and 86f960e stable in U0 (with the t16o mis-pairing), 18bf9b4 (RX_VLD_OUT gate) loops (held U0
+in t16o after ~1000 Recoveries), 0ba2a12 loops always; same GTR12 configuration in all. The RX_VLD_OUT gate is
+off by default again (`--rx-valid-gate`); next: Lane 1 alone at Gen 1x1 (single lane and merged configurations).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
