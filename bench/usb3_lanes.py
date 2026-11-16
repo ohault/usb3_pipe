@@ -75,7 +75,8 @@ class USB3LanesClient:
             "u0_count"       : dbg["u0"],
             "recovery_count" : dbg["recovery"],
         }
-        r.update({name: self.reg(f"usb3_lanes_debug_{name}_count").read() for name in LANES_COUNTERS})
+        r.update({name: self.reg(f"usb3_lanes_debug_{name}_count").read() for name in LANES_COUNTERS
+            if hasattr(self.bus.regs, f"usb3_lanes_debug_{name}_count")}) # Not in the lean builds.
         # U0 exits requested by the lanes (Recovery causes) and lanes RX idle cycles in U0.
         for name in ["deskew_lost_u0", "lane_idle_u0", "realign_u0", "skp_odd_u0", "com_slip", "lane0_rx_idle_u0_cycles", "lane1_rx_idle_u0_cycles"] + [
             f"lane{lane}_{name}" for lane in range(2) for name in ["rx_buferror", "rx_realign", "rx_skp_odd", "rx_com_partial", "rx_errors_reinit",
@@ -420,8 +421,15 @@ def main():
                     result = "timeout" # Script not done (ex: link not in U0).
                     break
             results[result] += 1
+            info = {}
+            if result == "error" and hasattr(bus.regs, "usb3_script_error_step"):
+                # Failing step latched at the error (the step counter restarts after it).
+                e = lanes.reg("usb3_script_error_step").read()
+                step = e & 0xffff
+                info = {"error_ltssm": lanes.dbg.state_name((e >> 16) & 0xff),
+                    "error_u0": (e >> 24) & 0x1, "error_x2": (e >> 25) & 0x1}
             print(json.dumps({"run": run, "result": result, "step": step, "section": section(step),
-                "time_ms": round(1e3*(time.time() - start), 1)}), flush=True)
+                **info, "time_ms": round(1e3*(time.time() - start), 1)}), flush=True)
         lanes.reg("usb3_script_control").write(lanes.reg("usb3_script_control").read() & ~1)
         status = lanes.status()
         resets = {"resets_csr": lanes.reg("usb3_script_resets").read()} if hasattr(bus.regs, "usb3_script_resets") else {}

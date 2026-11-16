@@ -36,6 +36,7 @@ from litescope import LiteScopeAnalyzer
 
 from usb3_pipe.phy      import USB3PHY, USB3PHYX1Link, USB3PHYX2Link
 from usb3_pipe.prbs     import PRBSLinkTester
+from usb3_pipe.gen      import get_ltssm_state_localparam
 from usb3_pipe.datapath import Gen2RXDatapath
 from usb3_pipe.debug    import USB3PHYDebug, USB3LanesDebug, USB3SerDesDebug, Gen2RXDebug
 from usb3_pipe.debug    import usb3_analyzer_groups, USB3_ANALYZER_GROUPS
@@ -403,6 +404,13 @@ def add_usb3_profile(soc, phy):
         counts.append(c)
     soc.comb += soc.usb3_profile.status.eq(Cat(*counts))
 
+def add_ltssm_states_constants(soc, phy):
+    """LTSSM states encoding of the build as SoC constants (csr.csv: usb3_ltssm_<state>): the encoding
+    depends on the PHY options (ex: no U1/U2 states with with_u1u2=False), the debug clients decode
+    the ltssm_state values with it (bench/usb3_debug.py)."""
+    for name, value in phy.ltssm_states.items():
+        soc.add_constant(get_ltssm_state_localparam("usb3", name), value)
+
 def add_usb3_device(soc, serdes, leds=[], leds_inverted=False,
     with_serdes_debug = False,
     with_core         = True,
@@ -442,6 +450,7 @@ def add_usb3_device(soc, serdes, leds=[], leds_inverted=False,
         pipe_cd       = phy_cd,
         pipe_clk_freq = phy_clk_freq,
         with_u1u2     = with_lpm or (phy_cd is None)) # U1/U2 only with LPM on slow fabrics.
+    add_ltssm_states_constants(soc, usb3_phy)
     if (phy_cd is not None) and not with_debug:
         # Minimal PHY status (no USB3PHYDebug): LTSSM state (get_ltssm_states), U0, SerDes ready.
         usb3_phy.status = CSRStatus(fields=[
@@ -491,10 +500,11 @@ def add_usb3_device(soc, serdes, leds=[], leds_inverted=False,
 # USB3 Gen 1x2 Link (PRBS) -------------------------------------------------------------------------
 
 def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], leds_inverted=False,
-    with_core = False,
-    example   = "loopback",
-    with_lpm  = False,
-    max_burst = 8):
+    with_core     = False,
+    example       = "loopback",
+    with_lpm      = False,
+    max_burst     = 8,
+    with_counters = True):
     """Add a Gen 1x2 link on serdes (2 lanes, Lane 0: Configuration Lane) to soc: USB3PHY(lanes=2) in
     the Host or Device role + debug (USB3PHYDebug on Lane 0, USB3LanesDebug), PRBS Link-Layer stand-ins
     (PRBSLinkTester on the 64-bit link words) and LEDs (SerDes ready, U0, x2 negotiated).
@@ -515,7 +525,8 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     - examples with 64-bit endpoints (loopback, wishbone, bench): USB3PHYX2Link, SuperSpeedPlus at
       Gen 1x2 with a Gen 1x2 host, SuperSpeed at Gen 1x1 otherwise.
     - other examples (32-bit endpoints): USB3PHYX1Link, the PHY not x2 capable: Gen 1x1.
-    LEDs: SerDes ready, U0, lanes swapped."""
+    LEDs: SerDes ready, U0, lanes swapped. with_counters=False: USB3LanesDebug without its event/RX
+    errors counters and noise monitor (lean builds)."""
     sys_clk_freq = soc.sys_clk_freq
     assert len(serdes) == 2
     host_script = with_core and (role == "host")
@@ -535,6 +546,7 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
         with_endianness_swap = False,
         lanes                = 2,
         x2_capable           = x2_capable)
+    add_ltssm_states_constants(soc, usb3_phy)
     if (not with_core) or host_script:
         soc.comb += usb3_phy.link_activity.eq(1) # No (native) Link Layer: no PM activity.
 
@@ -565,7 +577,8 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     # Lanes Debug (with the USB3PHYX2Link RX buffer overflow/drops, transceivers re-initialization
     # held 10us) ------------------------------------------------------------------------------------
     soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes, link=usb3_link,
-        reinit_cycles=int(sys_clk_freq*10e-6), monitor_tick_cycles=int(sys_clk_freq*1e-3))
+        reinit_cycles=int(sys_clk_freq*10e-6), monitor_tick_cycles=int(sys_clk_freq*1e-3),
+        with_counters=with_counters)
 
     # Host Port Reset (Host role: Warm Reset when U0 is not reached, as the host software) --------
     if role == "host":
@@ -858,6 +871,28 @@ class USB3HostScript(LiteXModule):
                 signal_d.eq(signal),
                 If(signal & ~signal_d, csr.status.eq(csr.status + 1)),
             ]
+
+        # Last failed test run (the step counter restarts after an error: the failing step would be
+        # lost): step and LTSSM state at the error, and the runs count then (last CSR: earlier CSRs
+        # addresses unchanged).
+        self._error_step = CSRStatus(fields=[
+            CSRField("step",  size=16, offset=0,  description="Step of the last failed test run."),
+            CSRField("ltssm", size=8,  offset=16, description="LTSSM state at the error (csr.csv usb3_ltssm_* encoding)."),
+            CSRField("u0",    size=1,  offset=24, description="Link in U0 at the error."),
+            CSRField("x2",    size=1,  offset=25, description="Gen 1x2 negotiated at the error."),
+        ])
+        error_d = Signal()
+        error   = Signal()
+        self.comb += error.eq(test & run & model.error)
+        self.sync += [
+            error_d.eq(error),
+            If(error & ~error_d,
+                self._error_step.fields.step.eq(model.step),
+                self._error_step.fields.ltssm.eq(link.ltssm_state),
+                self._error_step.fields.u0.eq(link.u0),
+                self._error_step.fields.x2.eq(link.x2),
+            )
+        ]
 
 # USB3 Analyzer ------------------------------------------------------------------------------------
 

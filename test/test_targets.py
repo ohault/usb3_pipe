@@ -153,7 +153,7 @@ def test_target_lanes_host_script(tmp_path):
     # Acorn Mini, Gen 1x2 PHY in the Host role with the scripted USB host (USB3HostScript on a
     # USB3PHYX2Link): the script CSRs, no PRBS stand-ins, both lanes.
     csr = elaborate("acorn", tmp_path, ["--lanes", "2", "--role", "host", "--lanes-core"])
-    for csr_name in ["usb3_script_control", "usb3_script_status", "usb3_script_step",
+    for csr_name in ["usb3_script_control", "usb3_script_status", "usb3_script_step", "usb3_script_error_step",
         "usb3_script_passes", "usb3_script_fails", "usb3_lanes_debug_rx_drop_count",
         "usb3_script_ss_start", "usb3_script_ssp", "usb3_port_reset_count",
         "usb3_lanes_debug_control", "usb3_lanes_debug_lane0_rx_disparity_errors_count",
@@ -271,6 +271,32 @@ def test_target_tang_x2(tmp_path):
         tcl = (out / "gateware" / "run.tcl").read_text()
         assert tcl.count("set_csr ") == 1
         assert "0x900b91,0x0000F300" in tcl
+
+def test_target_tang_x2_lean(tmp_path):
+    # Tang Gen 1x2 --lean: USB3LanesDebug status/control/re-initialization only (timings).
+    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path, ["--lanes", "2", "--lean"])
+    assert "usb3_lanes_debug_status" in csr and "usb3_lanes_debug_xcvr_reinit" in csr
+    assert "usb3_lanes_debug_lane0_ts1_count" not in csr
+    assert "usb3_lanes_debug_monitor" not in csr
+    assert "usb3_prbs_rx_errors" in csr
+
+def test_target_ltssm_states_constants(tmp_path):
+    # LTSSM states encoding of the build in csr.csv (Tang Gen 1x1: no U1/U2 states, the states after
+    # U0 shifted), decoded by the debug client (t16j: HotReset.Active read as Loopback with the
+    # default encoding).
+    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path, ["--example", "loopback"])
+    constants = {}
+    for line in csr.splitlines():
+        row = line.split(",")
+        if row[0] == "constant" and row[1].startswith("usb3_ltssm_"):
+            constants[row[1]] = int(row[2])
+    assert "usb3_ltssm_u1" not in constants
+    sys.path.insert(0, str(ROOT / "bench"))
+    from types import SimpleNamespace
+    from usb3_debug import USB3DebugClient
+    client = USB3DebugClient(SimpleNamespace(constants=SimpleNamespace(d=constants)))
+    assert client.state_name(constants["usb3_ltssm_hotreset_active"]) == "HotReset.Active"
+    assert client.state_name(constants["usb3_ltssm_u0"]) == "U0"
 
 def test_target_tang_device_c(tmp_path):
     # Tang Mega 138K Pro production part (--device C): Gowin device set for version C.

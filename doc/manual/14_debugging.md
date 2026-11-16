@@ -307,7 +307,10 @@ counters (`USB3LanesDebug`). The procedure and the results are in
 | `x2-disable`, `x2-enable` | Gen 1x2 advertised or not at the next training (Gen 1x1 test) |
 
 With `--lanes-core`, `usb3_lanes.py script --runs N` runs the scripted host and prints one JSON
-line per run, with the failing step on an error. A Gen 1x2 build changes from one bitstream load
+line per run, with the failing step on an error (latched with the LTSSM state at the error in
+`usb3_script_error_step`: the step counter restarts after it). The debug clients decode the LTSSM
+state with the build's own encoding (`usb3_ltssm_*` constants of `csr.csv`: it depends on the PHY
+options, ex: no U1/U2 states). A Gen 1x2 build changes from one bitstream load
 to the next: `bench/acorn_x2_loads.py` loads both boards N times and runs the script on each load.
 With `--reinit-until-clean N`, it first checks each load with a short burst of runs and
 re-initializes both boards' transceivers until the burst is clean (the line noise is drawn at the

@@ -252,7 +252,9 @@ device core. Both lanes share one GTR12 instance, one UPAR and one register conf
 lane 0 and lane 1 configurations merged (`gw5_csr_merge_lanes`), or `usb3_5g_x2.csr` once generated
 from `usb3_5g_x2.toml` (the 1.9.12 tools do not accept the 1.9.10 TOML files), or `--serdes-csr`.
 `sys` runs at 125 MHz on the lane 0 TX clock, so the bridge only answers once the dock reference
-clock is programmed.
+clock is programmed. These builds do not reach 125 MHz on the GW5A (72 to 80 MHz measured): the
+transmitted lanes are clean, the received words are corrupted after the 8b/10b decode. `--lean`
+leaves out the lanes event/error counters and the noise monitor (timing measurements).
 
 With `--lean` and the split clocking, a minimal `usb3_phy_status` register keeps the LTSSM state,
 U0 and the transceiver ready. The UVC, Isochronous and composite examples need 32-bit link words,

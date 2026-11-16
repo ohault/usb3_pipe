@@ -720,7 +720,7 @@ class USB3X2SoC(USB3BaseSoC):
     lanes arbitrated: Lane 1 bursts edges a UPAR write later)."""
     def __init__(self, platform, refclk="100M", csr_config=None, role="device", x2_capable=True,
         lanes_core=False, example="loopback", with_clk_meters=False, with_analyzer=False,
-        analyzer_group="link", analyzer_csv="analyzer.csv", **kwargs):
+        analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, **kwargs):
         sys_clk_freq  = 125e6
         xcvr_clk_freq = 62.5e6
 
@@ -769,7 +769,8 @@ class USB3X2SoC(USB3BaseSoC):
             leds          = [platform.request("led_n", i) for i in range(3)],
             leds_inverted = True,
             with_core     = lanes_core,
-            example       = example)
+            example       = example,
+            with_counters = not lean)
 
         # Clocks frequency meters (Hz): Lane 0 TX (sys), lanes RX fabric clocks (the RX 8b/10b errors
         # by type are the lane{n}_rx_* counters of USB3LanesDebug, as on the Acorn).
@@ -847,6 +848,7 @@ def main():
             lanes_core      = args.lanes_core,
             example         = example,
             with_clk_meters = args.with_clk_meters,
+            lean            = args.lean,
             **usb3_args)
         usb3_soc_build(parser, args, soc)
         return

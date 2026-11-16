@@ -232,7 +232,10 @@ class USB3LanesDebug(LiteXModule):
       monitor (LanesNoiseMonitor, monitor_*), transceivers re-initialization on a sustained RX
       disparity errors/Recovery rate.
     """
-    def __init__(self, phy, serdes, link=None, reinit_cycles=1024, monitor_tick_cycles=None):
+    def __init__(self, phy, serdes, link=None, reinit_cycles=1024, monitor_tick_cycles=None,
+        with_counters=True):
+        # with_counters=False: status/control/re-initialization only, no event/RX errors counters
+        # nor noise monitor (lean builds: timings on slow fabrics).
         assert len(serdes) == 2
         with_rx_drop = hasattr(link, "rx_drop")
         self._clear   = CSR() # Clear counters (write).
@@ -342,6 +345,8 @@ class USB3LanesDebug(LiteXModule):
                 setattr(self, f"_lane{lane}_tx_postcursor", csr)
                 self.comb += s.tx_postcursor.eq(csr.storage)
         counted = [s for s in serdes if hasattr(s, "add_rx_errors_count") and hasattr(s, "rx_substitution")]
+        if not with_counters:
+            counted = []
         if counted:
             symbols = Signal()
             self.comb += symbols.eq(ltssm_symbols(phy))
@@ -356,6 +361,8 @@ class USB3LanesDebug(LiteXModule):
                 setattr(self, f"_lane{lane}_{name}_count", csr)
                 self.sync += If(self._clear.re, base.eq(value))
                 self.comb += csr.status.eq(value - base)
+        if not with_counters:
+            events = []
         for name, signal, edge in events:
             csr = CSRStatus(32, name=f"{name}_count",
                 description=f"{name} {'events' if edge else 'cycles'} count (saturating).")

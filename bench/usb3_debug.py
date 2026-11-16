@@ -38,7 +38,7 @@ from common import add_kern_log_args, DEFAULT_KERN_LOG, kern_log_lines, usb_kern
 from common import usb_superspeed_devices
 
 from usb3_pipe.debug import USB3PHYDebug, USB3PHY_DEBUG_HISTORY_DEPTH
-from usb3_pipe.gen   import get_ltssm_states
+from usb3_pipe.gen   import get_ltssm_states, get_ltssm_state_localparam
 
 COUNTERS = [
     "ts1", "ts1_inv", "ts2",
@@ -57,7 +57,15 @@ class USB3DebugClient:
     def __init__(self, bus, name="usb3_debug"):
         self.bus    = bus
         self.name   = name
-        self.states = {v: k for k, v in get_ltssm_states().items()}
+        # LTSSM states encoding of the build (csr.csv constants usb3_ltssm_<state>, it depends on the
+        # PHY options: ex no U1/U2 states), else the default one (builds before them).
+        default = get_ltssm_states()
+        self.states = {v: k for k, v in default.items()}
+        constants = getattr(getattr(bus, "constants", None), "d", {})
+        names     = {get_ltssm_state_localparam("usb3", k).lower(): k for k in default}
+        build     = {v: names.get(k, k) for k, v in constants.items() if k.startswith("usb3_ltssm_")}
+        if build:
+            self.states = build
 
     def reg(self, name):
         return getattr(self.bus.regs, f"{self.name}_{name}")
@@ -297,7 +305,7 @@ def main():
     elif args.command == "tx-inhibit-state":
         # Inhibit TX while in an LTSSM state (ex: Polling.Active, to observe the partner's signal
         # without our TX), no argument: disable.
-        states = get_ltssm_states()
+        states = {name: value for value, name in dbg.states.items()} # Encoding of the build.
         value  = (0x100 | states[args.args[0]]) if len(args.args) else 0
         bus.regs.usb3_serdes_debug_tx_inhibit_state.write(value)
 
