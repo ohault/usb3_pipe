@@ -199,12 +199,14 @@ def test_target_lanes_tx_diffctrl(tmp_path):
 
 def test_target_lanes_split_counters(tmp_path):
     # Tang Mega 138K Pro Gen 1x2 split build (lanes logic in pipe_cd): the lanes event counters
-    # counted in pipe_cd (lane word misalignment diagnosis, t22), not with --lean.
+    # counted in pipe_cd with --with-lanes-counters (lane word misalignment diagnosis, t22), not with --lean.
     csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path / "default", ["--lanes", "2"])
+    assert "usb3_lanes_debug_deskew_count" not in csr # Opt-in (lanes clock timing, t23).
+    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path / "counters", ["--lanes", "2", "--with-lanes-counters"])
     for name in ["deskew", "realign_u0", "skp_odd_u0", "com_slip", "lane0_rx_skp_odd", "lane1_rx_com_partial",
         "lane1_rx_errors_cycles", "lane0_ts2"]:
         assert f"usb3_lanes_debug_{name}_count" in csr, name
-    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path / "lean", ["--lanes", "2", "--lean"])
+    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path / "lean", ["--lanes", "2", "--lean", "--with-lanes-counters"])
     assert "usb3_lanes_debug_deskew_count" not in csr
 
 def test_target_lanes_host_script_ss(tmp_path):

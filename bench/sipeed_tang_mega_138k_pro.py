@@ -726,7 +726,7 @@ class USB3X2SoC(USB3BaseSoC):
     lanes arbitrated: Lane 1 bursts edges a UPAR write later)."""
     def __init__(self, platform, refclk="100M", csr_config=None, role="device", x2_capable=True,
         lanes_core=False, example="loopback", with_clk_meters=False, with_analyzer=False,
-        analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, rx_valid_gate=False, cdr_toggle=False, **kwargs):
+        analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, rx_valid_gate=False, cdr_toggle=False, lanes_counters=False, **kwargs):
         split         = not lanes_core # LTSSM/SoC at 62.5MHz, lanes logic at 125MHz.
         sys_clk_freq  = 62.5e6 if split else 125e6
         xcvr_clk_freq = 62.5e6
@@ -801,6 +801,7 @@ class USB3X2SoC(USB3BaseSoC):
             with_core     = lanes_core,
             example       = example,
             with_counters = not lean,
+            with_cd_counters = lanes_counters,
             phy_cd        = "pipe" if split else None,
             phy_clk_freq  = lanes_clk_freq)
 
@@ -859,6 +860,7 @@ def main():
     x2_group.add_argument("--no-x2",      action="store_true", help="--lanes 2: not Gen 1x2 capable (Gen 1x1 on SFP0).")
     x2_group.add_argument("--lanes-core", action="store_true", help="--lanes 2: scripted USB host (Host role) or Device Core (Device role, --example) instead of the PRBS stand-ins.")
     x2_group.add_argument("--cdr-toggle", action="store_true", help="--lanes 2: lanes RX resets with a CDR re-acquisition (GTR12 CDR signal detect toggle through UPAR; on hardware it kept Lane 1 from locking, t16s).")
+    x2_group.add_argument("--with-lanes-counters", action="store_true", help="--lanes 2 PRBS split builds: lanes event counters in the lanes clock domain (diagnosis: lanes clock 100MHz instead of 125MHz on hardware builds, t23).")
     x2_group.add_argument("--rx-valid-gate", action="store_true", help="--lanes 2: RX words taken only with the GTR12 RX_VLD_OUT (A/B: Lane 1 starved in training on hardware, t16q).")
     usb3_soc_args(parser, output_dir="build/sipeed_tang_mega_138k_pro")
     args = parser.parse_args()
@@ -899,6 +901,7 @@ def main():
             lean            = args.lean,
             rx_valid_gate   = args.rx_valid_gate,
             cdr_toggle      = args.cdr_toggle,
+            lanes_counters  = args.with_lanes_counters,
             **usb3_args)
         usb3_soc_build(parser, args, soc)
         return

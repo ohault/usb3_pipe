@@ -505,6 +505,7 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     with_lpm      = False,
     max_burst     = 8,
     with_counters = True,
+    with_cd_counters = False,
     phy_cd        = None,
     phy_clk_freq  = None):
     """Add a Gen 1x2 link on serdes (2 lanes, Lane 0: Configuration Lane) to soc: USB3PHY(lanes=2) in
@@ -587,7 +588,7 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     # held 10us) ------------------------------------------------------------------------------------
     soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes, link=usb3_link,
         reinit_cycles=int(sys_clk_freq*10e-6), monitor_tick_cycles=int(sys_clk_freq*1e-3),
-        with_counters=with_counters,
+        with_counters=with_counters, with_cd_counters=with_cd_counters,
         # Training watchdog: Host transceivers re-initialized, then a Warm Reset, after 2s of training
         # without a stable U0 (Acorn Host start-ups never training at Gen 1x2 with a Tang Device,
         # t16z/t17); Device: disabled (runtime CSR).

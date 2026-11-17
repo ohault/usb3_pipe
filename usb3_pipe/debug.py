@@ -236,15 +236,17 @@ class USB3LanesDebug(LiteXModule):
       training without U0 (0: disabled).
     """
     def __init__(self, phy, serdes, link=None, reinit_cycles=1024, monitor_tick_cycles=None,
-        with_counters=True, training_watchdog_ms=None):
+        with_counters=True, training_watchdog_ms=None, with_cd_counters=False):
         # with_counters=False: status/control/re-initialization only, no event/RX errors counters
         # nor noise monitor (lean builds: timings on slow fabrics). With a PHY lanes logic in its
         # pipe_cd: status resynchronized to sys, re-initialization to pipe_cd, no counters.
         assert len(serdes) == 2
         cd = getattr(phy, "pipe_cd", None)
-        # pipe_cd: the lanes events counted in pipe_cd (wrapping, through BusSynchronizers, cleared by
-        # a snapshot in sys), without the LTSSM gated ones, the RX errors by type and the noise monitor.
-        cd_counters = with_counters and (cd is not None)
+        # pipe_cd with with_cd_counters: the lanes events counted in pipe_cd (registered, wrapping,
+        # through BusSynchronizers, cleared by a snapshot in sys), without the LTSSM gated ones, the RX
+        # errors by type and the noise monitor (opt-in: on the Tang Mega 138K Pro they took the lanes
+        # clock from 125.2MHz to 100MHz, t23).
+        cd_counters = with_counters and with_cd_counters and (cd is not None)
         if cd is not None:
             with_counters = False
         def level(s):
@@ -401,10 +403,13 @@ class USB3LanesDebug(LiteXModule):
                     description=f"{name} {'events' if edge else 'cycles'} count (wrapping, since the last clear).")
                 setattr(self, f"_{name}_count", csr)
                 value    = Signal(32)
+                signal_r = Signal()
                 signal_d = Signal()
-                event    = (signal & ~signal_d) if edge else signal
+                event    = Signal()
                 getattr(self.sync, cd).__iadd__([
-                    signal_d.eq(signal),
+                    signal_r.eq(signal),
+                    signal_d.eq(signal_r),
+                    event.eq((signal_r & ~signal_d) if edge else signal_r),
                     If(event, value.eq(value + 1)),
                 ])
                 bs   = BusSynchronizer(32, cd, "sys")
