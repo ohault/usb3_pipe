@@ -144,6 +144,17 @@ class USB3LanesClient:
             assert 0 <= value < 32
             self.reg(f"usb3_lanes_debug_lane{lane}_tx_postcursor").write(value)
 
+    def tx_diffctrl(self, values):
+        # TX differential swing per SerDes (GTP TXDIFFCTRL 0-15, Acorn Gen 1x2 builds), at once.
+        for lane, value in enumerate(values):
+            assert 0 <= value < 16
+            self.reg(f"usb3_lanes_debug_lane{lane}_tx_diffctrl").write(value)
+
+    def tx_idle_force(self, values):
+        # Forced TX electrical idle per SerDes (debug, Acorn Gen 1x2 builds).
+        for lane, value in enumerate(values):
+            self.reg(f"usb3_lanes_debug_lane{lane}_tx_idle_force").write(int(bool(value)))
+
     def xcvr_reinit(self):
         # Transceivers re-initialization (both SerDes TX/RX reset sequences and the Lane 0 Quad PLL,
         # held 10us): the link retrains (Recovery, or Rx.Detect and a full training).
@@ -276,7 +287,7 @@ def main():
         "prbs-enable", "prbs-disable", "script",
         "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable",
         "x2-enable", "x2-disable", "skp-recovery-enable", "skp-recovery-disable",
-        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit", "drp-dump", "monitor", "watchdog"])
+        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit", "drp-dump", "monitor", "watchdog", "tx-diffctrl", "tx-idle-force"])
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -307,6 +318,12 @@ def main():
         lanes.reg("usb3_lanes_debug_clear").write(1)
         time.sleep(args.wait)
         print(json.dumps(lanes.status()))
+    elif args.command in ["tx-diffctrl", "tx-idle-force"]:
+        # TX swing (--value A[,B], 0-15) / forced TX electrical idle (--value A[,B], 0/1) per SerDes.
+        values = [int(v, 0) for v in args.value.split(",")]
+        values = values*2 if len(values) == 1 else values
+        (lanes.tx_diffctrl if args.command == "tx-diffctrl" else lanes.tx_idle_force)(values)
+        print(json.dumps({args.command: values}))
     elif args.command == "watchdog":
         # Training watchdog: timeout (--value, ms, 0: disabled) set when given, state (JSON).
         print(json.dumps({"watchdog": lanes.watchdog(None if args.value is None else int(args.value, 0))}))

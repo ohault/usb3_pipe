@@ -1117,6 +1117,14 @@ training without U0 -> transceivers re-init, `usb3_lanes.py watchdog`). Warm Res
 x2 off 5/5. Timing: Tang lanes clock 98.1MHz (6e30bcc), 97.2MHz (2cae579), 108.7MHz (1dbb0ef: PRBS checker/deskew input
 stages; worst then deskew FIFO read -> pairing state and a lane TS1 checker -> idle handshake count, buffered/registered
 in f9cdafa), sys met; Acorn WNS +0.248/+0.106ns.
+t17 (0948c75/8173e58): the first watchdog never fired (the failing link passes through U0 ~65 times per
+second: training time cleared), fixed (stable U0 = 100ms) and a Warm Reset 5ms after each re-init (8173e58): 7/20 Acorn
+loads good within 60s (3 at once, 4 after 7-21 re-inits; 13 bad through 27 re-inits), every good load 612MB/s 0 errors
+both ways. t18 (8173e58 Acorn, 6 bad loads x 15 tries): Tang PHY reset, Tang PHY reset held across an Acorn re-init,
+Acorn re-init + Acorn retrain, Tang re-init + retrain, the t16z recipe: 0/90 recovered (Tang CDRs never both locked);
+only an Acorn bitstream load changes a bad load, and the same load trains at Gen 1x1. Open: what the Acorn
+configuration sets per load that its transceivers re-init does not (DRP dumps good/bad, TX swing, a lane TX forced
+idle: `usb3_lanes.py tx-diffctrl/tx-idle-force`).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

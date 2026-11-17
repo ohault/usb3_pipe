@@ -185,6 +185,14 @@ class USB3SoC(USB3BaseSoC):
             if lanes == 2:
                 serdes.tx_postcursor = Signal(5, reset=tx_postcursor[cage] if tx_postcursor else 0)
                 serdes.gtp.gtp_params.update(i_TXPOSTCURSOR=serdes.tx_postcursor)
+                # Runtime TX differential swing (TXDIFFCTRL, reset: the USB3 0b1100) and forced TX
+                # electrical idle (debug, Gen 1x2 Acorn <-> Tang: a lane transmitter disturbing the
+                # others, t18): USB3LanesDebug lane{n}_tx_diffctrl/lane{n}_tx_idle_force CSRs.
+                serdes.tx_diffctrl   = Signal(4, reset=0b1100)
+                serdes.tx_idle_force = Signal()
+                serdes.gtp.gtp_params.update(
+                    i_TXDIFFCTRL = serdes.tx_diffctrl,
+                    i_TXELECIDLE = serdes.tx_idle | serdes.tx_idle_force)
             elif tx_postcursor is not None and tx_postcursor[0]:
                 serdes.gtp.gtp_params.update(i_TXPOSTCURSOR=tx_postcursor[0])
             serdes.gtp.gtp_params.update(gtp_params) # Debug overrides (--gtp-param).

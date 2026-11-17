@@ -357,6 +357,17 @@ class USB3LanesDebug(LiteXModule):
                     description=f"SerDes {lane} TX post-cursor pre-emphasis (GTP TXPOSTCURSOR).")
                 setattr(self, f"_lane{lane}_tx_postcursor", csr)
                 self.comb += s.tx_postcursor.eq(csr.storage)
+        # Per SerDes TX differential swing and forced TX electrical idle (debug, runtime controls when
+        # the target exposes them: Acorn Gen 1x2; reset to the build values).
+        for lane, s in enumerate(serdes):
+            for name, desc in [("tx_diffctrl", "TX differential swing (GTP TXDIFFCTRL)"),
+                ("tx_idle_force", "TX electrical idle forced (debug)")]:
+                if hasattr(s, name):
+                    sig = getattr(s, name)
+                    csr = CSRStorage(len(sig), reset=sig.reset.value, name=f"lane{lane}_{name}",
+                        description=f"SerDes {lane} {desc}.")
+                    setattr(self, f"_lane{lane}_{name}", csr)
+                    self.comb += sig.eq(csr.storage)
         counted = [s for s in serdes if hasattr(s, "add_rx_errors_count") and hasattr(s, "rx_substitution")]
         if not with_counters:
             counted = []
