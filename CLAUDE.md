@@ -214,7 +214,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   error words break the gap/disarm). t16t (ed8749f): the reset-less monitor broke the Acorn training (RX errors re-init loop, reverted:
   `rx_errors_hold` during the re-init instead), Tang Warm Reset still missed, lanes clock 95.4MHz. t16u (66dce0f): Acorn fixed, the Tang loops (deskew disarm on
   K28.4 first COMs, fixed 45d16b3: gap only), Warm Reset 0/8 also with re-init off (sim detects it: GTR12 side,
-  `warm` LiteScope group), lanes clock 108.6MHz. Next: t16v, Device Core on the split design.
+  `warm` LiteScope group), lanes clock 108.6MHz. t16v (65e470a): Tang Warm Reset miss = lane 1 `rx_errors` 0 during the
+  LFPS (fix: `rx_stall`, RX_VLD_OUT low 64 cycles = errors), the no-disarm deskew mis-paired on a one lane K28.4
+  first marker (fix: K28.4+COM words are markers), 66dce0f Acorn + new Tang 4/10 U0 all clean. Next: t16w.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

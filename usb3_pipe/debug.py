@@ -1011,7 +1011,8 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
         # Configuration Lane Warm Reset checker and the lanes swap.
         groups["warm"] = link_signals + [phy.lane_swap, pipe.lfps_rx_reset] + [
             getattr(s, name) for s in phy.lanes_phys_serdes
-            for name in ["rx_idle", "rx_idle_raw", "rx_errors", "rx_errors_hold", "rx_reset"]
+            for name in ["rx_idle", "rx_idle_raw", "rx_errors", "rx_errors_hold", "rx_reset",
+                "rx_invalid", "rx_stall"]
             if hasattr(s, name)]
     if serdes_debug is not None:
         groups["phase"] = link_signals + [

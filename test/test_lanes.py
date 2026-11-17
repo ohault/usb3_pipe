@@ -283,8 +283,8 @@ class TestLanes(unittest.TestCase):
 
     def test_deskew_first_com_errors_armed(self):
         # Search armed on a gap, the first COM Symbols of the first TS Ordered Set received as K28.4
-        # on both lanes (hardware, after an idle period): the search stays armed, the next markers
-        # paired (t16u: disarmed, the lanes were never paired again).
+        # on both lanes (hardware, after an idle period): corrupted marker words, paired (t16u: the
+        # search disarmed, the lanes were never paired again).
         rng    = random.Random(7)
         marker = (0xbcbcbcbcbcbcbcbc, 0xff)
         bad    = (0xbcbcbcbcbcbc9c9c, 0xff) # First 2 COMs as K28.4.
@@ -299,7 +299,30 @@ class TestLanes(unittest.TestCase):
         stream = gap + tss + data
         lanes = [[(0, 0)] + [self.stripe(w, 0) for w in stream], [self.stripe(w, 1) for w in stream]]
         out = self.run_deskew(lanes, error_symbol=0x9c)
-        self.assertEqual(out, tss[4:] + data)
+        self.assertEqual(len(out), len(tss + data))
+        self.assertEqual(out[1:], tss[1:] + data)
+
+    def test_deskew_first_com_errors_one_lane(self):
+        # First COM Symbols of the first TS Ordered Set received as K28.4 on Lane 0 only: the
+        # corrupted marker word is a marker, paired with Lane 1's first marker (not with Lane 0's
+        # next one: the lanes an Ordered Set apart, t16v).
+        rng    = random.Random(8)
+        marker = (0xbcbcbcbcbcbcbcbc, 0xff)
+        def ts(n):
+            r = []
+            for _ in range(n):
+                r += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
+            return r
+        gap  = [(0, 0)]*20
+        tss  = ts(6)
+        data = [(rng.getrandbits(64), rng.getrandbits(8) & 0x7f) for _ in range(16)]
+        stream = gap + tss + data
+        lane0 = [self.stripe(w, 0) for w in stream]
+        lane0[len(gap)] = (0xbcbc9c9c, 0xf) # Lane 0 first marker: 2 COMs as K28.4.
+        lane1 = [self.stripe(w, 1) for w in stream]
+        out = self.run_deskew([[(0, 0)] + lane0, lane1], error_symbol=0x9c)
+        self.assertEqual(len(out), len(tss + data))
+        self.assertEqual(out[1:], tss[1:] + data)
 
     def test_deskew_lost_on_lane_shift(self):
         # Lane 0 one word late from the middle of the TS stream (word dropped on Lane 1: lanes no

@@ -422,7 +422,7 @@ class RXErrorMonitor(LiteXModule):
     valid 8b/10b symbols while SuperSpeed data does: this is used to differentiate a Warm Reset LFPS
     from data, both seen as a non electrical idle line.
     """
-    def __init__(self, decoders, clock_domain="sys", window=256):
+    def __init__(self, decoders, clock_domain="sys", window=256, extra=None):
         self.errors = Signal() # o
 
         # # #
@@ -430,7 +430,9 @@ class RXErrorMonitor(LiteXModule):
         invalid = Signal()
         errors  = Signal()
         count   = Signal(max=window + 1)
-        self.comb += invalid.eq(Reduce("OR", [decoder.invalid for decoder in decoders]))
+        # extra: other RX errors (clock_domain, ex: transceiver RX words not delivered).
+        self.comb += invalid.eq(Reduce("OR", [decoder.invalid for decoder in decoders] +
+            ([] if extra is None else [extra])))
         sync = getattr(self.sync, clock_domain)
         sync += [
             If(invalid,

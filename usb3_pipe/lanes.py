@@ -112,7 +112,8 @@ class LaneDeskew(LiteXModule):
     mismatch; Tang Mega 138K Pro Lane 1 late, every destriped word corrupted in U0).
 
     error_symbol: K Symbol substituted for the RX decode errors (K28.4): a word with one is not counted
-    in a gap, an armed search is kept (the first COM Symbols of a TS Ordered Set after an idle period
+    in a gap, a marker word with some of its Symbols as error_symbol is a marker (corrupted first
+    COM Symbols on one lane: else paired with the other lane's next marker), an armed search is kept (the first COM Symbols of a TS Ordered Set after an idle period
     often arrive as K28.4 on hardware: disarming on them, the lanes were never paired again, t16u)
     (a lane not word aligned yet receives garbage without marker: as a gap, its first marker
     then paired with a later Ordered Set of the other lane, the lanes Ordered Sets apart without any
@@ -130,6 +131,21 @@ class LaneDeskew(LiteXModule):
         # FIFOs flushed on an overflow clear (else full: drained one word per cycle while searching
         # as they are filled, stale words before the next markers).
         flush = Signal()
+        # Marker word: the marker, or with error_symbol the marker with some of its Symbols received
+        # as error_symbol (at least one marker Symbol left: the first COM Symbols of a TS Ordered Set
+        # after an idle period often arrive as K28.4 on hardware, on one lane only the lanes would be
+        # paired an Ordered Set apart, t16v).
+        nsym = len(sinks[0].ctrl)
+        def marker_match(data, ctrl):
+            if error_symbol is None:
+                return (data == marker_data) & (ctrl == marker_ctrl)
+            sym = marker_data & 0xff
+            assert marker_data == int.from_bytes(bytes([sym])*nsym, "little")
+            assert marker_ctrl == 2**nsym - 1
+            is_m = [data[8*i:8*(i+1)] == sym          for i in range(nsym)]
+            is_e = [data[8*i:8*(i+1)] == error_symbol for i in range(nsym)]
+            return ((ctrl == marker_ctrl) &
+                Reduce("AND", [m | e for m, e in zip(is_m, is_e)]) & Reduce("OR", is_m))
         # Marker flag computed on the sink side and stored with the word (timing: the heads are a
         # single FIFO output bit, not a word compare).
         self.fifos = fifos = [ResetInserter()(stream.SyncFIFO(lane_layout() + [("marker", 1)], depth))
@@ -145,7 +161,7 @@ class LaneDeskew(LiteXModule):
             self.comb += [
                 sinks[lane].connect(fifos[lane].sink, omit={"ready"}),
                 sinks[lane].ready.eq(1),
-                marker_in.eq((sinks[lane].data == marker_data) & (sinks[lane].ctrl == marker_ctrl)),
+                marker_in.eq(marker_match(sinks[lane].data, sinks[lane].ctrl)),
                 fifos[lane].sink.marker.eq(marker_in),
                 head.eq(fifos[lane].source.valid & fifos[lane].source.marker),
             ]

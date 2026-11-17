@@ -1080,6 +1080,19 @@ lanes split Device detects the Host Warm Reset in U0 at Gen 1x2 with crossed lan
 hardware miss is the GTR12 receive (idle/decode errors during the LFPS): `warm` LiteScope group added. Fixes
 (45d16b3): the deskew keeps an armed search on error words (gap only), marker flag stored in the deskew FIFOs, PRBS
 checker compare pipelined (lanes clock).
+t16v (65e470a; report `build/hw_runs/mixed_t16/t16v/report_t16v.md` on the NUC): B, `warm` captures (5, up to
+268ms) on the two lanes Tang, lanes swapped: physical lane 1 `rx_idle` steady low for the 200ms Warm Reset LFPS but
+`rx_errors` 0 throughout, no `rx_reset`, `lfps_rx_reset` never rises (the checker sees idle: `rx_idle | ~rx_errors`);
+the single lane SFP1 Tang (`link` group) shows `rx_errors` steady high and detects it (+38, +39). Suspect: the GTR12
+RX interface FIFO not delivering words (`RX_VLD_OUT` low) during the LFPS, the fabric decoding the last word again
+without errors; fix: `RX_VLD_OUT` low for 64 consecutive rx cycles counted as RX errors (`rx_stall`), `rx_invalid`
+and `rx_stall` added to the `warm` group. A: 65e470a Acorn 0/10 (Recovery loop), also 0/3 with the t16s Tang, the
+66dce0f Acorn 3/3; 66dce0f Acorn + 65e470a Tang 4/10 stable U0, all 4 clean both ways at 610MB/s (no mis-pairing),
+22-30s to U0. Cause of the 65e470a Acorn: without the disarm, a first marker word received with K28.4 Symbols on one
+lane let the other lane's first marker pair with its next one, the lanes an Ordered Set apart. Fix: a marker word
+with some Symbols as K28.4 (at least one COM) is a marker (`test_deskew_first_com_errors_one_lane`). C: Tang lanes
+clock 109.3MHz (313 failing endpoints; worst: PRBS checker packet decode, deskew gap counter enable), 106.4MHz with
+the analyzer, sys 69.4/72.2MHz; the single lane build meets all clocks.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

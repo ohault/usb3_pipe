@@ -183,7 +183,7 @@ class USB3SerDes(LiteXModule):
             ]
         self.rx_errors_counts = counter.counts
 
-    def add_lfps(self, xcvr, rx_idle, rx_idle_burst_cycles=1):
+    def add_lfps(self, xcvr, rx_idle, rx_idle_burst_cycles=1, rx_errors_extra=None):
         """LFPS: TX pattern, filtered RX electrical idle (from the transceiver's OOB detector, non-idle
         spikes shorter than rx_idle_burst_cycles rejected) and RX decode errors (Warm Reset LFPS
         detection)."""
@@ -196,7 +196,8 @@ class USB3SerDes(LiteXModule):
         self.rx_idle_stretch = self.rx_idle_filter.stretch_cycles
         self.rx_idle_raw     = self.rx_idle_filter.raw # Unfiltered (debug: glitches in U0).
         self.comb += self.rx_idle.eq(self.rx_idle_filter.idle)
-        self.rx_error_monitor = RXErrorMonitor(xcvr.decoders, clock_domain="rx")
+        self.rx_error_monitor = RXErrorMonitor(xcvr.decoders, clock_domain="rx",
+            extra=rx_errors_extra)
         # At 10Gbps (Gen 2, raw 128b/132b words), the 8b/10b decode errors are always set: Gen 2 RX
         # errors (block alignment lost) instead (a Warm Reset LFPS on a Gen 2 link would otherwise
         # be detected after tResetDelay in U0).
@@ -941,7 +942,20 @@ class GW5USB3SerDes(USB3SerDes):
             assert source.startswith("astat")
             bit = gtr12.astat[int(source[5:])]
             self.comb += rx_idle.eq(~bit if invert else bit)
-        self.add_lfps(gtr12, rx_idle)
+        # RX words not delivered (GTR12 RX interface FIFO RX_VLD_OUT low for rx_stall_cycles
+        # consecutive rx cycles) counted as RX errors: the fabric then decodes the last word again
+        # (valid 8b/10b), a Warm Reset LFPS on a Gen 1x2 lane in U0 was seen without any decode error
+        # (rx_errors 0, never detected, t16v).
+        rx_stall_cycles = 64
+        rx_stall_count  = Signal(max=rx_stall_cycles + 1)
+        self.rx_stall   = rx_stall = Signal() # rx clock domain.
+        self.sync.rx += If(gtr12.rx_valid,
+            rx_stall_count.eq(0)
+        ).Elif(rx_stall_count != rx_stall_cycles,
+            rx_stall_count.eq(rx_stall_count + 1)
+        )
+        self.comb += rx_stall.eq(rx_stall_count == rx_stall_cycles)
+        self.add_lfps(gtr12, rx_idle, rx_errors_extra=rx_stall)
         # TX LFPS: bit-level square wave with a 24ns period (41.7MHz, Table 6-29: 20-80ns for
         # SuperSpeedPlus) through the raw TX words whenever the transmitter is idle, the bursts made
         # by the TX Electrical Idle register (the square wave is already running when the driver is
