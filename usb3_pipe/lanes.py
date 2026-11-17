@@ -158,23 +158,44 @@ class LaneDeskew(LiteXModule):
         heads  = []
         gaps   = []
         errors = []
+        # Input words registered with their marker/error flags (timing: the Symbol compares in their
+        # own cycle, not before the FIFO write/gap counter; Tang Mega 138K Pro lanes clock, t16w).
+        inputs = []
         for lane in range(2):
             head      = Signal()
             gap_count = Signal(max=gap + 1)
+            marker_c  = Signal()
+            error_c   = Signal()
+            valid_in  = Signal()
+            data_in   = Signal(len(sinks[lane].data))
+            ctrl_in   = Signal(len(sinks[lane].ctrl))
             marker_in = Signal()
+            error_in  = Signal()
             self.comb += [
-                sinks[lane].connect(fifos[lane].sink, omit={"ready"}),
                 sinks[lane].ready.eq(1),
-                marker_in.eq(marker_match(sinks[lane].data, sinks[lane].ctrl)),
+                marker_c.eq(marker_match(sinks[lane].data, sinks[lane].ctrl)),
+            ]
+            # Error Symbol in the word.
+            if error_symbol is not None:
+                self.comb += error_c.eq(Reduce("OR", [sinks[lane].ctrl[i] &
+                    (sinks[lane].data[8*i:8*(i+1)] == error_symbol) for i in range(nsym)]))
+            self.sync += [
+                valid_in.eq(sinks[lane].valid),
+                data_in.eq(sinks[lane].data),
+                ctrl_in.eq(sinks[lane].ctrl),
+                marker_in.eq(marker_c),
+                error_in.eq(error_c),
+            ]
+            self.comb += [
+                fifos[lane].sink.valid.eq(valid_in),
+                fifos[lane].sink.data.eq(data_in),
+                fifos[lane].sink.ctrl.eq(ctrl_in),
                 fifos[lane].sink.marker.eq(marker_in),
                 head.eq(fifos[lane].source.valid & fifos[lane].source.marker),
             ]
+            inputs.append(valid_in)
             # Words without marker (nor error Symbol) received on the lane (saturated to gap).
-            error_in = Signal()
-            if error_symbol is not None:
-                self.comb += error_in.eq(Reduce("OR", [sinks[lane].ctrl[i] &
-                    (sinks[lane].data[8*i:8*(i+1)] == error_symbol) for i in range(len(sinks[lane].ctrl))]))
-            self.sync += If(sinks[lane].valid,
+            self.sync += If(valid_in,
                 If(marker_in | error_in,
                     gap_count.eq(0)
                 ).Elif(gap_count != gap,
@@ -185,7 +206,7 @@ class LaneDeskew(LiteXModule):
             gaps.append(gap_count == gap)
             # Error word (not a corrupted marker word): disarms an armed search.
             error = Signal()
-            self.comb += error.eq(error_in & ~marker_in)
+            self.comb += error.eq(valid_in & error_in & ~marker_in)
             errors.append(error)
         self.heads = heads
 
@@ -197,7 +218,7 @@ class LaneDeskew(LiteXModule):
         overflow = Signal() # A word received with a full FIFO (dropped).
         self.comb += [
             both.eq(fifos[0].source.valid & fifos[1].source.valid),
-            overflow.eq(Reduce("OR", [sinks[n].valid & ~fifos[n].sink.ready for n in range(2)])),
+            overflow.eq(Reduce("OR", [inputs[n] & ~fifos[n].sink.ready for n in range(2)])),
             flush.eq(overflow & (armed | aligned)),
         ]
         self.sync += [

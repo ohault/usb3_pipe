@@ -137,13 +137,21 @@ class PRBSPacketChecker(LiteXModule):
         is_start = Signal()
         is_end   = Signal()
         is_idle  = Signal()
+        # Two stages: the input registered, then its markers/Logical Idle decoded (the compares
+        # from the input were still the worst lanes clock paths on the Tang Mega 138K Pro, t16w).
+        valid_i  = Signal()
+        data_i   = Signal(data_width)
+        ctrl_i   = Signal(data_width//8)
         self.sync += [
-            valid.eq(sink.valid),
-            data.eq(sink.data),
-            ctrl.eq(sink.ctrl),
-            is_start.eq((sink.data == start[0]) & (sink.ctrl == start[1])),
-            is_end.eq(  (sink.data == end[0])   & (sink.ctrl == end[1])),
-            is_idle.eq( (sink.data == 0)        & (sink.ctrl == 0)),
+            valid_i.eq(sink.valid),
+            data_i.eq(sink.data),
+            ctrl_i.eq(sink.ctrl),
+            valid.eq(valid_i),
+            data.eq(data_i),
+            ctrl.eq(ctrl_i),
+            is_start.eq((data_i == start[0]) & (ctrl_i == start[1])),
+            is_end.eq(  (data_i == end[0])   & (ctrl_i == end[1])),
+            is_idle.eq( (data_i == 0)        & (ctrl_i == 0)),
         ]
         # Re-synchronized on the first start marker after being enabled (packets cut by a link
         # retrain/disable are not errors).
