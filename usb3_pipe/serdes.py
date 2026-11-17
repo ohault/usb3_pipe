@@ -205,6 +205,14 @@ class USB3SerDes(LiteXModule):
         # re-initializations, see USB3PHY.add_rx_errors_monitors).
         self.comb += self.rx_errors.eq(Mux(self.rate_10g, self.gen2_rx_errors,
             self.rx_error_monitor.errors) | self.rx_errors_hold)
+        # rx_decode_errors: rx_errors from the decode errors only (no hold, no transceiver specific
+        # errors), the Gen 1x2 RX errors re-initializations input: with its RX FIFO stalls (rx_stall)
+        # counted, a GTR12 lane without RX words (CDR not locked) is re-initialized every ~110us, the
+        # re-initialization restarting the stall (suspected on the t16x loads without U0: both Tang
+        # RX clocks ~0.2% slow, as with a short RX reset every ~100us).
+        self.rx_decode_errors = Signal() # o
+        self.comb += self.rx_decode_errors.eq(Mux(self.rate_10g, self.gen2_rx_errors,
+            self.rx_error_monitor.decode_errors))
 
     def add_timing_constraints(self, platform, sys_clk, xcvr, with_tx=True):
         """Transceiver TX/RX clocks constraints (with_tx: False when the TX clock is shared with

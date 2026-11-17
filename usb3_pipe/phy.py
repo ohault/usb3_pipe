@@ -493,7 +493,7 @@ class USB3PHY(LiteXModule):
                     )
                 ).Else(
                     count.eq(count + 1),
-                    errors.eq(errors + s.rx_errors),
+                    errors.eq(errors + getattr(s, "rx_decode_errors", s.rx_errors)),
                 )
             ]
             L.comb += request.eq(reset != 0)
