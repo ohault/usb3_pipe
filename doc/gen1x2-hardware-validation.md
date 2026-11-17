@@ -1155,6 +1155,14 @@ is not). Tang place options (deterministic, lanes clock/sys): 0 118.5/62.8, 1 12
 4 112.0/69.5MHz: `--place-option` 0-4, default 3 for the `--lanes 2` PRBS split builds. `litex_mcp` read-only against
 the Acorn SoC works (check, register reads/sequences); LiteX's `parse_build_reports` finds no Gowin timing (Gowin
 1.9.12.02 SP2 writes `impl/pnr/project.tr.html`, not `project.tr`: upstream LiteX fix).
+t22 (d512796, Tang place option 3 by default: lanes clock 125.2MHz, sys 65.4MHz, met; Acorn WNS +0.303ns): resync on
+both boards, 10 loads x 10 Host Warm Resets: **0/110 garbage, 0/110 Tang stuck**, no resync or Recovery while measuring,
+back to x2 U0 median 0.92s (max 1.96s); Tang resyncs in 80/100 trainings (102/109 while the Host PHY is held in reset: no
+words received in U0, the new criterion), Acorn resyncs 54/100 trainings (up to 14, those trainings ~1.95s). Tang resync
+off (2 x 5 loads x 10): no frozen case, but 5/110 measurements garbage for 10s with the Tang packets at ~9.7k/s instead of
+4.67M/s (start markers almost never whole: a lane word misalignment on the Tang receiver with deskew reported aligned;
+open, the split Tang build has no realign/SKP counters), cleared by re-enabling resync (4 and 11 Recoveries). 20 Acorn
+loads (Tang loaded once): 20/20 x2 U0, first 10s clean (610MB/s each way, 0 errors, 0 resyncs).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
