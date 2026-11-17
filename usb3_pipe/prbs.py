@@ -109,10 +109,13 @@ class PRBSPacketChecker(LiteXModule):
     (descrambled 00h data symbols) is expected.
     After being enabled, the words are checked from the first packet start marker.
 
-    lost: pulse when more than half of the received words of a lost_window cycles window are errors
-    (the checker sees garbage with valid packet markers: the K-code markers are not scrambled, so a
-    descrambler out of synchronization with the partner scrambler, which a Link Layer would see as
-    CRC errors and leave through a Recovery).
+    lost: pulse at the end of a lost_window cycles window when more than half of its received words
+    are errors (the checker sees garbage with valid packet markers: the K-code markers are not
+    scrambled, so a descrambler out of synchronization with the partner scrambler, which a Link
+    Layer would see as CRC errors and leave through a Recovery), or when it holds no packet start
+    marker while words other than Logical Idle (or no words at all) were received (start markers
+    never seen whole: nothing checked, nothing counted). A partner not sending packets (Logical Idle
+    only) is not lost.
     """
     def __init__(self, data_width=32, lost_window=1024):
         self.enable  = Signal()   # i
@@ -212,23 +215,39 @@ class PRBSPacketChecker(LiteXModule):
             mism.eq(cerr_d | (chk_d & (data_d != exp_d))),
             self.errors.eq(self.errors + err + mism),
         ]
-        # Lost: errored cycles (err/mism) counted over a window of lost_window cycles.
-        err_d       = Signal()
-        window      = Signal(max=lost_window)
-        window_errs = Signal(max=lost_window + 1)
+        # Lost: errored cycles (err/mism) and start markers/non-idle/valid words over a window of
+        # lost_window cycles.
+        err_d        = Signal()
+        window       = Signal(max=lost_window)
+        window_errs  = Signal(max=lost_window + 1)
+        seen_start   = Signal()
+        seen_nonidle = Signal()
+        seen_valid   = Signal()
         self.sync += [
             err_d.eq(err),
             self.lost.eq(0),
             If(~self.enable,
                 window.eq(0),
                 window_errs.eq(0),
+                seen_start.eq(0),
+                seen_nonidle.eq(0),
+                seen_valid.eq(0),
             ).Else(
                 window.eq(window + 1),
                 window_errs.eq(window_errs + (err_d | mism)),
+                If(valid,
+                    seen_valid.eq(1),
+                    If(is_start,  seen_start.eq(1)),
+                    If(~is_idle,  seen_nonidle.eq(1)),
+                ),
                 If(window == (lost_window - 1),
                     window.eq(0),
                     window_errs.eq(0),
-                    self.lost.eq(window_errs > lost_window//2),
+                    seen_start.eq(0),
+                    seen_nonidle.eq(0),
+                    seen_valid.eq(0),
+                    self.lost.eq((window_errs > lost_window//2) |
+                        (~seen_start & (seen_nonidle | ~seen_valid))),
                 )
             )
         ]
@@ -252,9 +271,9 @@ class PRBSLinkTester(LiteXModule):
     the generators/checkers in it, the CSRs in sys (enable/u0/x2 resynchronized, counters through
     BusSynchronizers).
 
-    Resync (PHY with directed_recovery, as a Link Layer on CRC errors): a checker lost (errors on most
-    words of a window: scrambler/descrambler out of synchronization, seen on hardware with the
-    link in U0 and no Recovery) directs the LTSSM to Recovery (the TS Ordered Sets COMs re-seed the
+    Resync (PHY with directed_recovery, as a Link Layer on CRC errors/timeouts): a checker lost (errors
+    on most words of a window: scrambler/descrambler out of synchronization; or no start marker in a
+    window with packets or nothing received; both seen on hardware with the link in U0 and no Recovery) directs the LTSSM to Recovery (the TS Ordered Sets COMs re-seed the
     LFSRs), counted in rx_resyncs.
     """
     def __init__(self, phy, data_width=32, gap_bits=4, cd="sys"):

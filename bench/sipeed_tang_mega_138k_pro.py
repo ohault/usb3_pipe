@@ -851,7 +851,7 @@ def main():
     parser.add_argument("--with-clk-meters",     action="store_true", help="GTR12 TX/RX fabric clocks frequency meters (usb3_tx_freq/usb3_rx_freq, Hz).")
     parser.add_argument("--with-gtr12-debug",    action="store_true", help="GTR12/PIPE bring-up debug (transitions, RX snapshots, SSP status).")
     parser.add_argument("--with-gtr12-analyzer", action="store_true", help="LiteScope Analyzer on the GTR12 raw RX words.")
-    parser.add_argument("--place-option",   default=2, type=int, help="Gowin place algorithm.", choices=[0, 1, 2])
+    parser.add_argument("--place-option",   default=None, type=int, help="Gowin place algorithm (default: 3 for the --lanes 2 PRBS split builds, else 2).", choices=[0, 1, 2, 3, 4])
     parser.add_argument("--route-option",   default=1, type=int, help="Gowin route algorithm.", choices=[0, 1, 2])
     x2_group = parser.add_argument_group(title="Gen 1x2 (two lanes, SFP0/SFP1: two boards link tests, as bench/acorn.py --lanes 2)")
     x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, --sfp) or 2 (Gen 1x2, SFP0/SFP1, sys on the Lane 0 TX clock at 125MHz).", choices=[1, 2])
@@ -872,6 +872,10 @@ def main():
         # GW5AST-138 silicon revision of the board (LiteX-Boards: the engineering sample, version B).
         platform.device, platform.devicename = TANG_DEVICES[args.device]
     # Place & Route options for timings (Gowin SUG100: timing driven by default).
+    # --lanes 2 PRBS split builds (t21b, deterministic: lanes clock 118.5/125.1/113.0/126.1/112.0MHz for
+    # place options 0-4, sys 74.4MHz with 3): 3.
+    if args.place_option is None:
+        args.place_option = 3 if (args.lanes == 2 and not args.lanes_core) else 2
     platform.toolchain.options["place_option"]        = args.place_option
     platform.toolchain.options["route_option"]        = args.route_option
     platform.toolchain.options["replicate_resources"] = 1

@@ -1144,6 +1144,17 @@ t21 (589865c, partial: the NUC went offline during the resync on/off A/B): Tang 
 113MHz on the lanes clock (WNS -0.85ns, t20 met at 0766db0: margin placement dependent), `--place-option 1` 125.1MHz (used);
 30 Acorn loads + Warm Resets + Tang retrains: 55/55 PRBS measurements clean, no garbage measurement (whether resyncs
 occurred and the A/B not collected).
+t21b (320eab6 bitstreams, 2 x 10 loads x 10 Host trainings (Warm Resets), resync off/on alternating, 10s PRBS each): the
+Acorn checker loses step on ~18% of the trainings in both arms (line clean: no decode/disparity/COM/SKP errors, U0 x2
+deskewed, normal packet rate: descrambler out of step); resync off 16/100 garbage measurements, on **0/100** (1-2 resyncs
+during the training; re-enabled on the 16: cleared, 1 to 94 Recoveries). New: the Tang checker stops receiving (9 cases,
+both arms, sticky on some loads, cleared by a later training): its RX words/packets/errors frozen, TX running, link in U0
+x2 deskewed, CDRs locked, no Recovery, Acorn clean: start markers never seen whole, nothing counted, so not lost. Fix: a
+window with no start marker while non-idle (or no) words were received is lost too (a partner sending Logical Idle only
+is not). Tang place options (deterministic, lanes clock/sys): 0 118.5/62.8, 1 125.1/67.0, 2 113.0/67.1, 3 **126.1/74.4**,
+4 112.0/69.5MHz: `--place-option` 0-4, default 3 for the `--lanes 2` PRBS split builds. `litex_mcp` read-only against
+the Acorn SoC works (check, register reads/sequences); LiteX's `parse_build_reports` finds no Gowin timing (Gowin
+1.9.12.02 SP2 writes `impl/pnr/project.tr.html`, not `project.tr`: upstream LiteX fix).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

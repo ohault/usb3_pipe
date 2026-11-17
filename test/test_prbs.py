@@ -12,7 +12,7 @@ from migen import *
 
 from litex.soc.interconnect import stream
 
-from usb3_pipe.prbs import PRBSLinkTester
+from usb3_pipe.prbs import PRBSLinkTester, PRBSPacketChecker
 
 # Fake PHY (loopback) ------------------------------------------------------------------------------
 
@@ -24,6 +24,8 @@ class LoopbackPHY(Module):
         self.u0      = Signal()
         self.corrupt = Signal()
         self.garbage = Signal() # All the data words corrupted (descrambler out of synchronization).
+        self.drop    = Signal() # No words received.
+        self.unstart = Signal() # Start markers corrupted (never seen whole).
         self.directed_recovery = Signal()
         pipes = [stream.PipeValid(layout) for _ in range(2)]
         self.submodules += pipes
@@ -34,6 +36,12 @@ class LoopbackPHY(Module):
             pipes[1].source.connect(self.source),
             If((self.corrupt | self.garbage) & (pipes[1].source.ctrl == 0),
                 self.source.data.eq(pipes[1].source.data ^ 0x5a)
+            ),
+            If(self.unstart & (pipes[1].source.data[0:8] == 0xfb),
+                self.source.data.eq(pipes[1].source.data ^ 1)
+            ),
+            If(self.drop,
+                self.source.valid.eq(0)
             )
         ]
 
@@ -47,6 +55,27 @@ class LanesLoopbackPHY(Module):
         self.submodules += x2, x1
         self.sink,    self.source    = x2.sink, x2.source
         self.sink_x1, self.source_x1 = x1.sink, x1.source
+
+class TestPRBSPacketChecker(unittest.TestCase):
+    def test_lost_idle_partner(self):
+        # A partner sending only Logical Idle (its packets disabled): not lost; no words at all: lost.
+        dut = PRBSPacketChecker(32, lost_window=64)
+        def generator():
+            yield dut.enable.eq(1)
+            yield dut.sink.valid.eq(1)
+            yield dut.sink.data.eq(0)
+            yield dut.sink.ctrl.eq(0)
+            lost = 0
+            for _ in range(300):
+                lost += (yield dut.lost)
+                yield
+            self.assertEqual(lost, 0)
+            yield dut.sink.valid.eq(0)
+            for _ in range(300):
+                lost += (yield dut.lost)
+                yield
+            self.assertGreaterEqual(lost, 3)
+        run_simulation(dut, generator())
 
 class DUT(Module):
     def __init__(self, data_width):
@@ -99,6 +128,20 @@ class TestPRBSLinkTester(unittest.TestCase):
             for _ in range(2200):
                 yield
             self.assertEqual((yield t._rx_resyncs.status), recoveries)
+
+            # No words received / start markers never seen whole: lost -> directed Recovery.
+            for fault in [dut.phy.drop, dut.phy.unstart]:
+                yield fault.eq(1)
+                count = 0
+                for _ in range(3000):
+                    count += (yield dut.phy.directed_recovery)
+                    yield
+                yield fault.eq(0)
+                self.assertGreaterEqual(count, 1)
+                for _ in range(2200):
+                    yield
+                recoveries += count
+                self.assertEqual((yield t._rx_resyncs.status), recoveries)
 
             # Disabled: no new packets (CSR fields: the CSRs are not simulated).
             yield t._control.fields.enable.eq(0)
