@@ -151,7 +151,8 @@ class LaneDeskew(LiteXModule):
                 Reduce("AND", [m | e for m, e in zip(is_m, is_e)]) & Reduce("OR", is_m))
         # Marker flag computed on the sink side and stored with the word (timing: the heads are a
         # single FIFO output bit, not a word compare).
-        self.fifos = fifos = [ResetInserter()(stream.SyncFIFO(lane_layout() + [("marker", 1)], depth))
+        self.fifos = fifos = [ResetInserter()(stream.SyncFIFO(lane_layout() + [("marker", 1)], depth,
+            buffered=True))
             for _ in range(2)]
         self.submodules += fifos
         self.comb += [fifo.reset.eq(flush) for fifo in fifos]

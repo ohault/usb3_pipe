@@ -302,14 +302,28 @@ class USB3PIPE(LiteXModule):
         rx_valid = Signal()
         rx_data  = rx_words.data
         rx_ctrl  = rx_words.ctrl
+        rx_idle_word = Signal()
+        rx_data_word = Signal()
         self.comb += [
             rx_valid.eq(rx_words.valid & rx_words.ready),
+            rx_idle_word.eq(rx_valid & (rx_data == 0) & (rx_ctrl == 0)),
+            rx_data_word.eq(rx_valid & ((rx_data != 0) | (rx_ctrl != 0))),
             idle_handshake.enable.eq(self.idle_handshake),
-            idle_handshake.rx_idle.eq(rx_valid & (rx_data == 0) & (rx_ctrl == 0)),
-            idle_handshake.rx_data.eq(rx_valid & ((rx_data != 0) | (rx_ctrl != 0))),
             idle_handshake.tx_idle.eq(tx_idle_sent),
             self.idle_handshake_done.eq(idle_handshake.done),
         ]
+        if x2_lane:
+            # Gen 1x2 lane: the descrambler output not registered, the received words flags
+            # registered (timing: Tang Mega 138K Pro lanes clock, TS1 checker -> handshake count).
+            self.sync += [
+                idle_handshake.rx_idle.eq(rx_idle_word),
+                idle_handshake.rx_data.eq(rx_data_word),
+            ]
+        else:
+            self.comb += [
+                idle_handshake.rx_idle.eq(rx_idle_word),
+                idle_handshake.rx_data.eq(rx_data_word),
+            ]
 
 # Gen 2 PIPE ---------------------------------------------------------------------------------------
 
