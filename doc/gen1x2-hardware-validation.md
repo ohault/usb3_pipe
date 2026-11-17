@@ -1140,6 +1140,10 @@ also at Gen 1x1) with the link in U0 and no Recovery: the packet markers (K-code
 data/idle word is wrong, i.e. the Acorn descrambler out of step with the Tang scrambler (likely one errored Symbol, e.g.
 a SKP, advancing one LFSR); a Link Layer would see CRC errors and Recover. PRBS stand-ins now do the same: checker lost
 (errors on most words of 1024 cycles) -> directed Recovery, `usb3_prbs_rx_resyncs`.
+t21 (589865c, partial: the NUC went offline during the resync on/off A/B): Tang split build at the default placement
+113MHz on the lanes clock (WNS -0.85ns, t20 met at 0766db0: margin placement dependent), `--place-option 1` 125.1MHz (used);
+30 Acorn loads + Warm Resets + Tang retrains: 55/55 PRBS measurements clean, no garbage measurement (whether resyncs
+occurred and the A/B not collected).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
