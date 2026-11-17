@@ -257,7 +257,7 @@ lane 0 and lane 1 configurations merged (`gw5_csr_merge_lanes`), or `usb3_5g_x2.
 from `usb3_5g_x2.toml` (the 1.9.12 tools do not accept the 1.9.10 TOML files), or `--serdes-csr`.
 With the PRBS stand-ins (default), the lanes logic (PIPEs, lanes datapath, transceiver logic) and the
 stand-ins run at 125 MHz on the lane 0 TX clock (met at 0766db0: 125.35 MHz), and the LTSSM and the SoC
-at 62.5 MHz, as the Gen 1x1 build splits its PHY; the lanes debug registers then have no event counters. With `--lanes-core`
+at 62.5 MHz, as the Gen 1x1 build splits its PHY; the lanes debug registers then count only the lanes events (deskew, realignments, odd SKP runs, COM slips, per lane TS and receive errors), in the lanes clock domain. With `--lanes-core`
 (scripted host or device core) everything runs at 125 MHz on the lane 0 TX clock, so the bridge only
 answers once the dock reference clock is programmed; these builds do not reach 125 MHz on the GW5A
 (69 to 80 MHz measured). `--lean` leaves out the lanes event/error counters and the noise monitor.

@@ -197,6 +197,16 @@ def test_target_lanes_tx_diffctrl(tmp_path):
             assert re.search(r"reg\s+\[3:0\]\s+" + storage + r"\s*=\s*4'd" + str(value) + ";", verilog), \
                 (args, lane, value)
 
+def test_target_lanes_split_counters(tmp_path):
+    # Tang Mega 138K Pro Gen 1x2 split build (lanes logic in pipe_cd): the lanes event counters
+    # counted in pipe_cd (lane word misalignment diagnosis, t22), not with --lean.
+    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path / "default", ["--lanes", "2"])
+    for name in ["deskew", "realign_u0", "skp_odd_u0", "com_slip", "lane0_rx_skp_odd", "lane1_rx_com_partial",
+        "lane1_rx_errors_cycles", "lane0_ts2"]:
+        assert f"usb3_lanes_debug_{name}_count" in csr, name
+    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path / "lean", ["--lanes", "2", "--lean"])
+    assert "usb3_lanes_debug_deskew_count" not in csr
+
 def test_target_lanes_host_script_ss(tmp_path):
     # Scripted host not x2 capable: SuperSpeed script (Gen 1x1 negotiated with the Device).
     csr = elaborate("acorn", tmp_path, ["--lanes", "2", "--role", "host", "--lanes-core", "--no-x2"])

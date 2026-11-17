@@ -242,6 +242,9 @@ class USB3LanesDebug(LiteXModule):
         # pipe_cd: status resynchronized to sys, re-initialization to pipe_cd, no counters.
         assert len(serdes) == 2
         cd = getattr(phy, "pipe_cd", None)
+        # pipe_cd: the lanes events counted in pipe_cd (wrapping, through BusSynchronizers, cleared by
+        # a snapshot in sys), without the LTSSM gated ones, the RX errors by type and the noise monitor.
+        cd_counters = with_counters and (cd is not None)
         if cd is not None:
             with_counters = False
         def level(s):
@@ -385,6 +388,30 @@ class USB3LanesDebug(LiteXModule):
                 setattr(self, f"_lane{lane}_{name}_count", csr)
                 self.sync += If(self._clear.re, base.eq(value))
                 self.comb += csr.status.eq(value - base)
+        if cd_counters:
+            # Lanes events in pipe_cd (Tang Mega 138K Pro split builds: lane word misalignment, t22).
+            cd_names = {"deskew", "realign_u0", "skp_odd_u0", "com_slip"}
+            for lane in range(2):
+                cd_names |= {f"lane{lane}_{n}" for n in ["ts1", "ts1_inv", "ts2", "rx_errors_cycles",
+                    "rx_buferror", "rx_realign", "rx_skp_odd", "rx_com_partial"]}
+            for name, signal, edge in events:
+                if name not in cd_names:
+                    continue
+                csr = CSRStatus(32, name=f"{name}_count",
+                    description=f"{name} {'events' if edge else 'cycles'} count (wrapping, since the last clear).")
+                setattr(self, f"_{name}_count", csr)
+                value    = Signal(32)
+                signal_d = Signal()
+                event    = (signal & ~signal_d) if edge else signal
+                getattr(self.sync, cd).__iadd__([
+                    signal_d.eq(signal),
+                    If(event, value.eq(value + 1)),
+                ])
+                bs   = BusSynchronizer(32, cd, "sys")
+                base = Signal(32)
+                self.submodules += bs
+                self.comb += [bs.i.eq(value), csr.status.eq(bs.o - base)]
+                self.sync += If(self._clear.re, base.eq(bs.o))
         if not with_counters:
             events = []
         for name, signal, edge in events:
