@@ -216,7 +216,10 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   K28.4 first COMs, fixed 45d16b3: gap only), Warm Reset 0/8 also with re-init off (sim detects it: GTR12 side,
   `warm` LiteScope group), lanes clock 108.6MHz. t16v (65e470a): Tang Warm Reset miss = lane 1 `rx_errors` 0 during the
   LFPS (fix: `rx_stall`, RX_VLD_OUT low 64 cycles = errors), the no-disarm deskew mis-paired on a one lane K28.4
-  first marker (fix: K28.4+COM words are markers), 66dce0f Acorn + new Tang 4/10 U0 all clean. Next: t16w.
+  first marker (fix: K28.4+COM words are markers), 66dce0f Acorn + new Tang 4/10 U0 all clean. t16w (f95b23c): Tang Warm Reset detected 6/6
+  (RX_VLD_OUT low during the LFPS confirmed), 66dce0f Acorn + f95b23c Tang Gen 1x2 PRBS 10/10 clean, the f95b23c
+  Acorn 0/10 (needs the disarm: restored for non-marker error words). Next: t16x (both at the new commit, Gen 1x1
+  cross-check, Tang Host role), lanes clock timing (PRBS checker packet decode, deskew gap counter).
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

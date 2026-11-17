@@ -112,8 +112,11 @@ class LaneDeskew(LiteXModule):
     mismatch; Tang Mega 138K Pro Lane 1 late, every destriped word corrupted in U0).
 
     error_symbol: K Symbol substituted for the RX decode errors (K28.4): a word with one is not counted
-    in a gap, a marker word with some of its Symbols as error_symbol is a marker (corrupted first
-    COM Symbols on one lane: else paired with the other lane's next marker), an armed search is kept (the first COM Symbols of a TS Ordered Set after an idle period
+    in a gap and disarms an armed search (a lane word aligned after the arming: its garbage, then its
+    first marker paired with a later Ordered Set of the other lane; Acorn, t16w); a marker word with
+    some of its Symbols as error_symbol is a marker, not an error (corrupted first COM Symbols: as
+    errors, the search was disarmed at each Ordered Set and the lanes never paired, Tang t16u; on one
+    lane only, without the disarm, paired with the other lane's next marker, Acorn t16v) (the first COM Symbols of a TS Ordered Set after an idle period
     often arrive as K28.4 on hardware: disarming on them, the lanes were never paired again, t16u)
     (a lane not word aligned yet receives garbage without marker: as a gap, its first marker
     then paired with a later Ordered Set of the other lane, the lanes Ordered Sets apart without any
@@ -152,8 +155,9 @@ class LaneDeskew(LiteXModule):
             for _ in range(2)]
         self.submodules += fifos
         self.comb += [fifo.reset.eq(flush) for fifo in fifos]
-        heads = []
-        gaps  = []
+        heads  = []
+        gaps   = []
+        errors = []
         for lane in range(2):
             head      = Signal()
             gap_count = Signal(max=gap + 1)
@@ -179,6 +183,10 @@ class LaneDeskew(LiteXModule):
             )
             heads.append(head)
             gaps.append(gap_count == gap)
+            # Error word (not a corrupted marker word): disarms an armed search.
+            error = Signal()
+            self.comb += error.eq(error_in & ~marker_in)
+            errors.append(error)
         self.heads = heads
 
         # Search armed after a gap on both lanes (no marker in the FIFOs, dropped while searching),
@@ -199,7 +207,9 @@ class LaneDeskew(LiteXModule):
                 mismatch.eq(0)
             ).Elif(~aligned,
                 mismatch.eq(0),
-                If(gaps[0] & gaps[1],
+                If(errors[0] | errors[1],
+                    armed.eq(0)
+                ).Elif(gaps[0] & gaps[1],
                     armed.eq(1)
                 ).Elif(armed & heads[0] & heads[1],
                     aligned.eq(1),

@@ -256,8 +256,9 @@ class TestLanes(unittest.TestCase):
     def test_deskew_late_lane_errors_no_gap(self):
         # Lane 1 not word aligned yet (garbage with decode errors substituted, K28.4) while Lane 0
         # already receives the TS Ordered Sets, its first marker one Ordered Set later than Lane 0's
-        # (within the FIFOs depth: no overflow, t16s). The garbage with errors is not a gap: no
-        # pairing until a clean gap on both lanes (Logical Idle), the next TS paired.
+        # (within the FIFOs depth: no overflow, t16s). The garbage with errors is not a gap and
+        # disarms a search armed before it: no pairing until a clean gap on both lanes (Logical
+        # Idle), the next TS paired.
         rng    = random.Random(6)
         marker = (0xbcbcbcbcbcbcbcbc, 0xff)
         sub    = (0x9c9c9c9c9c9c9c9c, 0xff)
@@ -273,10 +274,17 @@ class TestLanes(unittest.TestCase):
         late = 4 # One Ordered Set.
         garbage = [self.stripe(sub, 1) if i % 3 == 0 else (rng.getrandbits(32) & 0x7f7f7f7f, 0)
             for i in range(24 + late)]
+        for armed in [False, True]:
+            # armed: a clean gap on both lanes first (search armed before the garbage, disarmed by
+            # its error words).
+            pre = [(0, 0)]*20 if armed else []
+            lane0 = [self.stripe(w, 0) for w in pre + [(0, 0)]*24 + first + idle + last + data]
+            lane1 = [self.stripe(w, 1) for w in pre] + garbage + \
+                [self.stripe(w, 1) for w in first[late:] + idle + last + data]
+            out = self.run_deskew([lane0, lane1], cycles=400, error_symbol=0x9c)
+            self.assertEqual(out, last + data, f"armed={armed}")
         lane0 = [self.stripe(w, 0) for w in [(0, 0)]*24 + first + idle + last + data]
         lane1 = garbage + [self.stripe(w, 1) for w in first[late:] + idle + last + data]
-        out = self.run_deskew([lane0, lane1], cycles=400, error_symbol=0x9c)
-        self.assertEqual(out, last + data)
         # Without the error Symbol check, the garbage is a gap: the lanes paired one Ordered Set apart.
         out = self.run_deskew([lane0, lane1], cycles=400)
         self.assertNotEqual(out[-len(data):], data)

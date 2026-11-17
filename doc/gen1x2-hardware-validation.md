@@ -1093,6 +1093,15 @@ lane let the other lane's first marker pair with its next one, the lanes an Orde
 with some Symbols as K28.4 (at least one COM) is a marker (`test_deskew_first_com_errors_one_lane`). C: Tang lanes
 clock 109.3MHz (313 failing endpoints; worst: PRBS checker packet decode, deskew gap counter enable), 106.4MHz with
 the analyzer, sys 69.4/72.2MHz; the single lane build meets all clocks.
+t16w (f95b23c; report `build/hw_runs/mixed_t16/t16w/report_t16w.md` on the NUC): B, Warm Reset with the lanes
+swapped on the two lanes Tang: detected 6/6 (Host-only retrains, both back in U0 within 0.64-0.73s); `rx_invalid`
+(RX_VLD_OUT low) high on lane 1 for the whole capture (LFPS and the Host's Polling bursts; also on lane 0 without a far
+end: no valid RX data), `rx_stall` then `rx_errors` steady high, `lfps_rx_reset` 25.0ms after `rx_idle` steady low. A:
+66dce0f Acorn + f95b23c Tang 10/10 (U0 at Gen 1x2 in 0.08-2.1s, deskew aligned, 0 PRBS errors both ways at 610MB/s);
+f95b23c Acorn + f95b23c Tang 0/10 (Recovery loop, as the 65e470a Acorn): the Acorn needs the disarm (a lane word
+aligned after the arming), the Tang the corrupted marker words. Fix: error words that are not corrupted marker words
+disarm again (both). C: Acorn Host WNS +0.071ns; Tang lanes clock 101.7MHz (worst: PRBS checker packet decode,
+deskew gap counter ~-1.8ns), sys 75.7MHz; with the `warm` analyzer sys 60.5MHz (fails 62.5 by 2.45ns, captures fine).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
