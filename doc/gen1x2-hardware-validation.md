@@ -1131,6 +1131,15 @@ both channels identical on good/bad loads, no status bit separating them. Acorn 
 locks on a bad load. A bad load = too little Tang receiver margin at swing 12 with both Acorn lanes transmitting.
 Fix: `--tx-diffctrl` (reset value of the runtime register), default 15 with `--lanes 2`; the watchdog kept as a fallback.
 Acorn <-> Acorn Gen 1x2 not retested at 15 (bench wired Acorn/Tang).
+t20 (0766db0 Acorn and Tang): Tang split PRBS build meets timing (lanes clock 125.35MHz, +0.023ns; sys 83.3MHz), Acorn
+WNS +0.100ns, swing 15 read back on both lanes. Acorn loads: **20/20** good at x2 with the watchdog off (both Tang CDRs
+locked at 124.996-124.997MHz, ~615MB/s each way, 0 watchdog re-inits), 10/10 with it on; Warm Reset at x2 (Host PHY held
+in reset 1s: the port reset path): 15/15 back to x2 U0 in 1.14-1.18s; Gen 1x1 at swing 15: 2/2, 308MB/s. Open: in 7/47
+PRBS measurements the Acorn checker (Tang -> Acorn) counts more errors than words (~1.16G errors for ~769M words in 10s,
+also at Gen 1x1) with the link in U0 and no Recovery: the packet markers (K-codes, not scrambled) are received but every
+data/idle word is wrong, i.e. the Acorn descrambler out of step with the Tang scrambler (likely one errored Symbol, e.g.
+a SKP, advancing one LFSR); a Link Layer would see CRC errors and Recover. PRBS stand-ins now do the same: checker lost
+(errors on most words of 1024 cycles) -> directed Recovery, `usb3_prbs_rx_resyncs`.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

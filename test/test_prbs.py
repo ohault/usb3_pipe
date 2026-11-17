@@ -23,6 +23,8 @@ class LoopbackPHY(Module):
         layout = [("data", data_width), ("ctrl", data_width//8)]
         self.u0      = Signal()
         self.corrupt = Signal()
+        self.garbage = Signal() # All the data words corrupted (descrambler out of synchronization).
+        self.directed_recovery = Signal()
         pipes = [stream.PipeValid(layout) for _ in range(2)]
         self.submodules += pipes
         self.sink   = pipes[0].sink
@@ -30,8 +32,8 @@ class LoopbackPHY(Module):
         self.comb += [
             pipes[0].source.connect(pipes[1].sink),
             pipes[1].source.connect(self.source),
-            If(self.corrupt & (pipes[1].source.ctrl == 0),
-                self.source.data.eq(pipes[1].source.data ^ 1)
+            If((self.corrupt | self.garbage) & (pipes[1].source.ctrl == 0),
+                self.source.data.eq(pipes[1].source.data ^ 0x5a)
             )
         ]
 
@@ -83,6 +85,20 @@ class TestPRBSLinkTester(unittest.TestCase):
             errors = (yield t._rx_errors.status)
             self.assertGreaterEqual(errors, 1)
             self.assertLessEqual(errors, 2)
+            self.assertEqual((yield t._rx_resyncs.status), 0)
+
+            # Garbage (all data/idle words corrupted, markers intact): lost -> directed Recovery.
+            yield dut.phy.garbage.eq(1)
+            recoveries = 0
+            for _ in range(3000):
+                recoveries += (yield dut.phy.directed_recovery)
+                yield
+            yield dut.phy.garbage.eq(0)
+            self.assertGreaterEqual(recoveries, 1)
+            self.assertEqual((yield t._rx_resyncs.status), recoveries)
+            for _ in range(2200):
+                yield
+            self.assertEqual((yield t._rx_resyncs.status), recoveries)
 
             # Disabled: no new packets (CSR fields: the CSRs are not simulated).
             yield t._control.fields.enable.eq(0)

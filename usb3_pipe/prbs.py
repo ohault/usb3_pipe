@@ -13,7 +13,7 @@ hardware link tests: bench/acorn.py --lanes 2).
 """
 
 from migen import *
-from migen.genlib.cdc import MultiReg, BusSynchronizer
+from migen.genlib.cdc import MultiReg, BusSynchronizer, PulseSynchronizer
 
 from litex.gen import *
 
@@ -108,13 +108,19 @@ class PRBSPacketChecker(LiteXModule):
     a corrupted/lost word only gives a bounded number of errors). Outside packets, only Logical Idle
     (descrambled 00h data symbols) is expected.
     After being enabled, the words are checked from the first packet start marker.
+
+    lost: pulse when more than half of the received words of a lost_window cycles window are errors
+    (the checker sees garbage with valid packet markers: the K-code markers are not scrambled, so a
+    descrambler out of synchronization with the partner scrambler, which a Link Layer would see as
+    CRC errors and leave through a Recovery).
     """
-    def __init__(self, data_width=32):
+    def __init__(self, data_width=32, lost_window=1024):
         self.enable  = Signal()   # i
         self.sink    = sink = stream.Endpoint([("data", data_width), ("ctrl", data_width//8)])
         self.words   = Signal(32) # o: Data words checked.
         self.packets = Signal(32) # o: Packets received.
         self.errors  = Signal(32) # o: Errors.
+        self.lost    = Signal()   # o: Errors on most words of a window (pulse).
 
         # # #
 
@@ -206,6 +212,26 @@ class PRBSPacketChecker(LiteXModule):
             mism.eq(cerr_d | (chk_d & (data_d != exp_d))),
             self.errors.eq(self.errors + err + mism),
         ]
+        # Lost: errored cycles (err/mism) counted over a window of lost_window cycles.
+        err_d       = Signal()
+        window      = Signal(max=lost_window)
+        window_errs = Signal(max=lost_window + 1)
+        self.sync += [
+            err_d.eq(err),
+            self.lost.eq(0),
+            If(~self.enable,
+                window.eq(0),
+                window_errs.eq(0),
+            ).Else(
+                window.eq(window + 1),
+                window_errs.eq(window_errs + (err_d | mism)),
+                If(window == (lost_window - 1),
+                    window.eq(0),
+                    window_errs.eq(0),
+                    self.lost.eq(window_errs > lost_window//2),
+                )
+            )
+        ]
 
 # Link Tester (PRBS Packets, CSRs) -----------------------------------------------------------------
 
@@ -225,15 +251,22 @@ class PRBSLinkTester(LiteXModule):
     cd: clock domain of the PHY link interface (USB3PHY(lanes=2) with pipe_cd: its lanes interface),
     the generators/checkers in it, the CSRs in sys (enable/u0/x2 resynchronized, counters through
     BusSynchronizers).
+
+    Resync (PHY with directed_recovery, as a Link Layer on CRC errors): a checker lost (errors on most
+    words of a window: scrambler/descrambler out of synchronization, seen on hardware with the
+    link in U0 and no Recovery) directs the LTSSM to Recovery (the TS Ordered Sets COMs re-seed the
+    LFSRs), counted in rx_resyncs.
     """
     def __init__(self, phy, data_width=32, gap_bits=4, cd="sys"):
         self._control = CSRStorage(fields=[
             CSRField("enable", size=1, offset=0, reset=1, description="Send/check packets in U0."),
+            CSRField("resync", size=1, offset=1, reset=1, description="Directed Recovery on a lost checker (errors on most words of a window)."),
         ])
         self._tx_words   = CSRStatus(32, description="Data words sent.")
         self._rx_words   = CSRStatus(32, description="Data words checked.")
         self._rx_packets = CSRStatus(32, description="Packets received.")
         self._rx_errors  = CSRStatus(32, description="Errors.")
+        self._rx_resyncs = CSRStatus(32, description="Checker lost events (directed Recoveries when resync is enabled).")
 
         # # #
 
@@ -274,6 +307,21 @@ class PRBSLinkTester(LiteXModule):
             (self._rx_packets, counter(checkers[0].packets,   checkers[-1].packets)),
             (self._rx_errors,  counter(checkers[0].errors,    checkers[-1].errors)),
         ]
+        # Checker lost -> resync (directed Recovery, sys domain), counted.
+        lost = Signal()
+        lost_cd = Signal()
+        self.comb += lost_cd.eq(Reduce("OR", [c.lost for c in checkers]))
+        if cd == "sys":
+            self.comb += lost.eq(lost_cd)
+        else:
+            ps = PulseSynchronizer(cd, "sys")
+            self.submodules += ps
+            self.comb += [ps.i.eq(lost_cd), lost.eq(ps.o)]
+        resyncs = Signal(32)
+        self.sync += If(lost, resyncs.eq(resyncs + 1))
+        self.comb += self._rx_resyncs.status.eq(resyncs)
+        if hasattr(phy, "directed_recovery"):
+            self.comb += phy.directed_recovery.eq(lost & self._control.fields.resync)
         for csr, value in counters:
             if cd == "sys":
                 self.comb += csr.status.eq(value)

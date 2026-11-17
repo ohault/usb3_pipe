@@ -37,7 +37,7 @@ from usb3_debug import USB3DebugClient
 LANES_COUNTERS = ["deskew"] + [f"lane{lane}_{name}" for lane in range(2)
     for name in ["ts1", "ts1_inv", "ts2", "rx_errors_cycles"]]
 
-PRBS_COUNTERS = ["tx_words", "rx_words", "rx_packets", "rx_errors"]
+PRBS_COUNTERS = ["tx_words", "rx_words", "rx_packets", "rx_errors", "rx_resyncs"]
 
 PRBS_WORD_BYTES = {1: 8, 0: 4} # 64-bit link words (x2), 32-bit (Gen 1x1 negotiated, Lane 0).
 
@@ -56,7 +56,8 @@ class USB3LanesClient:
         return hasattr(self.bus.regs, "usb3_prbs_control")
 
     def prbs(self):
-        return {name: self.reg(f"usb3_prbs_{name}").read() for name in PRBS_COUNTERS}
+        return {name: self.reg(f"usb3_prbs_{name}").read() for name in PRBS_COUNTERS
+            if hasattr(self.bus.regs, f"usb3_prbs_{name}")} # rx_resyncs: not in the older builds.
 
     def status(self):
         dbg    = self.dbg.status()
@@ -396,6 +397,7 @@ def main():
                 "tx_MBps"      : round(delta["tx_words"]*word_bytes/args.period/1e6, 1),
                 "rx_MBps"      : round(delta["rx_words"]*word_bytes/args.period/1e6, 1),
                 "rx_errors"    : delta["rx_errors"],
+                "rx_resyncs"   : delta.get("rx_resyncs"),
                 "ltssm_state"  : lanes.dbg.status()["ltssm_state"],
             }), flush=True)
         elapsed = time.time() - start
@@ -406,6 +408,7 @@ def main():
             "rx_bytes"     : total["rx_words"]*word_bytes,
             "rx_packets"   : total["rx_packets"],
             "rx_errors"    : total["rx_errors"],
+            "rx_resyncs"   : total.get("rx_resyncs"),
             "rx_MBps"      : round(total["rx_words"]*word_bytes/elapsed/1e6, 1),
             "recoveries"   : status["recovery_count"] - recovery,
             "x2"           : status["x2"],

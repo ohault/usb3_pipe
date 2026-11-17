@@ -143,8 +143,12 @@ The Mini baseboard has two SFP cages on the same GTP quad, which makes it the Ge
 (`--lanes 2`, experimental). Lane 0, the configuration lane, is on SFP-0 and lane 1 on SFP-1, with
 lane 1 on the lane 0 PLL and transmit clock. Two Minis linked by two SFP DAC cables run one board
 in each role (`--role host` or `device`): PRBS stand-ins test the PHY, and with `--lanes-core` a
-scripted host in gateware tests the device core. The procedure and the results are in
-`doc/gen1x2-hardware-validation.md`.
+scripted host in gateware tests the device core. As a link layer would on CRC errors, the PRBS
+checker directs the LTSSM to Recovery when most words of a 1024-cycle window are errors (scrambler
+and descrambler out of step with the link in U0), counted in `usb3_prbs_rx_resyncs` (`resync` bit of
+`usb3_prbs_control`). With `--lanes 2` the Acorn transmit swing (`--tx-diffctrl`) is 15: at the USB3
+value 12 most bitstream loads did not train at Gen 1x2 with a Tang Mega 138K Pro. The procedure and
+the results are in `doc/gen1x2-hardware-validation.md`.
 
 ## KC705 {#boards-kc705}
 
@@ -252,8 +256,8 @@ device core. Both lanes share one GTR12 instance, one UPAR and one register conf
 lane 0 and lane 1 configurations merged (`gw5_csr_merge_lanes`), or `usb3_5g_x2.csr` once generated
 from `usb3_5g_x2.toml` (the 1.9.12 tools do not accept the 1.9.10 TOML files), or `--serdes-csr`.
 With the PRBS stand-ins (default), the lanes logic (PIPEs, lanes datapath, transceiver logic) and the
-stand-ins run at 125 MHz on the lane 0 TX clock, and the LTSSM and the SoC at 62.5 MHz, as the Gen 1x1
-build splits its PHY; the lanes debug registers then have no event counters. With `--lanes-core`
+stand-ins run at 125 MHz on the lane 0 TX clock (met at 0766db0: 125.35 MHz), and the LTSSM and the SoC
+at 62.5 MHz, as the Gen 1x1 build splits its PHY; the lanes debug registers then have no event counters. With `--lanes-core`
 (scripted host or device core) everything runs at 125 MHz on the lane 0 TX clock, so the bridge only
 answers once the dock reference clock is programmed; these builds do not reach 125 MHz on the GW5A
 (69 to 80 MHz measured). `--lean` leaves out the lanes event/error counters and the noise monitor.
