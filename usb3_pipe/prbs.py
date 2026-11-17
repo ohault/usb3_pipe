@@ -115,7 +115,8 @@ class PRBSPacketChecker(LiteXModule):
     Layer would see as CRC errors and leave through a Recovery), or when it holds no packet start
     marker while words other than Logical Idle (or no words at all) were received (start markers
     never seen whole: nothing checked, nothing counted). A partner not sending packets (Logical Idle
-    only) is not lost.
+    only) is not lost, nor the first window after the enable (U0 entry, t22: up to 14 Acorn resyncs
+    per training).
     """
     def __init__(self, data_width=32, lost_window=1024):
         self.enable  = Signal()   # i
@@ -223,10 +224,13 @@ class PRBSPacketChecker(LiteXModule):
         seen_start   = Signal()
         seen_nonidle = Signal()
         seen_valid   = Signal()
+        armed        = Signal() # First window after the enable ignored (U0 entry: the partner's
+                                # packets not flowing yet).
         self.sync += [
             err_d.eq(err),
             self.lost.eq(0),
             If(~self.enable,
+                armed.eq(0),
                 window.eq(0),
                 window_errs.eq(0),
                 seen_start.eq(0),
@@ -241,13 +245,14 @@ class PRBSPacketChecker(LiteXModule):
                     If(~is_idle,  seen_nonidle.eq(1)),
                 ),
                 If(window == (lost_window - 1),
+                    armed.eq(1),
                     window.eq(0),
                     window_errs.eq(0),
                     seen_start.eq(0),
                     seen_nonidle.eq(0),
                     seen_valid.eq(0),
-                    self.lost.eq((window_errs > lost_window//2) |
-                        (~seen_start & (seen_nonidle | ~seen_valid))),
+                    self.lost.eq(armed & ((window_errs > lost_window//2) |
+                        (~seen_start & (seen_nonidle | ~seen_valid)))),
                 )
             )
         ]
