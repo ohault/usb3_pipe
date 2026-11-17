@@ -1102,6 +1102,21 @@ f95b23c Acorn + f95b23c Tang 0/10 (Recovery loop, as the 65e470a Acorn): the Aco
 aligned after the arming), the Tang the corrupted marker words. Fix: error words that are not corrupted marker words
 disarm again (both). C: Acorn Host WNS +0.071ns; Tang lanes clock 101.7MHz (worst: PRBS checker packet decode,
 deskew gap counter ~-1.8ns), sys 75.7MHz; with the `warm` analyzer sys 60.5MHz (fails 62.5 by 2.45ns, captures fine).
+t16x-t16z (6e30bcc, 2cae579, 1dbb0ef; reports `build/hw_runs/mixed_t16/t16{x,y,z}/report_t16*.md` on the NUC): the
+Gen 1x2 Acorn Host <-> Tang Device result depends on the Acorn load (transceivers start-up draw): ~15% of the Acorn
+loads good (t16x 2/17, C2 1/8; t16y 1/12 6e30bcc Tang, 2/12 2cae579 Tang, 0/4 1dbb0ef pair), whatever the Tang build or
+reload (C1: 5 Tang reloads on a good Acorn load 5/5). The t16v/t16w "Acorn regression" verdicts rested on one Acorn load
+each (confounded with the draw). Good loads: 17/20 trainings at x2 (1.8-30s to U0), every good load 0 PRBS errors both
+ways at 610-613MB/s. Bad loads, at x2 only: both directions fail (Tang lane 1 CDR never locked, lane 0 locked about
+half of the reads, Tang RX clocks 124.6-124.85MHz; Acorn 10-30M decode errors per 2s on both lanes) while the same load
+trains at Gen 1x1 at once with 0 errors (4/4, t16x D 20/20, t16y 10/10, U0 in 0.07-0.09s). Not the Tang lanes RX errors
+re-initializations (off: 0/2 recovered; 2cae579 A/B no difference). Runtime actions on bad loads (t16z): Acorn TX
+post-cursor 0-14 0/20, Tang transceivers re-init 0/12, Acorn transceivers re-init (Quad PLL and both channels) + retrain
+3/4 loads recovered after 1-3 re-inits, then clean. Fix: Host training watchdog (`LanesTrainingWatchdog`, 2s of
+training without U0 -> transceivers re-init, `usb3_lanes.py watchdog`). Warm Reset at x2 not testable on the bad loads;
+x2 off 5/5. Timing: Tang lanes clock 98.1MHz (6e30bcc), 97.2MHz (2cae579), 108.7MHz (1dbb0ef: PRBS checker/deskew input
+stages; worst then deskew FIFO read -> pairing state and a lane TS1 checker -> idle handshake count, buffered/registered
+in f9cdafa), sys met; Acorn WNS +0.248/+0.106ns.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

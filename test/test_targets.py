@@ -162,11 +162,26 @@ def test_target_lanes_host_script(tmp_path):
         "usb3_lanes_debug_lane0_qpll_lock_lost_count", "usb3_lanes_debug_lane1_tx_buferror_count",
         "usb3_lanes_debug_monitor_control", "usb3_lanes_debug_monitor_thresholds", "usb3_lanes_debug_monitor_window",
         "usb3_lanes_debug_monitor_window_status", "usb3_lanes_debug_monitor_reinits_count",
-        "usb3_lanes_debug_monitor_ratio", "usb3_lanes_debug_monitor_window_hot_resets"]:
+        "usb3_lanes_debug_monitor_ratio", "usb3_lanes_debug_monitor_window_hot_resets",
+        "usb3_lanes_debug_watchdog_timeout", "usb3_lanes_debug_watchdog_count"]:
         assert csr_name in csr
     assert "usb3_prbs" not in csr
     verilog = next((tmp_path / "gateware").glob("*.v")).read_text()
     assert verilog.count("\nGTPE2_CHANNEL ") == 2
+
+def test_target_lanes_training_watchdog(tmp_path):
+    # Gen 1x2 training watchdog (transceivers re-initialization after training without U0): 2000ms
+    # reset value in the Host role, disabled (0) in the Device role (Tang Device split build too).
+    for target, args, reset in [
+        ("acorn", ["--lanes", "2", "--role", "host"],   2000),
+        ("acorn", ["--lanes", "2", "--role", "device"], 0),
+        ("sipeed_tang_mega_138k_pro", ["--lanes", "2"], 0)]:
+        out = tmp_path / f"{target}_{reset}_{args[-1]}"
+        elaborate(target, out, args)
+        verilog = next((out / "gateware").glob("*.v")).read_text()
+        assert "usb3_lanes_debug_watchdog_timeout" in (out / "csr.csv").read_text()
+        assert re.search(r"reg\s+\[15:0\]\s+\S*timeout_storage\s*=\s*16'd" + str(reset) + ";",
+            verilog), (target, args)
 
 def test_target_lanes_host_script_ss(tmp_path):
     # Scripted host not x2 capable: SuperSpeed script (Gen 1x1 negotiated with the Device).

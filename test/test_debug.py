@@ -15,7 +15,7 @@ from litex.gen import *
 from litex.soc.interconnect import stream
 
 from usb3_pipe.common import K
-from usb3_pipe.debug  import USB3PHYDebug, USB3LanesDebug, LanesNoiseMonitor, USB3PHY_DEBUG_HISTORY_DEPTH
+from usb3_pipe.debug  import USB3PHYDebug, USB3LanesDebug, LanesNoiseMonitor, LanesTrainingWatchdog, USB3PHY_DEBUG_HISTORY_DEPTH
 
 # Fake PHY/SerDes ----------------------------------------------------------------------------------
 
@@ -477,3 +477,49 @@ class TestLanesNoiseMonitor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+# Lanes Training Watchdog --------------------------------------------------------------------------
+
+class WatchdogDUT(LiteXModule):
+    STATES = {"Rx.Detect.Quiet": 0, "Polling.LFPS": 1, "Polling.RxEQ": 2, "eSS.Inactive": 3, "U0": 4,
+        "Recovery.Active": 5, "U3": 6}
+    def __init__(self, timeout_ms):
+        self.phy = SimpleNamespace(ltssm_state=Signal(4), ltssm_states=self.STATES, u0=Signal())
+        self.comb += self.phy.u0.eq(self.phy.ltssm_state == self.STATES["U0"])
+        self.watchdog = LanesTrainingWatchdog(self.phy, tick_cycles=4, timeout_ms=timeout_ms)
+
+class TestLanesTrainingWatchdog(unittest.TestCase):
+    def run_watchdog(self, states, timeout_ms=5):
+        # states: (LTSSM state name, cycles); returns the cycles of the reinit pulses and the count.
+        dut = WatchdogDUT(timeout_ms)
+        out = {"reinits": []}
+        def generator():
+            cycle = 0
+            for name, cycles in states:
+                yield dut.phy.ltssm_state.eq(dut.STATES[name])
+                for _ in range(cycles):
+                    yield
+                    if (yield dut.watchdog.reinit):
+                        out["reinits"].append(cycle)
+                    cycle += 1
+            out["count"] = (yield dut.watchdog._count.status)
+        run_simulation(dut, generator())
+        return out
+
+    def test_training_without_u0(self):
+        # Training loop (Polling/eSS.Inactive, Rx.Detect visits not counted) without U0: a
+        # re-initialization per 5ms (20 cycles) of training time.
+        loop = [("Polling.LFPS", 8), ("Polling.RxEQ", 4), ("eSS.Inactive", 4), ("Rx.Detect.Quiet", 30)]
+        out = self.run_watchdog(loop*6)
+        self.assertEqual(out["count"], 4)
+        self.assertEqual(len(out["reinits"]), 4)
+
+    def test_u0_reached(self):
+        # U0 reached within the timeout: no re-initialization (the training time restarts at U0).
+        out = self.run_watchdog([("Polling.LFPS", 16), ("U0", 40), ("Recovery.Active", 16), ("U0", 40)]*3)
+        self.assertEqual(out["count"], 0)
+
+    def test_no_partner_disabled(self):
+        # Rx.Detect only (no link partner), U3: no re-initialization; timeout 0: disabled.
+        self.assertEqual(self.run_watchdog([("Rx.Detect.Quiet", 400), ("U3", 400)])["count"], 0)
+        self.assertEqual(self.run_watchdog([("Polling.LFPS", 400)], timeout_ms=0)["count"], 0)

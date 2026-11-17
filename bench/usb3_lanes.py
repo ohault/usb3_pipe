@@ -149,6 +149,17 @@ class USB3LanesClient:
         # held 10us): the link retrains (Recovery, or Rx.Detect and a full training).
         self.reg("usb3_lanes_debug_xcvr_reinit").write(1)
 
+    def watchdog(self, timeout_ms=None):
+        # Training watchdog (transceivers re-initialization after timeout_ms of training without U0,
+        # 0: disabled): set the timeout (when given), return the timeout and re-initializations count
+        # (None: no watchdog in the build).
+        if not hasattr(self.bus.regs, "usb3_lanes_debug_watchdog_timeout"):
+            return None
+        if timeout_ms is not None:
+            self.reg("usb3_lanes_debug_watchdog_timeout").write(timeout_ms)
+        return {"timeout_ms": self.reg("usb3_lanes_debug_watchdog_timeout").read(),
+                "count": self.reg("usb3_lanes_debug_watchdog_count").read()}
+
     def xcvr_status(self, lane):
         # SerDes transceiver status (USB3LanesDebug lane{n}_xcvr_status fields).
         v = self.reg(f"usb3_lanes_debug_lane{lane}_xcvr_status").read()
@@ -265,7 +276,7 @@ def main():
         "prbs-enable", "prbs-disable", "script",
         "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable",
         "x2-enable", "x2-disable", "skp-recovery-enable", "skp-recovery-disable",
-        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit", "drp-dump", "monitor"])
+        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit", "drp-dump", "monitor", "watchdog"])
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -296,6 +307,9 @@ def main():
         lanes.reg("usb3_lanes_debug_clear").write(1)
         time.sleep(args.wait)
         print(json.dumps(lanes.status()))
+    elif args.command == "watchdog":
+        # Training watchdog: timeout (--value, ms, 0: disabled) set when given, state (JSON).
+        print(json.dumps({"watchdog": lanes.watchdog(None if args.value is None else int(args.value, 0))}))
     elif args.command == "xcvr-reinit":
         # Transceivers (both SerDes and the Quad PLL) re-initialized, counters cleared, status after
         # --wait.

@@ -231,9 +231,12 @@ class USB3LanesDebug(LiteXModule):
     - With monitor_tick_cycles (sys cycles per ms) and the per lane RX error counters: lanes noise
       monitor (LanesNoiseMonitor, monitor_*), transceivers re-initialization on a sustained RX
       disparity errors/Recovery rate.
+    - With monitor_tick_cycles and training_watchdog_ms: training watchdog (LanesTrainingWatchdog,
+      watchdog_timeout/count CSRs), transceivers re-initialization after training_watchdog_ms of link
+      training without U0 (0: disabled).
     """
     def __init__(self, phy, serdes, link=None, reinit_cycles=1024, monitor_tick_cycles=None,
-        with_counters=True):
+        with_counters=True, training_watchdog_ms=None):
         # with_counters=False: status/control/re-initialization only, no event/RX errors counters
         # nor noise monitor (lean builds: timings on slow fabrics). With a PHY lanes logic in its
         # pipe_cd: status resynchronized to sys, re-initialization to pipe_cd, no counters.
@@ -430,6 +433,7 @@ class USB3LanesDebug(LiteXModule):
                 self.comb += xcvr.drp_mux.sel.eq(Mux(drp_sel.storage, drp_index, 0))
 
         # Lanes noise monitor (per lane RX disparity errors counters required).
+        requests = [0]
         if monitor_tick_cycles is not None and len(counted) == len(serdes):
             states = phy.ltssm_states
             recovery, hot_reset, u3 = Signal(), Signal(), Signal()
@@ -445,7 +449,67 @@ class USB3LanesDebug(LiteXModule):
                 u3          = u3,
                 tick_cycles = monitor_tick_cycles,
                 clear       = self._clear.re)
-            self.comb += reinit_request.eq(self.monitor.reinit)
+            requests.append(self.monitor.reinit)
+
+        # Training watchdog.
+        if monitor_tick_cycles is not None and training_watchdog_ms is not None:
+            self.watchdog = LanesTrainingWatchdog(phy, tick_cycles=monitor_tick_cycles,
+                timeout_ms=training_watchdog_ms)
+            requests.append(self.watchdog.reinit)
+        self.comb += reinit_request.eq(Reduce("OR", requests))
+
+# Lanes Training Watchdog -------------------------------------------------------------------------
+
+class LanesTrainingWatchdog(LiteXModule):
+    """Gen 1x2 training watchdog: transceivers re-initialization when the link trains without
+    reaching U0.
+
+    Some transceivers start-ups (bitstream loads, re-initializations) give a link that never trains
+    at Gen 1x2: Acorn Mini Host (Artix7 GTP) <-> Tang Mega 138K Pro Device (GW5AST GTR12), ~85% of the
+    Acorn loads, both directions failing (Tang CDRs unlocked, Acorn decode errors on both lanes) while
+    the same load trains at Gen 1x1 at once; a runtime re-initialization of the Acorn transceivers
+    (Quad PLL and both channels) re-draws it: 3 of 4 bad loads recovered after 1-3 re-initializations,
+    then clean (t16z). The watchdog counts the time (tick_cycles sys cycles per ms) spent in the
+    training states (Polling, Recovery, Hot Reset, eSS.Inactive: a link partner present, not Rx.Detect)
+    since the last U0, and pulses reinit (one sys cycle) after timeout_ms of it (timeout CSR, runtime:
+    0 disables), then counts again (a re-initialization per timeout until U0).
+    """
+    def __init__(self, phy, tick_cycles, timeout_ms=2000):
+        from litex.soc.interconnect.csr import CSRStorage, CSRStatus
+        self.reinit = Signal() # o
+        self._timeout = CSRStorage(16, reset=timeout_ms,
+            description="Link training time without U0 (ms) before a transceivers re-initialization (0: disabled).")
+        self._count   = CSRStatus(32,
+            description="Transceivers re-initializations by the training watchdog.")
+
+        # # #
+
+        states   = phy.ltssm_states
+        training = Signal()
+        self.comb += training.eq(Reduce("OR", [phy.ltssm_state == value for name, value in
+            states.items() if name.split(".")[0] in ["Polling", "Recovery", "HotReset", "eSS"]]))
+        tick    = Signal()
+        ticks   = Signal(max=max(2, tick_cycles))
+        elapsed = Signal(16)
+        timeout = self._timeout.storage
+        self.sync += [
+            tick.eq(0),
+            ticks.eq(ticks + 1),
+            If(ticks == (tick_cycles - 1),
+                ticks.eq(0),
+                tick.eq(1),
+            ),
+            self.reinit.eq(0),
+            If(phy.u0 | (timeout == 0),
+                elapsed.eq(0)
+            ).Elif(elapsed >= timeout,
+                elapsed.eq(0),
+                self.reinit.eq(1),
+                self._count.status.eq(self._count.status + 1),
+            ).Elif(training & tick,
+                elapsed.eq(elapsed + 1)
+            )
+        ]
 
 # Lanes Noise Monitor -----------------------------------------------------------------------------
 

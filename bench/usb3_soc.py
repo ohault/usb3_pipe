@@ -587,7 +587,11 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     # held 10us) ------------------------------------------------------------------------------------
     soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes, link=usb3_link,
         reinit_cycles=int(sys_clk_freq*10e-6), monitor_tick_cycles=int(sys_clk_freq*1e-3),
-        with_counters=with_counters)
+        with_counters=with_counters,
+        # Training watchdog: Host transceivers re-initialized after 2s of training without U0 (Acorn
+        # Host start-ups never training at Gen 1x2 with a Tang Device, t16z); Device: disabled
+        # (runtime CSR).
+        training_watchdog_ms=2000 if role == "host" else 0)
 
     # Host Port Reset (Host role: Warm Reset when U0 is not reached, as the host software) --------
     if role == "host":

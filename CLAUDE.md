@@ -218,8 +218,12 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   LFPS (fix: `rx_stall`, RX_VLD_OUT low 64 cycles = errors), the no-disarm deskew mis-paired on a one lane K28.4
   first marker (fix: K28.4+COM words are markers), 66dce0f Acorn + new Tang 4/10 U0 all clean. t16w (f95b23c): Tang Warm Reset detected 6/6
   (RX_VLD_OUT low during the LFPS confirmed), 66dce0f Acorn + f95b23c Tang Gen 1x2 PRBS 10/10 clean, the f95b23c
-  Acorn 0/10 (needs the disarm: restored for non-marker error words). Next: t16x (both at the new commit, Gen 1x1
-  cross-check, Tang Host role), lanes clock timing (PRBS checker packet decode, deskew gap counter).
+  Acorn 0/10 (needs the disarm: restored for non-marker error words). t16x-t16z (6e30bcc..1dbb0ef): the Gen 1x2
+  result is set by the Acorn load (transceivers start-up draw, ~15% good; t16v/t16w verdicts confounded with it): bad
+  loads fail both ways at x2 only (Tang CDRs unlocked, Acorn decode errors), Gen 1x1 fine; good loads 0 PRBS errors at
+  610MB/s; an Acorn transceivers re-init + retrain recovers 3/4 bad loads (Acorn post-cursor, Tang re-init: no). Fix:
+  Host training watchdog (`LanesTrainingWatchdog`, 2s training without U0 -> xcvr re-init). Tang lanes clock 108.7MHz
+  at 1dbb0ef, more stages in f9cdafa. Next: t17 (watchdog, Acorn loads, Warm Reset x2, timing), Tang Host role.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
