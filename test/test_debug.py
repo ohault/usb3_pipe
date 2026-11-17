@@ -482,44 +482,64 @@ if __name__ == "__main__":
 
 class WatchdogDUT(LiteXModule):
     STATES = {"Rx.Detect.Quiet": 0, "Polling.LFPS": 1, "Polling.RxEQ": 2, "eSS.Inactive": 3, "U0": 4,
-        "Recovery.Active": 5, "U3": 6}
+        "Recovery.Active": 5, "U3": 6, "WarmReset": 7}
     def __init__(self, timeout_ms):
         self.phy = SimpleNamespace(ltssm_state=Signal(4), ltssm_states=self.STATES, u0=Signal())
         self.comb += self.phy.u0.eq(self.phy.ltssm_state == self.STATES["U0"])
-        self.watchdog = LanesTrainingWatchdog(self.phy, tick_cycles=4, timeout_ms=timeout_ms)
+        self.watchdog = LanesTrainingWatchdog(self.phy, tick_cycles=4, timeout_ms=timeout_ms,
+            u0_stable_ms=5, warm_delay_ms=2, warm_max_ms=4)
 
 class TestLanesTrainingWatchdog(unittest.TestCase):
-    def run_watchdog(self, states, timeout_ms=5):
-        # states: (LTSSM state name, cycles); returns the cycles of the reinit pulses and the count.
+    def run_watchdog(self, states, timeout_ms=5, warm_ack=False):
+        # states: (LTSSM state name, cycles); returns the cycles of the reinit pulses, of the Warm Reset
+        # request starts and the count. warm_ack: the LTSSM enters WarmReset on the request (one cycle).
         dut = WatchdogDUT(timeout_ms)
-        out = {"reinits": []}
+        out = {"reinits": [], "warm": [], "warm_cycles": 0}
         def generator():
-            cycle = 0
+            cycle, req_d = 0, 0
             for name, cycles in states:
-                yield dut.phy.ltssm_state.eq(dut.STATES[name])
                 for _ in range(cycles):
+                    req = (yield dut.watchdog.warm_reset_req)
+                    state = "WarmReset" if (warm_ack and req) else name
+                    yield dut.phy.ltssm_state.eq(dut.STATES[state])
                     yield
                     if (yield dut.watchdog.reinit):
                         out["reinits"].append(cycle)
+                    if req and not req_d:
+                        out["warm"].append(cycle)
+                    out["warm_cycles"] += req
+                    req_d = req
                     cycle += 1
             out["count"] = (yield dut.watchdog._count.status)
         run_simulation(dut, generator())
         return out
 
     def test_training_without_u0(self):
-        # Training loop (Polling/eSS.Inactive, Rx.Detect visits not counted) without U0: a
-        # re-initialization per 5ms (20 cycles) of training time.
-        loop = [("Polling.LFPS", 8), ("Polling.RxEQ", 4), ("eSS.Inactive", 4), ("Rx.Detect.Quiet", 30)]
-        out = self.run_watchdog(loop*6)
-        self.assertEqual(out["count"], 4)
-        self.assertEqual(len(out["reinits"]), 4)
+        # Training loop (Polling/eSS.Inactive, Rx.Detect visits not counted, brief U0 visits not
+        # clearing the training time) without a stable U0: a re-initialization per 5ms (20 cycles) of
+        # training time, each followed by a Warm Reset request ~2ms (8 cycles) later.
+        loop = [("Polling.LFPS", 8), ("U0", 2), ("Polling.RxEQ", 4), ("eSS.Inactive", 4),
+            ("Rx.Detect.Quiet", 30)]
+        out = self.run_watchdog(loop*12, warm_ack=True)
+        self.assertGreaterEqual(out["count"], 3)
+        self.assertEqual(len(out["reinits"]), out["count"])
+        self.assertEqual(len(out["warm"]), out["count"])
+        for r, w in zip(out["reinits"], out["warm"]):
+            self.assertTrue(4 <= w - r <= 12, (r, w))
+
+    def test_warm_request_bounded(self):
+        # No WarmReset entry: the request is held warm_max_ms (4ms, 16 cycles) at most.
+        out = self.run_watchdog([("Polling.LFPS", 60)])
+        self.assertEqual(out["count"], 1)
+        self.assertTrue(12 <= out["warm_cycles"] <= 20, out["warm_cycles"])
 
     def test_u0_reached(self):
-        # U0 reached within the timeout: no re-initialization (the training time restarts at U0).
+        # Stable U0 reached within the timeout: no re-initialization (the training time restarts).
         out = self.run_watchdog([("Polling.LFPS", 16), ("U0", 40), ("Recovery.Active", 16), ("U0", 40)]*3)
         self.assertEqual(out["count"], 0)
 
     def test_no_partner_disabled(self):
         # Rx.Detect only (no link partner), U3: no re-initialization; timeout 0: disabled.
         self.assertEqual(self.run_watchdog([("Rx.Detect.Quiet", 400), ("U3", 400)])["count"], 0)
-        self.assertEqual(self.run_watchdog([("Polling.LFPS", 400)], timeout_ms=0)["count"], 0)
+        out = self.run_watchdog([("Polling.LFPS", 400)], timeout_ms=0)
+        self.assertEqual((out["count"], out["warm_cycles"]), (0, 0))

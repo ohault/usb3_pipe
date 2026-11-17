@@ -588,14 +588,17 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     soc.usb3_lanes_debug = USB3LanesDebug(usb3_phy, serdes, link=usb3_link,
         reinit_cycles=int(sys_clk_freq*10e-6), monitor_tick_cycles=int(sys_clk_freq*1e-3),
         with_counters=with_counters,
-        # Training watchdog: Host transceivers re-initialized after 2s of training without U0 (Acorn
-        # Host start-ups never training at Gen 1x2 with a Tang Device, t16z); Device: disabled
-        # (runtime CSR).
+        # Training watchdog: Host transceivers re-initialized, then a Warm Reset, after 2s of training
+        # without a stable U0 (Acorn Host start-ups never training at Gen 1x2 with a Tang Device,
+        # t16z/t17); Device: disabled (runtime CSR).
         training_watchdog_ms=2000 if role == "host" else 0)
 
     # Host Port Reset (Host role: Warm Reset when U0 is not reached, as the host software) --------
     if role == "host":
         soc.usb3_port_reset = USB3HostPortReset(usb3_phy, sys_clk_freq=sys_clk_freq)
+        # Training watchdog: Warm Reset after its transceivers re-initialization (both PHYs retrained).
+        if hasattr(soc.usb3_lanes_debug, "watchdog"):
+            soc.comb += soc.usb3_port_reset.request.eq(soc.usb3_lanes_debug.watchdog.warm_reset_req)
 
     # Leds -----------------------------------------------------------------------------------------
     status = usb3_phy.lane_swap if (with_core and not host_script) else usb3_phy.x2
@@ -625,9 +628,10 @@ class USB3HostPortReset(LiteXModule):
         in_warm    = Signal()
         self.submodules += timer
         self.comb += in_warm.eq(phy.ltssm_state == phy.ltssm_states["WarmReset"])
+        self.request = Signal() # i: Warm Reset request (ex: Gen 1x2 training watchdog).
         self.comb += [
             timer.wait.eq(self._control.fields.enable & ~phy.u0 & ~requesting & ~in_warm),
-            phy.warm_reset_req.eq(requesting),
+            phy.warm_reset_req.eq(requesting | self.request),
         ]
         self.sync += [
             If(phy.u0 | in_warm | ~self._control.fields.enable,

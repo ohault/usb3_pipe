@@ -461,22 +461,30 @@ class USB3LanesDebug(LiteXModule):
 # Lanes Training Watchdog -------------------------------------------------------------------------
 
 class LanesTrainingWatchdog(LiteXModule):
-    """Gen 1x2 training watchdog: transceivers re-initialization when the link trains without
-    reaching U0.
+    """Gen 1x2 training watchdog: transceivers re-initialization and Warm Reset when the link trains
+    without reaching U0.
 
     Some transceivers start-ups (bitstream loads, re-initializations) give a link that never trains
     at Gen 1x2: Acorn Mini Host (Artix7 GTP) <-> Tang Mega 138K Pro Device (GW5AST GTR12), ~85% of the
     Acorn loads, both directions failing (Tang CDRs unlocked, Acorn decode errors on both lanes) while
     the same load trains at Gen 1x1 at once; a runtime re-initialization of the Acorn transceivers
-    (Quad PLL and both channels) re-draws it: 3 of 4 bad loads recovered after 1-3 re-initializations,
-    then clean (t16z). The watchdog counts the time (tick_cycles sys cycles per ms) spent in the
-    training states (Polling, Recovery, Hot Reset, eSS.Inactive: a link partner present, not Rx.Detect)
-    since the last U0, and pulses reinit (one sys cycle) after timeout_ms of it (timeout CSR, runtime:
-    0 disables), then counts again (a re-initialization per timeout until U0).
+    (Quad PLL and both channels) followed by a retrain of both PHYs re-draws it: 3 of 4 bad loads
+    recovered after 1-3 re-initializations, then clean (t16z); the re-initialization alone (no retrain)
+    did not recover them (t17).
+
+    The watchdog counts the time (tick_cycles sys cycles per ms) spent in the training states
+    (Polling, Recovery, Hot Reset, eSS.Inactive: a link partner present, not Rx.Detect) since the last
+    stable U0 (U0 held u0_stable_ms: the failing link passes through U0 ~65 times per second, t17).
+    After timeout_ms of it (timeout CSR, runtime: 0 disables), it pulses reinit (one sys cycle), then
+    after warm_delay_ms (transceivers initialization) requests a Warm Reset (warm_reset_req, Host:
+    both PHYs retrained) until the WarmReset state (warm_reset, i) or warm_max_ms, then counts again
+    (a re-initialization per timeout until U0).
     """
-    def __init__(self, phy, tick_cycles, timeout_ms=2000):
+    def __init__(self, phy, tick_cycles, timeout_ms=2000, u0_stable_ms=100, warm_delay_ms=5,
+        warm_max_ms=50):
         from litex.soc.interconnect.csr import CSRStorage, CSRStatus
-        self.reinit = Signal() # o
+        self.reinit         = Signal() # o
+        self.warm_reset_req = Signal() # o
         self._timeout = CSRStorage(16, reset=timeout_ms,
             description="Link training time without U0 (ms) before a transceivers re-initialization (0: disabled).")
         self._count   = CSRStatus(32,
@@ -484,14 +492,16 @@ class LanesTrainingWatchdog(LiteXModule):
 
         # # #
 
-        states   = phy.ltssm_states
-        training = Signal()
-        self.comb += training.eq(Reduce("OR", [phy.ltssm_state == value for name, value in
-            states.items() if name.split(".")[0] in ["Polling", "Recovery", "HotReset", "eSS"]]))
+        states    = phy.ltssm_states
+        training  = Signal()
+        warm      = Signal()
+        self.comb += [
+            training.eq(Reduce("OR", [phy.ltssm_state == value for name, value in
+                states.items() if name.split(".")[0] in ["Polling", "Recovery", "HotReset", "eSS"]])),
+            warm.eq(phy.ltssm_state == states["WarmReset"]) if "WarmReset" in states else warm.eq(0),
+        ]
         tick    = Signal()
         ticks   = Signal(max=max(2, tick_cycles))
-        elapsed = Signal(16)
-        timeout = self._timeout.storage
         self.sync += [
             tick.eq(0),
             ticks.eq(ticks + 1),
@@ -499,17 +509,54 @@ class LanesTrainingWatchdog(LiteXModule):
                 ticks.eq(0),
                 tick.eq(1),
             ),
-            self.reinit.eq(0),
-            If(phy.u0 | (timeout == 0),
-                elapsed.eq(0)
-            ).Elif(elapsed >= timeout,
-                elapsed.eq(0),
-                self.reinit.eq(1),
-                self._count.status.eq(self._count.status + 1),
-            ).Elif(training & tick,
-                elapsed.eq(elapsed + 1)
-            )
         ]
+        # Stable U0.
+        u0_ms     = Signal(max=u0_stable_ms + 1)
+        u0_stable = Signal()
+        self.comb += u0_stable.eq(u0_ms == u0_stable_ms)
+        self.sync += If(~phy.u0,
+            u0_ms.eq(0)
+        ).Elif(tick & ~u0_stable,
+            u0_ms.eq(u0_ms + 1)
+        )
+        # Training time, re-initialization then Warm Reset request.
+        elapsed  = Signal(16)
+        wait_ms  = Signal(max=warm_delay_ms + warm_max_ms + 1)
+        timeout  = self._timeout.storage
+        self.fsm = fsm = FSM(reset_state="COUNT")
+        fsm.act("COUNT",
+            If((timeout != 0) & (elapsed >= timeout),
+                self.reinit.eq(1),
+                NextValue(self._count.status, self._count.status + 1),
+                NextValue(wait_ms, 0),
+                NextState("REINIT")
+            )
+        )
+        fsm.act("REINIT",
+            If(tick,
+                NextValue(wait_ms, wait_ms + 1),
+                If(wait_ms == (warm_delay_ms - 1),
+                    NextValue(wait_ms, 0),
+                    NextState("WARM_RESET")
+                )
+            )
+        )
+        fsm.act("WARM_RESET",
+            self.warm_reset_req.eq(~warm),
+            If(warm | u0_stable,
+                NextState("COUNT")
+            ).Elif(tick,
+                NextValue(wait_ms, wait_ms + 1),
+                If(wait_ms == (warm_max_ms - 1),
+                    NextState("COUNT")
+                )
+            )
+        )
+        self.sync += If(u0_stable | (timeout == 0) | ~fsm.ongoing("COUNT"),
+            elapsed.eq(0)
+        ).Elif(training & tick & (elapsed < timeout),
+            elapsed.eq(elapsed + 1)
+        )
 
 # Lanes Noise Monitor -----------------------------------------------------------------------------
 
