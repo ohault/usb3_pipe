@@ -184,6 +184,19 @@ def test_target_lanes_training_watchdog(tmp_path):
         assert re.search(r"reg\s+\[15:0\]\s+\S*timeout_storage\s*=\s*16'd" + str(reset) + ";",
             verilog), (target, args)
 
+def test_target_lanes_tx_diffctrl(tmp_path):
+    # Acorn Gen 1x2 TX differential swing: runtime register reset to 15 by default (t19), per cage
+    # with --tx-diffctrl.
+    for args, values in [([], [15, 15]), (["--tx-diffctrl", "12,14"], [12, 14])]:
+        out = tmp_path / ("_".join(args) or "default")
+        elaborate("acorn", out, ["--lanes", "2", "--role", "host"] + args)
+        verilog = next((out / "gateware").glob("*.v")).read_text()
+        for lane, value in enumerate(values):
+            # TXDIFFCTRL port <- tx_diffctrl<lane> <- CSR storage (generated names).
+            storage = re.search(r"assign\s+tx_diffctrl" + str(lane) + r"\s*=\s*(\S+);", verilog).group(1)
+            assert re.search(r"reg\s+\[3:0\]\s+" + storage + r"\s*=\s*4'd" + str(value) + ";", verilog), \
+                (args, lane, value)
+
 def test_target_lanes_host_script_ss(tmp_path):
     # Scripted host not x2 capable: SuperSpeed script (Gen 1x1 negotiated with the Device).
     csr = elaborate("acorn", tmp_path, ["--lanes", "2", "--role", "host", "--lanes-core", "--no-x2"])

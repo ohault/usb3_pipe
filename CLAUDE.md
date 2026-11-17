@@ -223,7 +223,7 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   loads fail both ways at x2 only (Tang CDRs unlocked, Acorn decode errors), Gen 1x1 fine; good loads 0 PRBS errors at
   610MB/s; an Acorn transceivers re-init + retrain recovers 3/4 bad loads (Acorn post-cursor, Tang re-init: no). Fix:
   Host training watchdog (`LanesTrainingWatchdog`, 2s training without U0 -> xcvr re-init). Tang lanes clock 108.7MHz
-  at 1dbb0ef, more stages in f9cdafa. Next: t17 (watchdog, Acorn loads, Warm Reset x2, timing), Tang Host role.
+  at 1dbb0ef, more stages in f9cdafa. t17/t18: watchdog 7/20 loads, no runtime action recovers a bad load (0/90). t19: cause = Acorn TX swing: TXDIFFCTRL 15 trains every bad load (17/17, 12: 0/22), DRP identical good/bad; fix `--tx-diffctrl` default 15 (`--lanes 2`). Next: t20 (20 Acorn loads at 15, watchdog off/on, Warm Reset x2), Tang Host role.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").

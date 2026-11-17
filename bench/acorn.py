@@ -123,7 +123,7 @@ class _CRG(LiteXModule):
 
 class USB3SoC(USB3BaseSoC):
     def __init__(self, platform, cpu_type=None, with_dram=False,
-        gtp_params={}, rxcdr_cfg=None, lpm_hold="none", tx_postcursor=None, lanes=1, role="device", x2_capable=True,
+        gtp_params={}, rxcdr_cfg=None, lpm_hold="none", tx_postcursor=None, tx_diffctrl=None, lanes=1, role="device", x2_capable=True,
         lanes_core=False, sfp=0,
         with_analyzer=False, analyzer_group="link", analyzer_csv="analyzer.csv",
         usb3_kwargs={}, **kwargs):
@@ -185,10 +185,10 @@ class USB3SoC(USB3BaseSoC):
             if lanes == 2:
                 serdes.tx_postcursor = Signal(5, reset=tx_postcursor[cage] if tx_postcursor else 0)
                 serdes.gtp.gtp_params.update(i_TXPOSTCURSOR=serdes.tx_postcursor)
-                # Runtime TX differential swing (TXDIFFCTRL, reset: the USB3 0b1100) and forced TX
+                # Runtime TX differential swing (TXDIFFCTRL, reset: --tx-diffctrl) and forced TX
                 # electrical idle (debug, Gen 1x2 Acorn <-> Tang: a lane transmitter disturbing the
                 # others, t18): USB3LanesDebug lane{n}_tx_diffctrl/lane{n}_tx_idle_force CSRs.
-                serdes.tx_diffctrl   = Signal(4, reset=0b1100)
+                serdes.tx_diffctrl   = Signal(4, reset=tx_diffctrl[cage] if tx_diffctrl else 0b1100)
                 serdes.tx_idle_force = Signal()
                 serdes.gtp.gtp_params.update(
                     i_TXDIFFCTRL = serdes.tx_diffctrl,
@@ -257,6 +257,16 @@ def parse_tx_postcursor(value, lanes):
     assert all(0 <= v < 32 for v in values), f"--tx-postcursor: 0 to 31 ({value})."
     return values
 
+def parse_tx_diffctrl(value, lanes):
+    """--tx-diffctrl (--lanes 2): one value for all the SFP cages or one per cage (SFP-0 first),
+    default 15. Returns one value per lane (SFP cage)."""
+    values = [15] if value is None else [int(v, 0) for v in str(value).split(",")]
+    if len(values) == 1:
+        values = values*lanes
+    assert len(values) == lanes, f"--tx-diffctrl: one value or {lanes} values ({value})."
+    assert all(0 <= v < 16 for v in values), f"--tx-diffctrl: 0 to 15 ({value})."
+    return values
+
 def main():
     parser = argparse.ArgumentParser(
         description="USB3-PIPE on the SQRL Acorn CLE-215+ (Artix7 GTP), LiteX Acorn Baseboard (Mini).")
@@ -267,6 +277,7 @@ def main():
     gtp_group.add_argument("--rxcdr-cfg", default=None,   help="GTP RXCDR_CFG override (hex).")
     gtp_group.add_argument("--gtp-param", default=[],     help="GTP parameter override NAME=VALUE (ex: p_RXCDR_HOLD_DURING_EIDLE=1).", action="append")
     gtp_group.add_argument("--tx-postcursor", default=None, help="GTP TX post-cursor pre-emphasis (TXPOSTCURSOR 0-31), one value or one per SFP cage (ex: 6,10 for SFP-0/SFP-1; default: 6 with --lanes 2, else 0).")
+    gtp_group.add_argument("--tx-diffctrl", default=None, help="--lanes 2: GTP TX differential swing (TXDIFFCTRL 0-15, runtime register reset value), one value or one per SFP cage (default: 15).")
     gtp_group.add_argument("--lpm-hold",  default=None,   help="GTP LPM adaptation hold (rxeq: adapt only in Polling.RxEQ; default: rxeq with --lanes 2, else none).", choices=["none", "rxeq", "always"])
     x2_group = parser.add_argument_group(title="Gen 1x2 (two lanes, SFP-0/SFP-1: two boards link tests with PRBS Link-Layer stand-ins, or dual SFP to USB-C breakout)")
     x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2, SFP-0/SFP-1, Mini only).", choices=[1, 2])
@@ -287,6 +298,7 @@ def main():
         assert args.role == "device", "--role host requires --lanes 2."
         assert not args.no_x2, "--no-x2 requires --lanes 2."
         assert not args.lanes_core, "--lanes-core requires --lanes 2."
+        assert args.tx_diffctrl is None, "--tx-diffctrl requires --lanes 2."
 
     # DRAM disk: DDR3 SDRAM, initialized by the BIOS (VexRiscv CPU by default, console on a stub
     # UART).
@@ -313,6 +325,10 @@ def main():
         # the weak ones on both boards (millions of comma realignments on some loads, 759/1000
         # scripted runs on one cabling): TX post-cursor pre-emphasis 6 (~1.7dB), 998/1000.
         tx_postcursor = parse_tx_postcursor(args.tx_postcursor, args.lanes),
+        # Gen 1x2 Acorn Host <-> Tang Mega 138K Pro (t19): with the swing at 12, ~85-90% of the Acorn
+        # bitstream loads left the Tang receivers unlocked at x2 (both directions failing, no runtime
+        # re-init recovering them); swing 15 trained every such load at once (17/17, 0 PRBS errors).
+        tx_diffctrl   = parse_tx_diffctrl(args.tx_diffctrl, args.lanes) if args.lanes == 2 else None,
         lanes       = args.lanes,
         role        = args.role,
         x2_capable  = not args.no_x2,

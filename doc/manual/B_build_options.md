@@ -61,6 +61,7 @@ options.
 | `--with-dram` | off | DDR3 memory, initialized by the BIOS; needs a CPU, implied by `msc_dram` |
 | `--rxcdr-cfg` | none | GTP clock recovery setting override (hexadecimal) |
 | `--gtp-param` | none | GTP parameter override `NAME=VALUE`, repeatable |
+| `--tx-diffctrl` | 15 | With `--lanes 2`: GTP transmit differential swing (0 to 15), one value or one per SFP cage, the reset value of a runtime register |
 | `--lpm-hold` | `none` | Hold the GTP equalizer adaptation: `none`, `rxeq` (adapt only in Polling.RxEQ), `always`; `rxeq` with `--lanes 2` |
 | `--tx-postcursor` | 0 | GTP transmit post-cursor pre-emphasis (0 to 31), one value or one per SFP cage (`6,10`); 6 with `--lanes 2`, where it is the reset value of a runtime register |
 | `--lanes` | 1 | 1 (Gen 1x1, SFP-0) or 2 (Gen 1x2 on SFP-0 and SFP-1, Mini only, experimental) |

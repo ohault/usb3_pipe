@@ -1122,9 +1122,15 @@ second: training time cleared), fixed (stable U0 = 100ms) and a Warm Reset 5ms a
 loads good within 60s (3 at once, 4 after 7-21 re-inits; 13 bad through 27 re-inits), every good load 612MB/s 0 errors
 both ways. t18 (8173e58 Acorn, 6 bad loads x 15 tries): Tang PHY reset, Tang PHY reset held across an Acorn re-init,
 Acorn re-init + Acorn retrain, Tang re-init + retrain, the t16z recipe: 0/90 recovered (Tang CDRs never both locked);
-only an Acorn bitstream load changes a bad load, and the same load trains at Gen 1x1. Open: what the Acorn
-configuration sets per load that its transceivers re-init does not (DRP dumps good/bad, TX swing, a lane TX forced
-idle: `usb3_lanes.py tx-diffctrl/tx-idle-force`).
+only an Acorn bitstream load changes a bad load, and the same load trains at Gen 1x1.
+t19 (9700da1 Acorn, 8+3 bad and 2 good loads, watchdog off): the Acorn TX swing (`usb3_lanes.py tx-diffctrl`) at 15
+trains every bad load at once (17/17 retrains: x2 U0 in 0.55-1.2s, both Tang CDRs locked, 0 Acorn errors, 30s PRBS 0
+errors both ways), 14 3/3, 13 3/4, 12 (the former reset value) 0/22 (and back to 12 breaks a recovered link 6/6), 4/8/10
+0/4; good loads clean at 12-15; order controlled on 3 fresh loads (15 first, 12/15 alternating). The 256 DRP registers of
+both channels identical on good/bad loads, no status bit separating them. Acorn lane 1 TX forced idle: Tang lane 0
+locks on a bad load. A bad load = too little Tang receiver margin at swing 12 with both Acorn lanes transmitting.
+Fix: `--tx-diffctrl` (reset value of the runtime register), default 15 with `--lanes 2`; the watchdog kept as a fallback.
+Acorn <-> Acorn Gen 1x2 not retested at 15 (bench wired Acorn/Tang).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
