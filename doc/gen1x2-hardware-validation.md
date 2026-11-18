@@ -1191,6 +1191,14 @@ Symbol: Logical Idle/TS body, not a corrupted marker) clears the pairing at once
 lost, Recovery; `test_deskew_os_apart_end_of_stream`). Tang Host watchdog at 47514a9: 0 on 3 Acorn reloads, x2 at 8.0s.
 LiteX Gowin parser patch: clocks/Fmax/TNS/met identical to gowin_timing.py on 3 builds, WNS from the path list wrong (sys
 -> JTAG TCK paths first): WNS now from the per clock Fmax.
+t26 (deskew fix df60b2a/db5c7fa; Acorn Host WNS +0.281ns, Acorn Device +0.145ns; Tang Device 4bf5263 p3 125.06MHz, Tang
+Host db5c7fa p3 125.22MHz; the `--with-lanes-counters` Tang Device builds miss 125MHz by up to 0.18ns on every placement
+(routing 4-6ns of 8ns, paths spread): diagnosis builds only): Acorn Host <-> Tang Device, Tang PRBS resync off, 10 loads x 10
+Warm Resets: **0/110 bad** (t25 3/110, t23 14/110), back to x2 U0 median 0.94s (4/100 at ~2.0s, as t25); resync on both
+3 x 10: 0/33. Tang Host <-> Acorn Device (new deskew on the Acorn receive side): 5/5 loads x2, 0 errors; A/B old/new Acorn
+Device deskew, 10 loads x 5 Warm Resets: x2 5/5 each, back in 0.94s each, 0 errors, Acorn resyncs in training 12 vs 28
+(pairings cleared and re-paired: no measurable cost). LiteX parser patch `wns` = min(1/constraint - 1/Fmax): +0.021,
+-2.001, -0.927ns on 3 builds, matching the worst lanes clock paths.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
