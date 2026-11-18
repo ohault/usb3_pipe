@@ -77,6 +77,74 @@ class TestPRBSPacketChecker(unittest.TestCase):
             self.assertGreaterEqual(lost, 3)
         run_simulation(dut, generator())
 
+class LaneSkewLoopback(Module):
+    """64-bit loopback with Lane 1 (odd Symbols) delayed by one lane word when skew is set."""
+    def __init__(self):
+        layout = [("data", 64), ("ctrl", 8)]
+        self.u0   = Signal()
+        self.skew = Signal()
+        self.directed_recovery = Signal()
+        self.sink   = stream.Endpoint(layout)
+        self.source = stream.Endpoint(layout)
+        self.comb += self.sink.ready.eq(1)
+        d = stream.Endpoint(layout) # Previous word.
+        self.sync += If(self.sink.valid, d.data.eq(self.sink.data), d.ctrl.eq(self.sink.ctrl))
+        self.sync += [
+            self.source.valid.eq(1),
+            self.source.data.eq(self.sink.data),
+            self.source.ctrl.eq(self.sink.ctrl),
+            If(~self.sink.valid, # Logical Idle.
+                self.source.data.eq(0),
+                self.source.ctrl.eq(0),
+            ),
+        ]
+        # Lane 1 from the previous cycle's word (skew): built on the registered output.
+        out = Signal(64)
+        ctl = Signal(8)
+        prev_data = Signal(64)
+        prev_ctrl = Signal(8)
+        self.sync += [prev_data.eq(self.source.data), prev_ctrl.eq(self.source.ctrl)]
+        self.out_data = out
+        self.out_ctrl = ctl
+        for i in range(8):
+            src_d = prev_data if (i % 2) else self.source.data
+            src_c = prev_ctrl if (i % 2) else self.source.ctrl
+            self.comb += [
+                out[8*i:8*(i+1)].eq(Mux(self.skew, src_d[8*i:8*(i+1)], self.source.data[8*i:8*(i+1)])),
+                ctl[i].eq(Mux(self.skew, src_c[i], self.source.ctrl[i])),
+            ]
+
+class TestPRBSLaneCheck(unittest.TestCase):
+    def test_lane1_late(self):
+        phy  = LaneSkewLoopback()
+        layout = [("data", 64), ("ctrl", 8)]
+        tester_phy = Module()
+        tester_phy.u0 = phy.u0
+        tester_phy.directed_recovery = phy.directed_recovery
+        tester_phy.sink   = phy.sink
+        tester_phy.source = stream.Endpoint(layout)
+        tester_phy.comb += [
+            tester_phy.source.valid.eq(phy.source.valid),
+            tester_phy.source.data.eq(phy.out_data),
+            tester_phy.source.ctrl.eq(phy.out_ctrl),
+        ]
+        tester = PRBSLinkTester(tester_phy, data_width=64, gap_bits=2, lane_check=True)
+        dut = Module()
+        dut.submodules += phy, tester_phy, tester
+        def generator():
+            yield phy.u0.eq(1)
+            for _ in range(500):
+                yield
+            self.assertEqual((yield tester._rx_errors.status), 0)
+            self.assertEqual((yield tester._rx_half_markers.status), 0)
+            yield phy.skew.eq(1)
+            for _ in range(500):
+                yield
+            self.assertGreater((yield tester._rx_half_markers.status), 50)
+            self.assertGreater((yield tester._rx_lane1_late.status), 25)
+            self.assertEqual((yield tester._rx_lane1_early.status), 0)
+        run_simulation(dut, generator())
+
 class DUT(Module):
     def __init__(self, data_width):
         self.submodules.phy    = phy    = LoopbackPHY(data_width)

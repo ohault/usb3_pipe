@@ -582,7 +582,10 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
             max_burst=max_burst)
     else:
         # PRBS Link-Layer Stand-Ins ----------------------------------------------------------------
-        soc.usb3_prbs = PRBSLinkTester(usb3_phy, data_width=64, cd=phy_cd or "sys")
+        # with_cd_counters (diagnosis builds): per lane packet markers check (lanes paired one lane
+        # word apart, t23).
+        soc.usb3_prbs = PRBSLinkTester(usb3_phy, data_width=64, cd=phy_cd or "sys",
+            lane_check=with_cd_counters)
 
     # Lanes Debug (with the USB3PHYX2Link RX buffer overflow/drops, transceivers re-initialization
     # held 10us) ------------------------------------------------------------------------------------

@@ -118,13 +118,19 @@ class PRBSPacketChecker(LiteXModule):
     only) is not lost, nor the first window after the enable (U0 entry, t22: up to 14 Acorn resyncs
     per training).
     """
-    def __init__(self, data_width=32, lost_window=1024):
+    def __init__(self, data_width=32, lost_window=1024, lane_check=False):
         self.enable  = Signal()   # i
         self.sink    = sink = stream.Endpoint([("data", data_width), ("ctrl", data_width//8)])
         self.words   = Signal(32) # o: Data words checked.
         self.packets = Signal(32) # o: Packets received.
         self.errors  = Signal(32) # o: Errors.
         self.lost    = Signal()   # o: Errors on most words of a window (pulse).
+        # lane_check (64-bit words of two striped lanes: Lane 0 on the even Symbols): markers seen on
+        # a single lane (half markers), and a lane's half marker followed on the next word by the
+        # other lane's (lanes paired one lane word apart: Lane 1 late/early), pulses.
+        self.half_marker = Signal()
+        self.lane1_late  = Signal()
+        self.lane1_early = Signal()
 
         # # #
 
@@ -147,6 +153,8 @@ class PRBSPacketChecker(LiteXModule):
         is_start = Signal()
         is_end   = Signal()
         is_idle  = Signal()
+        # Per lane markers (lane_check): start (0) / end (1) on each lane.
+        lane_m   = [[Signal(name=f"lane{l}_marker{k}") for k in range(2)] for l in range(2)]
         # Two stages: the input registered, then its markers/Logical Idle decoded (the compares
         # from the input were still the worst lanes clock paths on the Tang Mega 138K Pro, t16w).
         valid_i  = Signal()
@@ -163,6 +171,34 @@ class PRBSPacketChecker(LiteXModule):
             is_end.eq(  (data_i == end[0])   & (ctrl_i == end[1])),
             is_idle.eq( (data_i == 0)        & (ctrl_i == 0)),
         ]
+        if lane_check:
+            assert data_width == 64
+            for l in range(2):
+                ldata = Cat(*[data_i[8*(2*i + l):8*(2*i + l + 1)] for i in range(4)])
+                lctrl = Cat(*[ctrl_i[2*i + l] for i in range(4)])
+                for k, symbol in enumerate([PRBS_START, PRBS_END]):
+                    self.sync += lane_m[l][k].eq((lctrl == 0xf) &
+                        (ldata == int.from_bytes(bytes([symbol])*4, "little")))
+            prev_m = [[Signal() for k in range(2)] for l in range(2)]
+            late   = Signal()
+            early  = Signal()
+            self.comb += [
+                late.eq(Reduce("OR", [prev_m[0][k] & ~prev_m[1][k] & lane_m[1][k] & ~lane_m[0][k]
+                    for k in range(2)])),
+                early.eq(Reduce("OR", [prev_m[1][k] & ~prev_m[0][k] & lane_m[0][k] & ~lane_m[1][k]
+                    for k in range(2)])),
+            ]
+            self.sync += [
+                self.half_marker.eq(0),
+                self.lane1_late.eq(0),
+                self.lane1_early.eq(0),
+                If(self.enable & valid,
+                    [prev_m[l][k].eq(lane_m[l][k]) for l in range(2) for k in range(2)],
+                    self.half_marker.eq(Reduce("OR", [lane_m[0][k] ^ lane_m[1][k] for k in range(2)])),
+                    self.lane1_late.eq(late),
+                    self.lane1_early.eq(early),
+                )
+            ]
         # Re-synchronized on the first start marker after being enabled (packets cut by a link
         # retrain/disable are not errors).
         self.sync += If(~self.enable,
@@ -281,7 +317,7 @@ class PRBSLinkTester(LiteXModule):
     window with packets or nothing received; both seen on hardware with the link in U0 and no Recovery) directs the LTSSM to Recovery (the TS Ordered Sets COMs re-seed the
     LFSRs), counted in rx_resyncs.
     """
-    def __init__(self, phy, data_width=32, gap_bits=4, cd="sys"):
+    def __init__(self, phy, data_width=32, gap_bits=4, cd="sys", lane_check=False):
         self._control = CSRStorage(fields=[
             CSRField("enable", size=1, offset=0, reset=1, description="Send/check packets in U0."),
             CSRField("resync", size=1, offset=1, reset=1, description="Directed Recovery on a lost checker (errors on most words of a window)."),
@@ -291,6 +327,10 @@ class PRBSLinkTester(LiteXModule):
         self._rx_packets = CSRStatus(32, description="Packets received.")
         self._rx_errors  = CSRStatus(32, description="Errors.")
         self._rx_resyncs = CSRStatus(32, description="Checker lost events (directed Recoveries when resync is enabled).")
+        if lane_check:
+            self._rx_half_markers = CSRStatus(32, description="x2 words with a packet marker on a single lane.")
+            self._rx_lane1_late   = CSRStatus(32, description="x2 Lane 0 half marker followed by the Lane 1 one (Lane 1 one lane word late).")
+            self._rx_lane1_early  = CSRStatus(32, description="x2 Lane 1 half marker followed by the Lane 0 one (Lane 1 one lane word early).")
 
         # # #
 
@@ -312,7 +352,7 @@ class PRBSLinkTester(LiteXModule):
         renamer = (lambda m: m) if cd == "sys" else ClockDomainsRenamer(cd)
         for width, sink, source, active in paths:
             generator = renamer(PRBSPacketGenerator(width, gap_bits))
-            checker   = renamer(PRBSPacketChecker(width))
+            checker   = renamer(PRBSPacketChecker(width, lane_check=lane_check and (width == 64)))
             self.submodules += generator, checker
             self.comb += [
                 generator.enable.eq(enable & active),
@@ -346,6 +386,14 @@ class PRBSLinkTester(LiteXModule):
         self.comb += self._rx_resyncs.status.eq(resyncs)
         if hasattr(phy, "directed_recovery"):
             self.comb += phy.directed_recovery.eq(lost & self._control.fields.resync)
+        if lane_check:
+            # Lane check counters, in the checker clock domain (x2 checker).
+            sync_cd = self.sync if cd == "sys" else getattr(self.sync, cd)
+            for name, csr in [("half_marker", self._rx_half_markers), ("lane1_late", self._rx_lane1_late),
+                ("lane1_early", self._rx_lane1_early)]:
+                value = Signal(32, name=f"rx_{name}_count")
+                sync_cd += If(getattr(checkers[0], name), value.eq(value + 1))
+                counters.append((csr, value))
         for csr, value in counters:
             if cd == "sys":
                 self.comb += csr.status.eq(value)

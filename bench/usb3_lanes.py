@@ -37,7 +37,8 @@ from usb3_debug import USB3DebugClient
 LANES_COUNTERS = ["deskew"] + [f"lane{lane}_{name}" for lane in range(2)
     for name in ["ts1", "ts1_inv", "ts2", "rx_errors_cycles"]]
 
-PRBS_COUNTERS = ["tx_words", "rx_words", "rx_packets", "rx_errors", "rx_resyncs"]
+PRBS_COUNTERS = ["tx_words", "rx_words", "rx_packets", "rx_errors", "rx_resyncs",
+    "rx_half_markers", "rx_lane1_late", "rx_lane1_early"] # Last three: --with-lanes-counters builds.
 
 PRBS_WORD_BYTES = {1: 8, 0: 4} # 64-bit link words (x2), 32-bit (Gen 1x1 negotiated, Lane 0).
 
@@ -398,6 +399,7 @@ def main():
                 "rx_MBps"      : round(delta["rx_words"]*word_bytes/args.period/1e6, 1),
                 "rx_errors"    : delta["rx_errors"],
                 "rx_resyncs"   : delta.get("rx_resyncs"),
+                **{k: delta[k] for k in ["rx_half_markers", "rx_lane1_late", "rx_lane1_early"] if k in delta},
                 "ltssm_state"  : lanes.dbg.status()["ltssm_state"],
             }), flush=True)
         elapsed = time.time() - start
@@ -409,6 +411,7 @@ def main():
             "rx_packets"   : total["rx_packets"],
             "rx_errors"    : total["rx_errors"],
             "rx_resyncs"   : total.get("rx_resyncs"),
+            **{k: total[k] for k in ["rx_half_markers", "rx_lane1_late", "rx_lane1_early"] if k in total},
             "rx_MBps"      : round(total["rx_words"]*word_bytes/elapsed/1e6, 1),
             "recoveries"   : status["recovery_count"] - recovery,
             "x2"           : status["x2"],

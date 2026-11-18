@@ -206,6 +206,8 @@ def test_target_lanes_split_counters(tmp_path):
     for name in ["deskew", "realign_u0", "skp_odd_u0", "com_slip", "lane0_rx_skp_odd", "lane1_rx_com_partial",
         "lane1_rx_errors_cycles", "lane0_ts2"]:
         assert f"usb3_lanes_debug_{name}_count" in csr, name
+    for name in ["rx_half_markers", "rx_lane1_late", "rx_lane1_early"]: # PRBS lane check.
+        assert f"usb3_prbs_{name}" in csr, name
     csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path / "lean", ["--lanes", "2", "--lean", "--with-lanes-counters"])
     assert "usb3_lanes_debug_deskew_count" not in csr
 

@@ -1163,6 +1163,17 @@ off (2 x 5 loads x 10): no frozen case, but 5/110 measurements garbage for 10s w
 4.67M/s (start markers almost never whole: a lane word misalignment on the Tang receiver with deskew reported aligned;
 open, the split Tang build has no realign/SKP counters), cleared by re-enabling resync (4 and 11 Recoveries). 20 Acorn
 loads (Tang loaded once): 20/20 x2 U0, first 10s clean (610MB/s each way, 0 errors, 0 resyncs).
+t23 (Tang 28b0d99 `--with-lanes-counters` p3: lanes clock 125.49MHz, sys 65.1MHz; 5ae61a9 without the counter input
+registers 85.9-106.5MHz on p0-p4; Acorn t22 bitstream): Tang resync off, 10 loads x 10 Warm Resets: 14/110 bad (G: ~12k
+packets/1.25s instead of 5.8M, words erroneous; F: frozen; E: no words, errors on every cycle; P: in a packet on every
+cycle, no packet), load 5 bad on 10/11 trainings then clean on the next Acorn load; **none of the 17 lanes counters moves
+during a bad period** (deskew, com_slip, realign/skp odd in U0, per lane TS, COM partial, SKP odd, RX errors cycles):
+invisible to the COM/SKP/deskew logic (no COM in U0); re-enabling resync cleared 14/14 (1-46 Recoveries); resync on 0/33.
+Reading: the markers are not seen whole: the destriped 64-bit word put together wrong after the deskew (lanes paired one
+lane word apart?). PRBS lane check added for the diagnosis builds (`--with-lanes-counters`: `usb3_prbs_rx_half_markers`,
+`rx_lane1_late`, `rx_lane1_early`: a packet marker on a single lane, then on the other lane the next word).
+Gowin 1.9.12.02 SP2 timing report: `impl/pnr/project.tr.html` is a frameset, the data is in `project_tr_content.html`
+(HTML tables; the setup path list starts with sys -> JTAG TCK crossings of negative slack while the per clock TNS is 0).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
