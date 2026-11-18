@@ -1207,6 +1207,8 @@ t28 (Tang Gen 1x2 Device Core split, 297761a): lanes clock 68.8MHz (p3) / 46.5MH
 `LanesPacketAligner` (buffer level -> symbol destinations -> 32-symbol buffer write in one cycle, 9-11 levels, -6.5ns):
 not run on hardware; the aligner needs a redesign for the GW5A. Acorn scripted host build met (+0.239ns). `--place-auto`
 works (reports matched gowin_timing.py); it now stops when a clock is below 90% of its constraint.
+`LanesPacketAligner` redesigned (per packet rotation, 32-bit slices of a two words window, 4 word FIFOs written in
+rotation): no per symbol placement from a buffer level; aligner tests and the 31 Gen 1x2 simulations pass.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

@@ -359,12 +359,17 @@ class LanesPacketAligner(LiteXModule):
     Symbols parser (8 symbols per cycle): a packet starts on a SHP/SLC/SDP K-symbol outside of a
     packet: Header Packet: 20 symbols (framing, 12-byte header, CRC-16, Link Control Word), Link
     Command: 8 symbols, DPP: from the SDP framing to the EPF of its END/EDB framing (7.2.1,
-    7.2.4). The packets symbols are packed (Logical Idle removed) in a symbols buffer, the last
-    word of a packet completed with Logical Idle symbols (00h data, as received from a partner
-    keeping its packets on 32-bit words): a packet always starts on a 32-bit word. Up to two words
-    per cycle on the output (registered, no back-pressure: four cycles of latency); the completion
-    of the DPPs adds up to 3 symbols per packet, absorbed by the symbols buffer (buffer_symbols,
-    overflow: sticky flag, never with Logical Idle or a SKP Ordered Set every few packets).
+    7.2.4). A word holds the symbols of at most two packets (the end of one, the start of the
+    next). Each packet's output words are the 32-bit slices of the symbols stream from its start
+    (rotation: start symbol modulo 4, words taken from a two words window), its last word
+    completed with Logical Idle symbols (00h data, as received from a partner keeping its packets
+    on 32-bit words): a packet always starts on a 32-bit word, Logical Idle between the packets
+    removed. Up to 4 words per cycle (end of a packet, its completed last word, start of the next)
+    written in rotation to 4 word FIFOs (buffer_symbols/4 words each), up to two words per cycle
+    on the output (registered, no back-pressure). Timing: no per symbol placement from a buffer
+    level (the previous symbols buffer did not reach 125MHz on the Tang Mega 138K Pro, t28); the
+    completions add up to 3 symbols per packet, absorbed by the FIFOs (overflow: sticky flag,
+    never with Logical Idle or a SKP Ordered Set every few packets).
 
     Not handled (as the Gen 1x1 path): a corrupted first framing symbol (the packet is then taken
     from the next symbol, misaligned: CRC error and retry by the Link Layer), a corrupted EPF at
@@ -485,77 +490,128 @@ class LanesPacketAligner(LiteXModule):
             )
         ]
 
-        # Symbols positions (registered, timing: independent of the buffer level) -----------------
-        # Position of each packet symbol and position after the cycle, relative to the 32-bit word of
-        # the buffer level, for the 4 offsets of the level in its word (the completion of the last
-        # word of a packet depends on it): the buffer stage selects them with the level 2 LSBs and
-        # adds the level word, instead of a chain of 8 dependent additions from the level.
-        rel_w   = bits_for(3 + 4*8)
-        rel     = [[Signal(rel_w, name=f"rel{r}_{i}") for i in range(8)] for r in range(4)]
-        rel_end = [Signal(rel_w, name=f"rel_end{r}") for r in range(4)]
-        for r in range(4):
-            q = Constant(r, rel_w)
-            for i in range(8):
-                nq   = Signal(rel_w, name=f"relq{r}_{i}")
-                end  = Signal(rel_w + 1, name=f"relend{r}_{i}")
-                self.comb += [
-                    end.eq(q + 4),
-                    nq.eq(q + keep[i]),
-                    # Last symbol of a packet: word completed (next packet on a 32-bit word).
-                    If(last[i], nq.eq(Cat(Constant(0, 2), end[2:]))),
-                ]
-                self.sync += rel[r][i].eq(q)
-                q = nq
-            self.sync += rel_end[r].eq(q)
-        sym_r  = [Signal(9, name=f"sym_r{i}")  for i in range(8)]
-        keep_r = [Signal(name=f"keep_r{i}")    for i in range(8)]
+        # Packets word ends (registered with the symbols) -------------------------------------------
+        # A word holds the symbols of at most two packets: A, the current packet (continued, or started
+        # in this word out of a packet), and B, a packet started after the end of A. A packet's output
+        # words are the 32-bit slices of the symbols stream from its start (rotation r: its start
+        # symbol modulo 4), its last word completed with Logical Idle symbols.
+        r_cur = Signal(2) # Rotation of the current packet.
+        a_act = Signal()  # A in this word.
+        a_r   = Signal(2) # A rotation.
+        a_new = Signal()  # A started in this word, at a_s.
+        a_s   = Signal(3)
+        a_end = Signal()  # A ended in this word, at a_e.
+        a_e   = Signal(3)
+        b_new = Signal()  # B started in this word (after the end of A), at b_s.
+        b_s   = Signal(3)
         self.sync += [
-            *[sym_r[i].eq(sym[i])   for i in range(8)],
-            *[keep_r[i].eq(keep[i]) for i in range(8)],
-        ]
-
-        # Symbols buffer (packets symbols packed, last word of the packets completed) --------------
-        n      = buffer_symbols + 16 # Buffer + one cycle of symbols (8) and completions (2x3).
-        level  = Signal(max=n + 1)
-        buf    = [Signal(9, name=f"buf{j}") for j in range(buffer_symbols)]
-        base   = Signal(max=n + 1) # Level 32-bit word.
-        self.comb += base.eq(Cat(Constant(0, 2), level[2:]))
-        dest   = []
-        for i in range(8):
-            d = Signal(max=n + 1, name=f"dest{i}")
-            self.comb += d.eq(base + Array(rel[r][i] for r in range(4))[level[:2]])
-            dest.append(d)
-        p = Signal(max=n + 1)
-        self.comb += p.eq(base + Array(rel_end)[level[:2]])
-        new = [Signal(9, name=f"new{j}") for j in range(n)]
-        for j in range(n):
-            cases = If(level > j, new[j].eq(buf[j]) if j < buffer_symbols else new[j].eq(0))
-            for i in range(8):
-                cases = cases.Elif(keep_r[i] & (dest[i] == j), new[j].eq(sym_r[i]))
-            self.comb += [new[j].eq(0), cases]
-
-        # Output: up to two complete words per cycle.
-        words = Signal(2)
-        self.comb += [
-            If(p >= 8,
-                words.eq(2)
-            ).Elif(p >= 4,
-                words.eq(1)
+            If(in_valid & started, r_cur.eq(s_index[:2])),
+            If(in_packet,
+                a_act.eq(in_valid),
+                a_r.eq(r_cur),
+                a_new.eq(0),
+                a_end.eq(ended),
+                a_e.eq(e),
+                b_new.eq(in_valid & started),
+                b_s.eq(s_index),
             ).Else(
-                words.eq(0)
+                a_act.eq(in_valid & started),
+                a_r.eq(s_index[:2]),
+                a_new.eq(1),
+                a_s.eq(s_index),
+                # Link Command starting at symbol 0: ends in this word.
+                a_end.eq(s_slc & (s_index == 0)),
+                a_e.eq(7),
+                b_new.eq(0),
             )
         ]
+        # Previous word (window: previous word symbols -8..-1, this word 0..7).
+        prev = [Signal(9, name=f"prev{i}") for i in range(8)]
+        self.sync += If(valid, *[prev[i].eq(sym[i]) for i in range(8)])
+        def win(p):
+            return prev[p + 8] if p < 0 else (sym[p] if p < 8 else Constant(0, 9))
+
+        # Word candidates (registered) --------------------------------------------------------------
+        # A: words ending at i1 = (r+3)%4 and i1+4 in this word, and with A ending in this word, its
+        # last word (ending at i1+8, completed); B: its first word when complete in this word.
+        def word(syms):
+            return Cat(*[x[:8] for x in syms]), Cat(*[x[8] for x in syms])
+        cand_d = [Signal(32, name=f"cand_d{k}") for k in range(4)]
+        cand_c = [Signal(4,  name=f"cand_c{k}") for k in range(4)]
+        cand_v = [Signal(name=f"cand_v{k}")     for k in range(4)]
+        cases  = {}
+        for r in range(4):
+            i1 = (r + 3) % 4
+            stmts = []
+            for k in range(3):
+                ws = i1 - 3 + 4*k # Word start symbol.
+                syms = []
+                for p in range(ws, ws + 4):
+                    x = win(p)
+                    if p >= 0:
+                        # Past the end of A: Logical Idle (completion).
+                        m = Signal(9, name=f"m{r}_{k}_{p - ws}")
+                        self.comb += m.eq(Mux(a_end & (p > a_e), 0, x) if p < 8 else 0)
+                        x = m
+                    syms.append(x)
+                d, c = word(syms)
+                v_new = (a_s <= ws) if ws >= 0 else 0
+                v_end = (ws <= a_e) if ws <= 7 else 0
+                v = a_act & (~a_new | v_new) & (~a_end | v_end)
+                if k == 2:
+                    v = v & a_end # Last word only (completed).
+                stmts += [cand_d[k].eq(d), cand_c[k].eq(c), cand_v[k].eq(v)]
+            cases[r] = stmts
+        self.sync += Case(a_r, cases)
+        b_cases = {}
+        for bs in range(1, 5):
+            d, c = word([sym[p] for p in range(bs, bs + 4)])
+            b_cases[bs] = [cand_d[3].eq(d), cand_c[3].eq(c), cand_v[3].eq(b_new)]
+        b_cases["default"] = cand_v[3].eq(0)
+        self.sync += Case(b_s, b_cases)
+
+        # Words FIFOs (4 banks written in rotation, up to 4 words per cycle) -------------------------
+        word_layout = [("data", 32), ("ctrl", 4)]
+        banks = [stream.SyncFIFO(word_layout, buffer_symbols//4) for _ in range(4)]
+        self.submodules += banks
+        wp  = Signal(2)
+        pos = [Signal(2, name=f"pos{k}") for k in range(4)]
+        self.comb += [
+            pos[0].eq(wp),
+            pos[1].eq(wp + cand_v[0]),
+            pos[2].eq(wp + cand_v[0] + cand_v[1]),
+            pos[3].eq(wp + cand_v[0] + cand_v[1] + cand_v[2]),
+        ]
+        self.sync += wp.eq(wp + cand_v[0] + cand_v[1] + cand_v[2] + cand_v[3])
+        for b, bank in enumerate(banks):
+            sel = If(cand_v[0] & (pos[0] == b), bank.sink.valid.eq(1), bank.sink.data.eq(cand_d[0]),
+                bank.sink.ctrl.eq(cand_c[0]))
+            for k in range(1, 4):
+                sel = sel.Elif(cand_v[k] & (pos[k] == b), bank.sink.valid.eq(1),
+                    bank.sink.data.eq(cand_d[k]), bank.sink.ctrl.eq(cand_c[k]))
+            self.comb += sel
+            self.sync += If(bank.sink.valid & ~bank.sink.ready, self.overflow.eq(1))
+
+        # Output: up to two words per cycle (registered) ----------------------------------------------
+        rp  = Signal(2)
+        rp1 = Signal(2)
+        self.comb += rp1.eq(rp + 1)
+        v0  = Signal()
+        v1  = Signal()
+        self.comb += [
+            v0.eq(Array(bk.source.valid for bk in banks)[rp]),
+            v1.eq(v0 & Array(bk.source.valid for bk in banks)[rp1]),
+        ]
+        for b, bank in enumerate(banks):
+            self.comb += bank.source.ready.eq((v0 & (rp == b)) | (v1 & (rp1 == b)))
         self.sync += [
-            source.valid.eq(words != 0),
-            source.words.eq(words),
-            source.data.eq(Cat(*[new[j][:8] for j in range(8)])),
-            source.ctrl.eq(Cat(*[new[j][8]  for j in range(8)])),
-            level.eq(p - 4*words),
-            Case(words, {w: [buf[j].eq(new[j + 4*w]) for j in range(buffer_symbols)] for w in range(3)}),
-            If(p - 4*words > buffer_symbols,
-                self.overflow.eq(1),
-                level.eq(buffer_symbols),
-            ),
+            source.valid.eq(v0),
+            source.words.eq(Mux(v1, 2, 1)),
+            source.data.eq(Cat(Array(bk.source.data for bk in banks)[rp],
+                               Array(bk.source.data for bk in banks)[rp1])),
+            source.ctrl.eq(Cat(Array(bk.source.ctrl for bk in banks)[rp],
+                               Array(bk.source.ctrl for bk in banks)[rp1])),
+            rp.eq(rp + v0 + v1),
         ]
 
 # Lanes TX Packer ----------------------------------------------------------------------------------
