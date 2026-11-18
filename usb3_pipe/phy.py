@@ -542,6 +542,27 @@ class USB3PHY(LiteXModule):
         self.specials += MultiReg(s, o, self.pipe_cd, reset=o.reset.value)
         return o
 
+    def add_lanes_levels_stable(self, signals, names):
+        """sys levels resynchronized together to pipe_cd (1-bit signals): the pipe_cd values are
+        updated from two equal consecutive resynchronized samples only, so no intermediate
+        combination is seen when the levels change in the same sys cycle (the resynchronizers are
+        not timed: their bits can land in different pipe_cd cycles)."""
+        cd   = self.pipe_cd
+        sync = getattr(self.sync, cd)
+        n    = len(signals)
+        s    = Signal(n, name=f"lanes_{names[0]}_s")
+        s_d  = Signal(n, name=f"lanes_{names[0]}_s_d")
+        outs = [Signal(reset=sig.reset.value, name=f"lanes_{name}") for sig, name in zip(signals, names)]
+        reset = sum(o.reset.value << i for i, o in enumerate(outs))
+        s.reset   = reset
+        s_d.reset = reset
+        self.specials += MultiReg(Cat(*signals), s, cd, reset=reset)
+        sync += [
+            s_d.eq(s),
+            If(s == s_d, Cat(*outs).eq(s)),
+        ]
+        return outs
+
     def add_lanes_ltssm_view(self, ltssm):
         """LTSSM signals seen by the lanes logic (Gen 1x2): the LTSSM itself, or with pipe_cd a view
         in pipe_cd: LTSSM outputs (levels) resynchronized to pipe_cd, LTSSM inputs driven by the
@@ -555,7 +576,15 @@ class USB3PHY(LiteXModule):
         outputs = [name for name, _, direction in LTSSM_PIPE_INTERFACE if direction == "o"]
         outputs += ["rx_keep", "u0", "ssp_polling", "compliance"]
         for name in outputs:
+            if name in ["tx_ready", "idle_handshake"]:
+                continue # Resynchronized together below.
             setattr(lt, name, self.add_lanes_level(getattr(ltssm, name), name))
+        # tx_ready/idle_handshake resynchronized together (TX scramblers reset out of both: their
+        # separate resynchronizations can see a tx_ready | idle_handshake gap at the Idle handshake
+        # -> U0 transition, the TX scramblers then restart from their start state in U0 and the
+        # partner descrambles garbage on both lanes, t32).
+        lt.tx_ready, lt.idle_handshake = self.add_lanes_levels_stable(
+            [ltssm.tx_ready, ltssm.idle_handshake], ["tx_ready", "idle_handshake"])
         for name, width, direction in LTSSM_PIPE_INTERFACE + [("lanes_deskew_lost", 1, "i")]:
             if direction != "i":
                 continue
@@ -779,10 +808,15 @@ class USB3PHY(LiteXModule):
         detections/bursts ends, LFPS detections), lfps_tx_count updated when stable (2 equal
         resynchronized samples: incremented once per LFPS burst)."""
         for name, width, direction in LTSSM_PIPE_INTERFACE:
+            if name in ["tx_ready", "idle_handshake"]:
+                continue # Resynchronized together below (TX scrambler reset out of both).
             if direction == "o":
                 self.ltssm_to_pipe(getattr(ltssm, name), getattr(pipe, name), pipe_cd)
             else:
                 self.pipe_to_ltssm(name, getattr(pipe, name), getattr(ltssm, name), pipe_cd)
+        tx_ready, idle_handshake = self.add_lanes_levels_stable(
+            [ltssm.tx_ready, ltssm.idle_handshake], ["tx_ready", "idle_handshake"])
+        self.comb += [pipe.tx_ready.eq(tx_ready), pipe.idle_handshake.eq(idle_handshake)]
 
     def ltssm_to_pipe(self, value, pipe_s, pipe_cd):
         """LTSSM control (level, sys) -> PIPE (pipe_cd)."""

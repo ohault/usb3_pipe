@@ -1223,6 +1223,16 @@ errors: step 510, `bulk_in_0` first DPP data word (after its SDP), in U0 at x2, 
 load 12-277 (runs restarted after any U0 exit). PRBS regression (Tang p4, Acorn +0.154ns): 5 loads x 3 Warm Resets, 0
 errors, 610MB/s, no resync. Next: the received word at the error (`usb3_script_error_data`/`error_prev`/`error_info`) and
 the `script` LiteScope group (host aligner input/output, model words) on the Acorn host.
+t32 (74b30d0, Tang t31 bitstream): 198/200 runs on 20 loads, then 2 of 3 first runs after ~20s in U0 failed. The
+received words and the `script` captures of 4 errors: the Tang -> Acorn scrambled symbols (Logical Idle, DPH, DPP data)
+are random on both lanes (zero symbols 0.3-0.5% per lane vs 99.2% in a good run), the framing K symbols intact and
+placed as in a good run; one load stayed bad across 699 Hot Resets (U0 reached each time: the descramblers matched
+during the Idle handshake). Cause: in the Tang split build (LTSSM in sys at 62.5MHz, lanes in the 125MHz lanes clock),
+`tx_ready` and `idle_handshake` were resynchronized separately (untimed paths): at the Idle handshake -> U0 transition
+the lanes clock could see both at 0 for a cycle, which resets the lanes TX scramblers (`~(tx_ready | idle_handshake)`)
+to their start state in U0, both lanes at once (the same mechanism explains the Tang -> Acorn PRBS "descrambler out
+of step" of t20/t21b). Fix: both resynchronized together, updated on two equal samples (`add_lanes_levels_stable`,
+also the Gen 1x1 `pipe_cd` LTSSM CDC; `TestLanesLevelsStable`).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
