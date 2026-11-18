@@ -1232,7 +1232,15 @@ during the Idle handshake). Cause: in the Tang split build (LTSSM in sys at 62.5
 the lanes clock could see both at 0 for a cycle, which resets the lanes TX scramblers (`~(tx_ready | idle_handshake)`)
 to their start state in U0, both lanes at once (the same mechanism explains the Tang -> Acorn PRBS "descrambler out
 of step" of t20/t21b). Fix: both resynchronized together, updated on two equal samples (`add_lanes_levels_stable`,
-also the Gen 1x1 `pipe_cd` LTSSM CDC; `TestLanesLevelsStable`).
+also the Gen 1x1 `pipe_cd` LTSSM CDC; `TestLanesLevelsStable`). The first version (d624cc8) delayed only these two
+outputs, so the TS requests ended a cycle before the Idle handshake start (`test_phy_x2_dev_pipe_cd*` stuck in
+Polling.Idle): all the LTSSM outputs are now resynchronized as one group (741c3b2).
+t33 (741c3b2): PRBS with the resync off on both boards, 20 loads x 6 trainings (120 measurements each way): Tang -> Acorn
+0 garbage, 0 stuck, 0 errors (t21b: 16/100 garbage): the "descrambler out of step" is gone; Acorn -> Tang 3 stuck
+(the frozen Tang RX word misalignment type, cleared by the Tang resync); resync on 20/20 clean. Some Warm Reset returns
+slower (13/100 over 1.5s, steps of ~1s, one 7.25s with resync on; t31 max 0.95s): to follow. Tang PRBS p3 met
+(126.1MHz); the Tang Device Core missed on every placement (best p1 116.1MHz, p2 112.5MHz): the group compare drove the
+update enable of all the resynchronized outputs, into the lanes TX words: compare registered (one more lanes cycle).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

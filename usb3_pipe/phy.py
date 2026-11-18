@@ -558,12 +558,16 @@ class USB3PHY(LiteXModule):
         for o in outs:
             reset  |= o.reset.value << offset
             offset += len(o)
-        s   = Signal(n, reset=reset, name="lanes_ltssm_s")
-        s_d = Signal(n, reset=reset, name="lanes_ltssm_s_d")
+        s    = Signal(n, reset=reset, name="lanes_ltssm_s")
+        s_d  = Signal(n, reset=reset, name="lanes_ltssm_s_d")
+        same = Signal(name="lanes_ltssm_same")
         self.specials += MultiReg(Cat(*signals), s, cd, reset=reset)
+        # Compare registered (timing: the outputs update enable from a register, not from the
+        # group compare, Tang Mega 138K Pro lanes clock t33): same = s(t) == s(t-1), s_d(t+1) = s(t).
         sync += [
             s_d.eq(s),
-            If(s == s_d, Cat(*outs).eq(s)),
+            same.eq(s == s_d),
+            If(same, Cat(*outs).eq(s_d)),
         ]
         return outs
 
