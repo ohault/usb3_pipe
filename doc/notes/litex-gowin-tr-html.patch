@@ -1,15 +1,15 @@
-From d50775dd0a3d5909568288d9efbd35a653c698d2 Mon Sep 17 00:00:00 2001
+From 5c64b9ce2d344d97d029a6ef16cb987e8f5b100f Mon Sep 17 00:00:00 2001
 Date: Wed, 18 Nov 2026 00:39:35 +0000
 Subject: [PATCH] build/report: Gowin 1.9.12 HTML timing report
  (project_tr_content.html)
 
 ---
- litex/build/report.py     | 72 ++++++++++++++++++++++++++++++++++++++-
- test/build/test_report.py | 57 ++++++++++++++++++++++++++++++-
- 2 files changed, 127 insertions(+), 2 deletions(-)
+ litex/build/report.py     | 76 ++++++++++++++++++++++++++++++++++++++-
+ test/build/test_report.py | 58 +++++++++++++++++++++++++++++-
+ 2 files changed, 132 insertions(+), 2 deletions(-)
 
 diff --git a/litex/build/report.py b/litex/build/report.py
-index 6276f5ec7..b16097071 100644
+index 6276f5ec7..d69f84d0a 100644
 --- a/litex/build/report.py
 +++ b/litex/build/report.py
 @@ -9,7 +9,8 @@
@@ -22,7 +22,7 @@ index 6276f5ec7..b16097071 100644
  - Quartus   : <name>.sta.summary and <name>.fit.summary.
  - Efinity   : outflow/<name>.timing.rpt and outflow/<name>.place.rpt.
  - nextpnr   : the Fmax and utilization lines of the build log (<output_dir>/litex.log).
-@@ -162,6 +163,71 @@ def parse_gowin_timing(report, max_paths=10):
+@@ -162,6 +163,75 @@ def parse_gowin_timing(report, max_paths=10):
      timing["met"] = all(c["met"] for c in timing["clocks"]) and (timing["tns"] == 0)
      return timing
  
@@ -86,15 +86,19 @@ index 6276f5ec7..b16097071 100644
 +        timing["worst_paths"].append(path)
 +        if len(timing["worst_paths"]) >= max_paths:
 +            break
-+    slacks = [p["slack"] for p in timing["worst_paths"]]
-+    timing["wns"] = min(slacks) if slacks else None
++    # WNS from the per clock Fmax (the setup path list also holds unconstrained clock crossings,
++    # ex: sys_clk -> JTAG TCK paths of negative slack on a build meeting timing).
++    slacks = [1e3/c["constraint_mhz"] - 1e3/c["fmax_mhz"] for c in timing["clocks"] if c["fmax_mhz"]]
++    if not slacks:
++        slacks = [p["slack"] for p in timing["worst_paths"]]
++    timing["wns"] = round(min(slacks), 3) if slacks else None
 +    timing["met"] = all(c["met"] for c in timing["clocks"]) and (timing["tns"] == 0)
 +    return timing
 +
  def parse_gowin_utilization(report):
      """Parse the Resource Usage Summary of a Gowin report (project.rpt.txt)."""
      utilization = []
-@@ -381,9 +447,13 @@ def parse_build_reports(output_dir, max_paths=10):
+@@ -381,9 +451,13 @@ def parse_build_reports(output_dir, max_paths=10):
      # Gowin.
      gowin_tr  = os.path.join(gateware_dir, "impl", "pnr", "project.tr")
      gowin_rpt = os.path.join(gateware_dir, "impl", "pnr", "project.rpt.txt")
@@ -109,7 +113,7 @@ index 6276f5ec7..b16097071 100644
          r["utilization"] = parse_gowin_utilization(_read(gowin_rpt))
  
 diff --git a/test/build/test_report.py b/test/build/test_report.py
-index c8261d8f4..7ddfef748 100644
+index c8261d8f4..a3821f25a 100644
 --- a/test/build/test_report.py
 +++ b/test/build/test_report.py
 @@ -9,7 +9,7 @@ import tempfile
@@ -164,7 +168,7 @@ index c8261d8f4..7ddfef748 100644
  class TestReport(unittest.TestCase):
      def test_vivado(self):
          t = parse_vivado_timing(VIVADO_TIMING)
-@@ -243,6 +279,25 @@ class TestReport(unittest.TestCase):
+@@ -243,6 +279,26 @@ class TestReport(unittest.TestCase):
          u = parse_gowin_utilization(GOWIN_UTILIZATION)
          self.assertEqual([r["resource"] for r in u], ["Logic", "Register", "BSRAM"])
  
@@ -177,6 +181,7 @@ index c8261d8f4..7ddfef748 100644
 +        self.assertEqual(t["clocks"][1]["failing_endpoints"], 0)
 +        self.assertEqual(t["tns"], 0)
 +        self.assertTrue(t["met"])
++        self.assertEqual(t["wns"], 0.014) # From the clocks Fmax, not the JTAG TCK path (-5.905).
 +        self.assertEqual([p["slack"] for p in t["worst_paths"]], [-5.905, 0.042])
 +        self.assertEqual(t["worst_paths"][0]["latch_clock"], "jtagbone_phy_gowinjtag_new_tck7:[R]")
 +        with tempfile.TemporaryDirectory() as d:
