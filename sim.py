@@ -405,7 +405,8 @@ class USB3PIPESim(SoCMini):
         x2_link = (dev_mode == "x2") and not dev_x2_disable
         ssp_x2 = with_core and (lanes == 2) and x2_link # SuperSpeedPlus at Gen 1x2.
         x1 = (lanes == 2) and not x2_link # Gen 1x1 negotiated by the Gen 1x2 Host.
-        assert (not dev_pipe_cd) or (lanes == 1) or (not with_core), "--dev-pipe-cd --lanes 2: PRBS stand-ins."
+        # --dev-pipe-cd --lanes 2 --lanes-core: Device USB3PHYX2Link lanes side in the PIPE domain, its
+        # Link Layer/Core at half the frequency (Tang Mega 138K Pro split Device Core build).
         assert (not dev_ss) or ((lanes == 1) and gen2_capable and (not gen2))
         sys_clk_freq = int(133e6)
         # SerDes models data width: 4 symbols per clock with the core (full PIPE rate, as on
@@ -497,8 +498,10 @@ class USB3PIPESim(SoCMini):
             # Host script RX buffer for Device bursts (DPPs at two words per cycle, the script takes one).
             link_phy = phy
             if with_core and (lanes_n == 2):
-                link_phy = renamer(USB3PHYX2Link(phy, rx_buffer_depth={"host": 4096, "dev": 64}[name],
-                    tx_symbol_shift=lanes_tx_shift))
+                link_phy = renamer(USB3PHYX2Link(phy,
+                    rx_buffer_depth = {"host": 4096, "dev": 512 if pipe_cd else 64}[name],
+                    tx_symbol_shift = lanes_tx_shift,
+                    cd              = pipe_cd))
                 self.add_module(name=f"{name}_usb3_phy_x2", module=link_phy)
             if lanes_n == 1:
                 # Inverse TX polarity to test RX auto-polarity.

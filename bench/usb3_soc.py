@@ -533,9 +533,12 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
 
     phy_cd: the PHY lanes logic (PIPEs, lanes datapath, SerDes renamed by the caller) and the PRBS
     stand-ins in phy_cd at phy_clk_freq, the LTSSM/SoC in sys (USB3PHY lanes=2 pipe_cd: FPGAs where
-    the LTSSM can't reach 125MHz, ex: Tang Mega 138K Pro). PRBS stand-ins only (no Link Layer)."""
+    the LTSSM can't reach 125MHz, ex: Tang Mega 138K Pro). PRBS stand-ins, or the Device Core with a
+    64-bit endpoints example (USB3PHYX2Link cd: its lanes side in phy_cd, the Link Layer/Core in sys,
+    words pairs through AsyncFIFOs)."""
     sys_clk_freq = soc.sys_clk_freq
-    assert (phy_cd is None) or (not with_core), "phy_cd: PRBS stand-ins only."
+    assert (phy_cd is None) or (not with_core) or (role == "device" and example in ["loopback",
+        "wishbone", "bench"]), "phy_cd: PRBS stand-ins or the Device Core (64-bit endpoints examples)."
     assert len(serdes) == 2
     host_script = with_core and (role == "host")
     lanes_x2    = host_script or (with_core and (example in ["loopback", "wishbone", "bench"]))
@@ -575,7 +578,10 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     elif with_core:
         # USB3 Device Core -------------------------------------------------------------------------
         if lanes_x2:
-            soc.usb3_link = usb3_link = USB3PHYX2Link(usb3_phy)
+            # phy_cd: RX AsyncFIFO of 512 pairs (Link Layer at half the lanes frequency, throttled
+            # from a quarter: the partner's outstanding Header Packets/DPPs).
+            soc.usb3_link = usb3_link = USB3PHYX2Link(usb3_phy, cd=phy_cd,
+                rx_buffer_depth=64 if phy_cd is None else 512)
         else:
             soc.usb3_link = usb3_link = USB3PHYX1Link(usb3_phy)
         add_usb3_example(soc, usb3_link, sys_clk_freq, example=example, with_lpm=with_lpm,

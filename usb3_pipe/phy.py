@@ -1296,10 +1296,21 @@ class USB3PHYX2Link(LiteXModule):
       per entry, SuperSpeed operation (Gen 1x1 is SuperSpeed, 7.1.1).
     The status/Link-Layer control signals are the ones of the USB3PHY (same Signal objects).
     tx_symbol_shift (test only): Gen 1x2 TX packets delayed by 1-7 symbols (LanesTXSymbolShift).
+
+    cd (USB3PHY lanes=2 with pipe_cd, its lanes clock domain): the TX packer/packets buffers and the RX
+    packet aligner in cd, the Link Layer in sys (ex: half the lanes frequency, Tang Mega 138K Pro):
+    words pairs through AsyncFIFOs. TX: Gen 1x1 words also stored and forwarded by packets (no
+    Logical Idle inside a packet from the slower Link Layer). RX: rx_buffer_depth pairs (AsyncFIFO),
+    rx_throttle from a quarter of it (the Link Layer then holds its Rx Header Buffer Credits: bounded
+    backlog of the partner's outstanding Header Packets/DPPs, received faster than read).
     """
     def __init__(self, phy, with_endianness_swap=True, rx_buffer_depth=64, tx_buffer_depth=256,
-        tx_symbol_shift=0):
+        tx_symbol_shift=0, cd=None):
         assert len(phy.pipes) == 2
+        if cd is not None:
+            assert tx_symbol_shift == 0
+            self._init_cdc(phy, with_endianness_swap, rx_buffer_depth, tx_buffer_depth, cd)
+            return
         object.__setattr__(self, "phy", phy) # Reference only (not a submodule).
         self.link_words     = 2
         self.ssp_lane_speed = 5      # Lane speed (Gbps, SuperSpeedPlus USB Device Capability).
@@ -1384,4 +1395,131 @@ class USB3PHYX2Link(LiteXModule):
         self.gen2_active    = phy.x2
         self.source_lc      = None
         self.rx_throttle    = Constant(0, 1)
+        self.rx_t2_credits  = 4
+
+    def _init_cdc(self, phy, with_endianness_swap, rx_depth, tx_buffer_depth, cd):
+        object.__setattr__(self, "phy", phy) # Reference only (not a submodule).
+        self.link_words     = 2
+        self.ssp_lane_speed = 5
+        self.sink           = sink   = stream.Endpoint(link_pairs_layout())
+        self.source         = source = stream.Endpoint(link_pairs_layout())
+        self.rx_overflow    = Signal() # o (sys): RX FIFO/packet aligner overflow (sticky).
+        self.rx_drop        = Signal() # o (sys): RX entry dropped (pulse).
+
+        # # #
+
+        R       = ClockDomainsRenamer(cd)
+        sync_cd = getattr(self.sync, cd)
+
+        # Lanes clock domain status.
+        x2       = Signal()
+        tx_ready = Signal()
+        self.specials += [MultiReg(phy.x2, x2, cd), MultiReg(phy.tx_ready, tx_ready, cd)]
+
+        # Endianness (per word, sys) ---------------------------------------------------------------
+        tx = stream.Endpoint(link_pairs_layout())
+        rx = stream.Endpoint(link_pairs_layout())
+        if with_endianness_swap:
+            self.tx_swap = EndiannessSwap(sink, tx, word_bytes=4)
+            self.rx_swap = EndiannessSwap(rx, source, word_bytes=4)
+        else:
+            self.comb += [sink.connect(tx), rx.connect(source)]
+
+        # TX: sys -> cd ----------------------------------------------------------------------------
+        # Out of U0 (not tx_ready in cd), the words are dropped (FIFO drained, packer reset, buffered
+        # packets dropped: no stale words at the next U0 entry, as without cd).
+        self.tx_cdc = tx_cdc = ClockDomainsRenamer({"write": "sys", "read": cd})(
+            stream.AsyncFIFO(link_pairs_layout(), 32, buffered=True))
+        self.tx_packer = tx_packer = R(ResetInserter()(LanesTXPacker()))
+        self.tx_buffer = tx_buffer = R(PacketsBuffer(link_layout(), depth=tx_buffer_depth))
+        self.tx_x1_buffer = tx_x1_buffer = R(PacketsBuffer(link_pairs_layout(), depth=tx_buffer_depth))
+        self.tx_words  = tx_words  = R(PairsToWords())
+        drop = Signal()
+        sync_cd += drop.eq(~tx_ready) # Registered (fanout).
+        self.comb += [
+            tx.connect(tx_cdc.sink),
+            tx_packer.reset.eq(drop),
+            tx_buffer.drop.eq(drop),
+            tx_x1_buffer.drop.eq(drop),
+            If(drop,
+                tx_cdc.source.ready.eq(1),
+            ).Elif(x2,
+                tx_cdc.source.connect(tx_packer.sink),
+            ).Else(
+                tx_cdc.source.connect(tx_x1_buffer.sink),
+            ),
+            tx_packer.source.connect(tx_buffer.sink),
+            tx_buffer.source.connect(phy.sink),
+            tx_x1_buffer.source.connect(tx_words.sink),
+            tx_words.source.connect(phy.sink_x1),
+        ]
+
+        # RX: cd -> sys ----------------------------------------------------------------------------
+        # Gen 1x1 RX words: Logical Idle dropped and the packets words packed in full pairs (the Link
+        # Layer consumes one word per cycle outside of the DPP data at half the frequency), as
+        # LinkWordsCDC.
+        self.rx_aligner = rx_aligner = R(LanesPacketAligner())
+        self.rx_x1_pipe = rx_x1_pipe = R(stream.Buffer([("data", 32), ("ctrl", 4)]))
+        self.rx_x1_idle = rx_x1_idle = R(LogicalIdleFilter())
+        self.rx_pairs   = rx_pairs   = R(WordsPacker())
+        self.rx_cdc     = rx_cdc     = ClockDomainsRenamer({"write": cd, "read": "sys"})(
+            stream.AsyncFIFO(link_pairs_layout(), rx_depth, buffered=True))
+        rx_in = stream.Endpoint(link_pairs_layout())
+        self.comb += [
+            phy.source.connect(rx_aligner.sink),
+            phy.source_x1.connect(rx_x1_pipe.sink),
+            rx_x1_pipe.source.connect(rx_x1_idle.sink),
+            rx_x1_idle.source.connect(rx_pairs.sink),
+            If(x2,
+                rx_aligner.source.connect(rx_in),
+            ).Else(
+                rx_pairs.source.connect(rx_in),
+            ),
+            rx_in.connect(rx_cdc.sink),
+            rx_cdc.source.connect(rx),
+        ]
+        drop_cd     = Signal()
+        overflow_cd = Signal()
+        self.comb += drop_cd.eq(rx_in.valid & ~rx_in.ready)
+        sync_cd += If(drop_cd | rx_aligner.overflow, overflow_cd.eq(1))
+        drop_ps = PulseSynchronizer(cd, "sys")
+        self.submodules += drop_ps
+        self.comb += [drop_ps.i.eq(drop_cd), self.rx_drop.eq(drop_ps.o)]
+        self.specials += MultiReg(overflow_cd, self.rx_overflow)
+
+        # RX throttling (sys): rx_cdc level >= a quarter, from a resynchronized (Gray) count of the
+        # written entries and the count of the read entries.
+        cw       = bits_for(rx_depth) + 1
+        wr_count = Signal(cw)
+        wr_gray  = Signal(cw)
+        wr_sys   = Signal(cw)
+        rd_count = Signal(cw)
+        level    = Signal(cw)
+        throttle = Signal()
+        sync_cd += [
+            If(rx_cdc.sink.valid & rx_cdc.sink.ready, wr_count.eq(wr_count + 1)),
+            wr_gray.eq(wr_count ^ (wr_count >> 1)),
+        ]
+        self.specials += MultiReg(wr_gray, wr_sys)
+        bins = [Signal() for _ in range(cw)]
+        self.comb += [bins[cw-1].eq(wr_sys[cw-1])] + [
+            bins[i].eq(bins[i+1] ^ wr_sys[i]) for i in reversed(range(cw-1))]
+        self.sync += [
+            If(rx.valid & rx.ready, rd_count.eq(rd_count + 1)),
+            level.eq(Cat(*bins) - rd_count),
+            throttle.eq(level >= rx_depth//4),
+        ]
+
+        # Status / Link-Layer control signals: the USB3PHY ones.
+        for name in USB3PHY_STATUS + [name for name, _ in USB3PHY_LINK_CTRL] + ["u2_timeout",
+            "ready", "ltssm_state", "x2", "gen2", "lane_swap"]:
+            setattr(self, name, getattr(phy, name))
+        self.ltssm_states = phy.ltssm_states
+
+        # Link interface (USB3PHY_LINK_INTERFACE).
+        self.with_u1u2      = phy.with_u1u2
+        self.ssp_capable    = True
+        self.gen2_active    = phy.x2
+        self.source_lc      = None
+        self.rx_throttle    = throttle
         self.rx_t2_credits  = 4

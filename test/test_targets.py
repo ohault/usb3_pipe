@@ -211,6 +211,15 @@ def test_target_lanes_split_counters(tmp_path):
     csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path / "lean", ["--lanes", "2", "--lean", "--with-lanes-counters"])
     assert "usb3_lanes_debug_deskew_count" not in csr
 
+def test_target_tang_lanes_core_split(tmp_path):
+    # Tang Mega 138K Pro Gen 1x2 Device Core: split clocking (Link Layer/Core in sys at 62.5MHz, the
+    # USB3PHYX2Link lanes side at 125MHz); the scripted host (Host role) single domain at 125MHz.
+    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path / "device", ["--lanes", "2", "--lanes-core"])
+    assert re.search(r"constant,config_clock_frequency,62500000,", csr)
+    csr = elaborate("sipeed_tang_mega_138k_pro", tmp_path / "host", ["--lanes", "2", "--lanes-core",
+        "--role", "host"])
+    assert re.search(r"constant,config_clock_frequency,125000000,", csr)
+
 def test_target_lanes_host_script_ss(tmp_path):
     # Scripted host not x2 capable: SuperSpeed script (Gen 1x1 negotiated with the Device).
     csr = elaborate("acorn", tmp_path, ["--lanes", "2", "--role", "host", "--lanes-core", "--no-x2"])

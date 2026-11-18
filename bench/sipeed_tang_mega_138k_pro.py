@@ -718,8 +718,10 @@ class USB3X2SoC(USB3BaseSoC):
     Clocking: PRBS stand-ins (default): the lanes logic (PIPEs, lanes datapath, SerDes logic) and the
     PRBS stand-ins in "pipe" on the Lane 0 TX clock (125MHz), the LTSSM/SoC in sys at 62.5MHz
     (USB3PHY lanes=2 pipe_cd: the LTSSM and the SoC don't reach 125MHz on the GW5A, t16n), the GTR12
-    control/UPAR in sys. lanes_core: everything in sys on the Lane 0 TX clock at 125MHz (_CRGX2,
-    timings not met: 69-80MHz measured).
+    control/UPAR in sys. lanes_core, Device role: split as well, the USB3PHYX2Link lanes side in pipe,
+    its Link Layer/Device Core in sys (words pairs through AsyncFIFOs). lanes_core, Host role (scripted
+    host): everything in sys on the Lane 0 TX clock at 125MHz (_CRGX2, timings not met: 69-80MHz
+    measured).
 
     The two lanes share the quad: one GTR12 instance, one register configuration with both lanes
     (csr_config, default usb3_pipe/gw5 usb3_5g_x2.csr), one UPAR (TX Electrical Idle writes of both
@@ -727,7 +729,9 @@ class USB3X2SoC(USB3BaseSoC):
     def __init__(self, platform, refclk="100M", csr_config=None, role="device", x2_capable=True,
         lanes_core=False, example="loopback", with_clk_meters=False, with_analyzer=False,
         analyzer_group="link", analyzer_csv="analyzer.csv", lean=False, rx_valid_gate=False, cdr_toggle=False, lanes_counters=False, **kwargs):
-        split         = not lanes_core # LTSSM/SoC at 62.5MHz, lanes logic at 125MHz.
+        # LTSSM/SoC (and Device Core) at 62.5MHz, lanes logic at 125MHz; the scripted host (Host
+        # role --lanes-core) single domain at 125MHz.
+        split         = not (lanes_core and role == "host")
         sys_clk_freq  = 62.5e6 if split else 125e6
         xcvr_clk_freq = 62.5e6
         lanes_clk_freq = 125e6
@@ -877,7 +881,7 @@ def main():
     # --lanes 2 PRBS split builds (t21b, deterministic: lanes clock 118.5/125.1/113.0/126.1/112.0MHz for
     # place options 0-4, sys 74.4MHz with 3): 3.
     if args.place_option is None:
-        args.place_option = 3 if (args.lanes == 2 and not args.lanes_core) else 2
+        args.place_option = 3 if (args.lanes == 2 and not (args.lanes_core and args.role == "host")) else 2
     platform.toolchain.options["place_option"]        = args.place_option
     platform.toolchain.options["route_option"]        = args.route_option
     platform.toolchain.options["replicate_resources"] = 1

@@ -472,6 +472,19 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 1, gen2: 0\)")
         self.assertRegex(out, r"DEV\s*lanes deskewed")
 
+    def test_core_x2_dev_pipe_cd(self):
+        # Gen 1x2 Device with its USB3PHYX2Link lanes side (TX packer/packets buffers, RX packet
+        # aligner) in the PIPE domain and its LTSSM/Link Layer/Core at half the frequency (words pairs
+        # through AsyncFIFOs, RX throttling: Tang Mega 138K Pro split Device Core build), crossed
+        # lanes.
+        out = self.run_sim("core_x2_dev_pipe_cd", ["--dev-mode", "x2", "--dev-pipe-cd", "--lanes-crossed"])
+        self.assertRegex(out, r"DEV\s*SSP entering DONE state \(x2: 1, gen2: 0\)")
+
+    def test_core_x2_dev_pipe_cd_x1(self):
+        # The same, Gen 1x1 negotiated (Device not x2 capable): Lane 0 words through the CDC (TX
+        # packets stored and forwarded, no Logical Idle inside a packet).
+        self.run_sim("core_x2_dev_pipe_cd_x1", ["--dev-mode", "x1", "--dev-pipe-cd"])
+
     def test_core_x2_crossed(self):
         # Gen 1x2 with a flipped USB Type-C plug (lanes swap).
         out = self.run_sim("core_x2_crossed", ["--dev-mode", "x2", "--lanes-crossed"])
