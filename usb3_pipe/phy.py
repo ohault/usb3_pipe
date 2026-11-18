@@ -1475,12 +1475,15 @@ class USB3PHYX2Link(LiteXModule):
             ).Else(
                 rx_pairs.source.connect(rx_in),
             ),
-            rx_in.connect(rx_cdc.sink),
+            # No back-pressure (timing: the FIFO ready not through the aligner/lanes datapath; words
+            # received at the line rate): dropped (counted) when the FIFO is full.
+            rx_in.connect(rx_cdc.sink, omit={"ready"}),
+            rx_in.ready.eq(1),
             rx_cdc.source.connect(rx),
         ]
         drop_cd     = Signal()
         overflow_cd = Signal()
-        self.comb += drop_cd.eq(rx_in.valid & ~rx_in.ready)
+        self.comb += drop_cd.eq(rx_in.valid & ~rx_cdc.sink.ready)
         sync_cd += If(drop_cd | rx_aligner.overflow, overflow_cd.eq(1))
         drop_ps = PulseSynchronizer(cd, "sys")
         self.submodules += drop_ps
