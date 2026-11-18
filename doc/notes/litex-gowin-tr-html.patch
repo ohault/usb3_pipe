@@ -1,0 +1,195 @@
+From d50775dd0a3d5909568288d9efbd35a653c698d2 Mon Sep 17 00:00:00 2001
+Date: Wed, 18 Nov 2026 00:39:35 +0000
+Subject: [PATCH] build/report: Gowin 1.9.12 HTML timing report
+ (project_tr_content.html)
+
+---
+ litex/build/report.py     | 72 ++++++++++++++++++++++++++++++++++++++-
+ test/build/test_report.py | 57 ++++++++++++++++++++++++++++++-
+ 2 files changed, 127 insertions(+), 2 deletions(-)
+
+diff --git a/litex/build/report.py b/litex/build/report.py
+index 6276f5ec7..b16097071 100644
+--- a/litex/build/report.py
++++ b/litex/build/report.py
+@@ -9,7 +9,8 @@
+ parse_build_reports(output_dir) looks for the reports a LiteX build leaves in <output_dir> and
+ <output_dir>/gateware and returns a dictionary that serializes to JSON:
+ - Vivado    : <name>_timing.rpt (report_timing_summary) and <name>_utilization_place.rpt.
+-- Gowin     : impl/pnr/project.tr and impl/pnr/project.rpt.txt.
++- Gowin     : impl/pnr/project.tr (or, from the 1.9.12 tools, the HTML project_tr_content.html) and
++              impl/pnr/project.rpt.txt.
+ - Quartus   : <name>.sta.summary and <name>.fit.summary.
+ - Efinity   : outflow/<name>.timing.rpt and outflow/<name>.place.rpt.
+ - nextpnr   : the Fmax and utilization lines of the build log (<output_dir>/litex.log).
+@@ -162,6 +163,71 @@ def parse_gowin_timing(report, max_paths=10):
+     timing["met"] = all(c["met"] for c in timing["clocks"]) and (timing["tns"] == 0)
+     return timing
+ 
++def _html_text(s):
++    s = re.sub(r"<[^>]+>", "", s)
++    for a, b in [("&lt;", "<"), ("&gt;", ">"), ("&nbsp;", " "), ("&amp;", "&")]:
++        s = s.replace(a, b)
++    return s.strip()
++
++def _html_rows(html):
++    """Table rows (lists of cell texts) of an HTML fragment."""
++    rows = []
++    for row in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S | re.I):
++        cells = [_html_text(c) for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row, re.S | re.I)]
++        if cells:
++            rows.append(cells)
++    return rows
++
++def _html_section(html, name):
++    """HTML from the <a name="name"> heading to the next <h2> heading."""
++    m = re.search(rf'<a\s+name="{re.escape(name)}"', html)
++    if not m:
++        return ""
++    n = re.search(r"<h2", html[m.end():], re.I)
++    return html[m.end():m.end() + n.start()] if n else html[m.end():]
++
++def parse_gowin_timing_html(report, max_paths=10):
++    """Parse a Gowin HTML timing report (project_tr_content.html, Gowin 1.9.12 tools: project.tr.html
++    is a frameset around it)."""
++    timing = {"clocks": [], "worst_paths": []}
++    for cells in _html_rows(_html_section(report, "Max_Frequency_Report")):
++        if len(cells) >= 5 and _int(cells[0]) is not None:
++            constraint = _float(cells[2].replace("(MHz)", ""))
++            fmax       = _float(cells[3].replace("(MHz)", ""))
++            if constraint is None or fmax is None:
++                continue
++            timing["clocks"].append({
++                "clock"         : cells[1],
++                "constraint_mhz": constraint,
++                "fmax_mhz"      : fmax,
++                "logic_levels"  : _int(cells[4]),
++                "met"           : fmax >= constraint,
++            })
++    tns = {}
++    for cells in _html_rows(_html_section(report, "Total_Negative_Slack_Report")):
++        if len(cells) == 4 and _float(cells[2]) is not None:
++            tns[(cells[0], cells[1].lower())] = (_float(cells[2]), _int(cells[3]))
++    for clock in timing["clocks"]:
++        clock["tns"], clock["failing_endpoints"] = tns.get((clock["clock"], "setup"), (None, None))
++    timing["tns"] = sum(v[0] for (c, t), v in tns.items() if t == "setup")
++    setup = _html_section(report, "Setup_Analysis") or report
++    for m in re.finditer(r"Path Summary:.*?(<table.*?</table>)", setup, re.S | re.I):
++        fields = {cells[0]: cells[1] for cells in _html_rows(m.group(1)) if len(cells) >= 2}
++        if _float(fields.get("Slack")) is None:
++            continue
++        path = {"slack": _float(fields["Slack"])}
++        for key, label in [("from", "From"), ("to", "To"), ("launch_clock", "Launch Clk"),
++            ("latch_clock", "Latch Clk")]:
++            if label in fields:
++                path[key] = fields[label]
++        timing["worst_paths"].append(path)
++        if len(timing["worst_paths"]) >= max_paths:
++            break
++    slacks = [p["slack"] for p in timing["worst_paths"]]
++    timing["wns"] = min(slacks) if slacks else None
++    timing["met"] = all(c["met"] for c in timing["clocks"]) and (timing["tns"] == 0)
++    return timing
++
+ def parse_gowin_utilization(report):
+     """Parse the Resource Usage Summary of a Gowin report (project.rpt.txt)."""
+     utilization = []
+@@ -381,9 +447,13 @@ def parse_build_reports(output_dir, max_paths=10):
+     # Gowin.
+     gowin_tr  = os.path.join(gateware_dir, "impl", "pnr", "project.tr")
+     gowin_rpt = os.path.join(gateware_dir, "impl", "pnr", "project.rpt.txt")
++    gowin_tr_html = os.path.join(gateware_dir, "impl", "pnr", "project_tr_content.html")
+     if os.path.exists(gowin_tr):
+         r["toolchain"] = "gowin"
+         r["timing"]    = parse_gowin_timing(_read(gowin_tr), max_paths)
++    elif os.path.exists(gowin_tr_html):
++        r["toolchain"] = "gowin"
++        r["timing"]    = parse_gowin_timing_html(_read(gowin_tr_html), max_paths)
+     if os.path.exists(gowin_rpt):
+         r["utilization"] = parse_gowin_utilization(_read(gowin_rpt))
+ 
+diff --git a/test/build/test_report.py b/test/build/test_report.py
+index c8261d8f4..7ddfef748 100644
+--- a/test/build/test_report.py
++++ b/test/build/test_report.py
+@@ -9,7 +9,7 @@ import tempfile
+ import unittest
+ 
+ from litex.build.report import parse_vivado_timing, parse_vivado_utilization
+-from litex.build.report import parse_gowin_timing, parse_gowin_utilization
++from litex.build.report import parse_gowin_timing, parse_gowin_timing_html, parse_gowin_utilization
+ from litex.build.report import parse_quartus_timing, parse_quartus_utilization
+ from litex.build.report import parse_efinity_timing, parse_efinity_utilization
+ from litex.build.report import parse_nextpnr_log, parse_build_log_errors, parse_build_reports
+@@ -221,6 +221,42 @@ Memory Blocks: 200 / 256 (78.12%)
+ 
+ # Test Report --------------------------------------------------------------------------------------
+ 
++# Gowin 1.9.12 HTML timing report (impl/pnr/project_tr_content.html, abridged).
++GOWIN_TIMING_HTML = """
++<h2><a name="Max_Frequency_Report">Max Frequency Summary:</a></h2>
++<table>
++<tr><th>NO.</th><th>Clock Name</th><th>Constraint</th><th>Actual Fmax</th><th>Logic Level</th><th>Entity</th></tr>
++<tr><td>1</td><td>sys_clk</td><td>62.500(MHz)</td><td>65.110(MHz)</td><td>7</td><td>TOP</td></tr>
++<tr><td>2</td><td>usb3_serdes_tx_clk</td><td>125.000(MHz)</td><td>125.213(MHz)</td><td>9</td><td>TOP</td></tr>
++</table>
++<h4>No timing paths to get frequency of tck_pad_i!</h4>
++<h2><a name="Total_Negative_Slack_Report">Total Negative Slack Summary:</a></h2>
++<table>
++<tr><th>Clock Name</th><th>Analysis Type</th><th>EndPoint TNS</th><th>Number of EndPoints</th></tr>
++<tr><td>sys_clk</td><td>setup</td><td>0.000</td><td>0</td></tr>
++<tr><td>usb3_serdes_tx_clk</td><td>setup</td><td>0.000</td><td>0</td></tr>
++</table>
++<h2><a name="Timing_Report">Timing Report:</a></h2>
++<h3><a name="Setup_Analysis">Setup Analysis Report</a></h3>
++<h4>Report Command:report_timing -setup -max_paths 25 -max_common_paths 1</h4>
++<h3>Path1</h3>
++<p><b>Path Summary:</b></p>
++<table class="summary_table">
++<tr><td class="label">Slack</td><td>-5.905</td></tr>
++<tr><td class="label">Data Arrival Time</td><td>58.867</td></tr>
++<tr><td class="label">From</td><td>storage_storage_RAMREG_0_G[1]_s0</td></tr>
++<tr><td class="label">Launch Clk</td><td>sys_clk:[R]</td></tr>
++<tr><td class="label">Latch Clk</td><td>jtagbone_phy_gowinjtag_new_tck7:[R]</td></tr>
++</table>
++<h3>Path2</h3>
++<p><b>Path Summary:</b></p>
++<table class="summary_table">
++<tr><td class="label">Slack</td><td>0.042</td></tr>
++<tr><td class="label">From</td><td>a_s0</td></tr>
++<tr><td class="label">To</td><td>b_s0</td></tr>
++</table>
++"""
++
+ class TestReport(unittest.TestCase):
+     def test_vivado(self):
+         t = parse_vivado_timing(VIVADO_TIMING)
+@@ -243,6 +279,25 @@ class TestReport(unittest.TestCase):
+         u = parse_gowin_utilization(GOWIN_UTILIZATION)
+         self.assertEqual([r["resource"] for r in u], ["Logic", "Register", "BSRAM"])
+ 
++    def test_gowin_html(self):
++        # Gowin 1.9.12: HTML report; timing met per clock (TNS 0) with a negative slack path to the
++        # JTAG TCK (not a constrained clock) at the head of the setup path list.
++        t = parse_gowin_timing_html(GOWIN_TIMING_HTML)
++        self.assertEqual([c["clock"] for c in t["clocks"]], ["sys_clk", "usb3_serdes_tx_clk"])
++        self.assertEqual(t["clocks"][1]["fmax_mhz"], 125.213)
++        self.assertEqual(t["clocks"][1]["failing_endpoints"], 0)
++        self.assertEqual(t["tns"], 0)
++        self.assertTrue(t["met"])
++        self.assertEqual([p["slack"] for p in t["worst_paths"]], [-5.905, 0.042])
++        self.assertEqual(t["worst_paths"][0]["latch_clock"], "jtagbone_phy_gowinjtag_new_tck7:[R]")
++        with tempfile.TemporaryDirectory() as d:
++            os.makedirs(os.path.join(d, "gateware", "impl", "pnr"))
++            with open(os.path.join(d, "gateware", "impl", "pnr", "project_tr_content.html"), "w") as f:
++                f.write(GOWIN_TIMING_HTML)
++            r = parse_build_reports(d)
++            self.assertEqual(r["toolchain"], "gowin")
++            self.assertTrue(r["timing"]["met"])
++
+     def test_quartus(self):
+         t = parse_quartus_timing(QUARTUS_STA_SUMMARY)
+         self.assertEqual(t["wns"], -0.412) # Worst corner.
+-- 
+2.43.0
+
