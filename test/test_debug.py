@@ -263,7 +263,30 @@ class LanesLinkDUT(Module):
         self.link = SimpleNamespace(rx_drop=Signal())
         self.submodules.debug = USB3LanesDebug(self.phy, self.serdes, link=self.link)
 
+class LanesLossDUT(Module):
+    def __init__(self):
+        self.phy, self.serdes = fake_lanes_phy()
+        self.phy.lanes_deskew_loss = Signal(8)
+        self.submodules.debug = USB3LanesDebug(self.phy, self.serdes)
+
 class TestUSB3LanesDebug(unittest.TestCase):
+    def test_deskew_loss(self):
+        # The CSR fields (they drive its status; CSRs are not simulated): the status assigned
+        # directly read 0 on hardware, fields left at 0 (t41).
+        dut = LanesLossDUT()
+        def generator():
+            yield dut.phy.lanes_deskew_loss.eq(0b10000001) # clear by a COM slip.
+            yield
+            yield
+            fields = dut.debug._deskew_loss.fields
+            names  = ["clear", "overflow", "mismatch", "plain", "lane_idle", "realign",
+                "debug_clear", "com_slip"]
+            values = []
+            for name in names:
+                values.append((yield getattr(fields, name)))
+            self.assertEqual(values, [1, 0, 0, 0, 0, 0, 0, 1])
+        run_simulation(dut, generator())
+
     def test_xcvr_status(self):
         # Per SerDes transceiver status fields and events (A7USB3SerDes xcvr_status/xcvr_events).
         dut = LanesXcvrDUT()

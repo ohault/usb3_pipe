@@ -1282,6 +1282,13 @@ retrain (Tang eSS.Inactive, Acorn WarmReset/Polling), 1.6-4.7s per looping run. 
 lost or Link `pending_hp` Recoveries, single. Gen 1x1: ~1000-1750 Tang Link Layer Recoveries per run (`directed` =
 `pending_hp` ~99% + `lcrd`), no lanes trigger, no loop: a Tang Device Core Link issue at Gen 1x1 (open). Next: the
 deskew loss reason on the Tang (`deskew_loss`, t41).
+**t41 (530ced3, both met): Gen 1x2 395/400** (5 timeouts at step 24 on loop loads: after a retrain the Acorn reaches
+U0 from Polling.Idle while the Tang loops Polling.Idle -> Polling.ExitToRxDetect: no Idle Symbols seen by the Tang,
+its deskewed lanes again), loops on 7/20 loads, all started by the Tang `lanes_deskew_lost`; the loop loads are the
+noisy loads (Acorn comma realignments, `realign_u0`, `skp_odd_u0`, `lane_idle_u0` ~30x the clean loads; 8 clean loads
+all 0). Tang controls on a looping load: realign/idle Recovery off no change, com Recovery off fewer loops (285 vs
+1642-4718 resets / 20 runs), not stopped. `deskew_loss` read 0: CSR status assigned directly while a CSRStatus with
+fields drives it from them (fixed: through the fields). Gen 1x1: Tang Link `pending_hp` ~1290 Recoveries per run again.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

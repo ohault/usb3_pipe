@@ -336,7 +336,12 @@ class USB3LanesDebug(LiteXModule):
                 CSRField("debug_clear", size=1, offset=6, description="Clear: debug/simulation clear."),
                 CSRField("com_slip",    size=1, offset=7, description="Clear: partial COM word, deskewed lanes disagreeing."),
             ], description="Last deskew pairing loss (held until the next one).")
-            self.comb += self._deskew_loss.status.eq(level(phy.lanes_deskew_loss))
+            # Through the fields (a CSRStatus with fields drives its status from them: an assignment
+            # of the status itself was overridden, read 0 on hardware, t41).
+            deskew_loss = level(phy.lanes_deskew_loss)
+            self.comb += [getattr(self._deskew_loss.fields, name).eq(deskew_loss[i])
+                for i, name in enumerate(["clear", "overflow", "mismatch", "plain", "lane_idle",
+                    "realign", "debug_clear", "com_slip"])]
 
         if hasattr(phy, "lanes_idle_recovery"):
             self.comb += phy.lanes_idle_recovery.eq(self._control.fields.idle_recovery)
