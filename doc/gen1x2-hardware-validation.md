@@ -1265,6 +1265,15 @@ Reset: the Tang PHY directs them (the deskew logic failing timing is the likely 
 **Acorn scripted host <-> Tang Device Core: Gen 1x2 110/110 runs, Gen 1x1 10/10, 0 errors, host Hot Resets per load
 10-43** (the t35-t37 bursts came with the timing misses); one run 181ms (eSS.Inactive, Polling retrains, completed).
 PRBS split p3 met (125.16MHz): 5 loads x 3 Warm Resets clean.
+**t39 soak (c260fd2, p2 route 1): 530/530 runs, 0 errors**: Gen 1x2 20 loads x 20 runs 400/400 (as the Acorn <->
+Acorn reference), Gen 1x1 4 x 20 80/80, 60s in U0 before the runs 5 x 10 50/50 (failed 2 in 3 before the t32 fix);
+U0 x2 in 7.51-7.57s on all loads, median run ~47ms, 19 runs over 100ms (LTSSM histories frozen). Host Hot Reset bursts
+on 5/20 Gen 1x2 loads (4840-210376) on a met build: not timing. Two slow run kinds: (1) a Hot Reset loop (~10us per
+loop): after `HotReset.Exit -> U0` both boards enter Recovery within ~1us, the Acorn returns to U0 once, the scripted
+host takes it as a U0 exit and restarts the run with a new Hot Reset (2 Acorn Recoveries per Hot Reset); (2) a
+Recovery timeout (12ms Acorn/6ms Tang) -> eSS.Inactive -> 1-3 Polling retrains. Tang Link Layer at Gen 1x2:
+`pending_hp` only, 0-4 per load (26, 69, 552 on three loads). Gen 1x1 (open): Tang Link 3085-18379 `pending_hp`
+and 53-122 `lcrd` Recoveries per load (Acorn <-> Acorn: ~20), runs still pass at normal times.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
