@@ -1241,6 +1241,10 @@ t33 (741c3b2): PRBS with the resync off on both boards, 20 loads x 6 trainings (
 slower (13/100 over 1.5s, steps of ~1s, one 7.25s with resync on; t31 max 0.95s): to follow. Tang PRBS p3 met
 (126.1MHz); the Tang Device Core missed on every placement (best p1 116.1MHz, p2 112.5MHz): the group compare drove the
 update enable of all the resynchronized outputs, into the lanes TX words: compare registered (one more lanes cycle).
+t34 (8430276): the group paths gone from the Tang Device Core worst list, best p2 120.1MHz (-0.328ns: Link RX AsyncFIFO
+write Gray counter, a buffered FIFO memory read data -> read address; p4 88.4, p3 94.2, p1 113.2, p0 101.5MHz). Warm
+Reset return A/B (6 alternating Tang loads x 8): a842823 0/24 over 1.5s (max 1.12s), 741c3b2 0/24 (max 1.13s): the t33
+slow returns not reproduced. t35: the Device Core runs on p2 (gate waived), route options 0/2 builds.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
