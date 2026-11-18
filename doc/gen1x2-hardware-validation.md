@@ -1249,6 +1249,12 @@ Device Core Gen 1x2 200/200 runs on 20 loads, 100/100 on 10 loads with the runs 
 Gen 1x1 20/20, 0 errors** (t31: 97/100): the scrambler fix confirmed on the Device Core. Route options 0/2 with p2/p1:
 none met (p2: Gowin PR0004 error, no bitstream). One load took 16.5s to U0 (usual ~7.5s). Next: a met Device Core build
 (9371917: registered Link RX FIFO input, the t34 worst path).
+t36 (9371917): the t34 worst path gone but the Tang Device Core placement worse (best p2 101.1MHz, p4/p3/p1/p0 85-88MHz;
+worst: deskew FIFO output -> `aligned` 11 levels, SerDes `rx_idle` -> `idle_count` clear 8.3ns of routing): the lanes
+clock swings 85-125MHz from one small change to the next. Functionally, on the p2 build (-2.11ns): Gen 1x2 160/160 runs
+(incl. 50 after 20s in U0), Gen 1x1 10/10, 0 errors, U0 in 7.51-7.54s on 16 loads; PRBS split p3 met, 5 loads x 3 Warm
+Resets clean. Open: some loads of the fix builds with many host Hot Resets (`resets_csr` 733-4872, t35 up to 213051;
+t31 max 277; every run passes): timing misses or behaviour, to separate on a met build.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

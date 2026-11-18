@@ -1159,7 +1159,11 @@ class USB3PHY(LiteXModule):
         # lane does not come back, tRecoveryActiveTimeout).
         lanes_idle = Signal()
         idle_count = Signal(max=self.lanes_idle_cycles + 1)
-        L.sync += If(~Reduce("OR", [s.rx_idle for s in self.lanes_serdes]),
+        # Lanes activity registered (timing: SerDes rx_idle -> idle_count clear, Tang Mega 138K Pro
+        # lanes clock t36: 8.3ns of routing).
+        lanes_active = Signal()
+        L.sync += lanes_active.eq(~Reduce("OR", [s.rx_idle for s in self.lanes_serdes]))
+        L.sync += If(lanes_active,
             idle_count.eq(0),
         ).Elif(idle_count != self.lanes_idle_cycles,
             idle_count.eq(idle_count + 1),
