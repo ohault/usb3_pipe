@@ -1449,9 +1449,19 @@ class USB3PHYX2Link(LiteXModule):
                 tx_cdc.source.connect(tx_x1_buffer.sink),
             ),
             tx_packer.source.connect(tx_buffer.sink),
-            tx_buffer.source.connect(phy.sink),
             tx_x1_buffer.source.connect(tx_words.sink),
-            tx_words.source.connect(phy.sink_x1),
+        ]
+        # Registered outputs (timing: packets buffers selection -> lanes TX/SerDes TX registers,
+        # Tang Mega 138K Pro t29), emptied out of U0.
+        self.tx_out    = tx_out    = R(ResetInserter()(stream.Buffer(link_layout(), pipe_valid=True, pipe_ready=True)))
+        self.tx_x1_out = tx_x1_out = R(ResetInserter()(stream.Buffer([("data", 32), ("ctrl", 4)], pipe_valid=True, pipe_ready=True)))
+        self.comb += [
+            tx_out.reset.eq(drop),
+            tx_x1_out.reset.eq(drop),
+            tx_buffer.source.connect(tx_out.sink),
+            tx_out.source.connect(phy.sink),
+            tx_words.source.connect(tx_x1_out.sink),
+            tx_x1_out.source.connect(phy.sink_x1),
         ]
 
         # RX: cd -> sys ----------------------------------------------------------------------------

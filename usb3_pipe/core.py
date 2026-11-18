@@ -313,11 +313,18 @@ class USB3PIPE(LiteXModule):
             self.idle_handshake_done.eq(idle_handshake.done),
         ]
         if x2_lane:
-            # Gen 1x2 lane: the descrambler output not registered, the received words flags
-            # registered (timing: Tang Mega 138K Pro lanes clock, TS1 checker -> handshake count).
+            # Gen 1x2 lane: the descrambler output not registered: registered, then its Logical Idle
+            # compare registered (timing: Tang Mega 138K Pro lanes clock, TS1 checker -> handshake,
+            # t29: 9 levels with the compare before the register).
+            rx_valid_r = Signal()
+            rx_data_r  = Signal(len(rx_data))
+            rx_ctrl_r  = Signal(len(rx_ctrl))
             self.sync += [
-                idle_handshake.rx_idle.eq(rx_idle_word),
-                idle_handshake.rx_data.eq(rx_data_word),
+                rx_valid_r.eq(rx_valid),
+                rx_data_r.eq(rx_data),
+                rx_ctrl_r.eq(rx_ctrl),
+                idle_handshake.rx_idle.eq(rx_valid_r & (rx_data_r == 0) & (rx_ctrl_r == 0)),
+                idle_handshake.rx_data.eq(rx_valid_r & ((rx_data_r != 0) | (rx_ctrl_r != 0))),
             ]
         else:
             self.comb += [

@@ -226,6 +226,11 @@ class LaneDeskew(LiteXModule):
         # Head word without K Symbol (flag stored with the word, timing: Tang Mega 138K Pro lanes clock).
         plain    = [Signal(name=f"plain{n}") for n in range(2)]
         self.comb += [plain[n].eq(fifos[n].source.valid & fifos[n].source.plain) for n in range(2)]
+        # Pairs released while aligned, with their head flags, registered: the aligned mismatch
+        # decision one cycle later (timing: FIFO outputs -> pairing state, Tang Mega 138K Pro t29).
+        pair_r  = Signal()
+        head_r  = [Signal(name=f"head_r{n}")  for n in range(2)]
+        plain_r = [Signal(name=f"plain_r{n}") for n in range(2)]
         overflow = Signal() # A word received with a full FIFO (dropped).
         self.comb += [
             both.eq(fifos[0].source.valid & fifos[1].source.valid),
@@ -247,17 +252,22 @@ class LaneDeskew(LiteXModule):
                     aligned.eq(1),
                     armed.eq(0)
                 )
-            ).Elif(both & (heads[0] != heads[1]),
+            ).Elif(pair_r & (head_r[0] != head_r[1]),
                 # Second mismatch, or a marker against a plain data word (no K Symbol: not a
                 # corrupted marker): the lanes are no longer paired / were paired Ordered Sets apart.
-                If(mismatch | (heads[0] & plain[1]) | (heads[1] & plain[0]),
+                If(mismatch | (head_r[0] & plain_r[1]) | (head_r[1] & plain_r[0]),
                     aligned.eq(0)
                 ).Else(
                     mismatch.eq(1)
                 )
-            ).Elif(both & heads[0] & heads[1],
+            ).Elif(pair_r & head_r[0] & head_r[1],
                 mismatch.eq(0)
             )
+        ]
+        self.sync += [
+            pair_r.eq(aligned & both & ~self.clear & ~(overflow & (armed | aligned))),
+            *[head_r[n].eq(heads[n])  for n in range(2)],
+            *[plain_r[n].eq(plain[n]) for n in range(2)],
         ]
         for lane in range(2):
             self.comb += [
@@ -436,10 +446,14 @@ class LanesPacketAligner(LiteXModule):
             DPP:         [ended.eq(epf_found), e.eq(epf_index)],
         })
         # Start of a packet after it (or from symbol 0 out of a packet): started, s, kind.
+        # The start search does not depend on the end found in this word (timing, t29: two chained
+        # priority encoders): no SHP/SLC/SDP K-symbol inside a packet's remaining symbols but its
+        # framing (FIXED/DPP_FRAMING: the first count symbols; a DPP: only END K-symbols before its
+        # EPF).
         start_ok = [Signal(name=f"start_ok{i}") for i in range(8)]
         for i in range(8):
             self.comb += start_ok[i].eq(is_start[i] &
-                ((mode == IDLE) | (ended & (i > e))))
+                ((mode == IDLE) | (mode == DPP) | (count <= i)))
         started, s_index = first(start_ok)
         s_shp = Signal()
         s_slc = Signal()
