@@ -15,6 +15,7 @@ from litex.gen import *
 from litex.soc.interconnect import stream
 
 from usb3_pipe.common import K
+from usb3_pipe.ltssm  import U0_EXIT_CAUSES
 from usb3_pipe.debug  import USB3PHYDebug, USB3LanesDebug, LanesNoiseMonitor, LanesTrainingWatchdog, USB3PHY_DEBUG_HISTORY_DEPTH
 
 # Fake PHY/SerDes ----------------------------------------------------------------------------------
@@ -34,7 +35,8 @@ def fake_phy(pipe_cd=None):
         ltssm_state     = Signal(5),
         ltssm_states    = {"U3": U3},
         ltssm           = SimpleNamespace(u0=Signal(), recovery=Signal(), u1=Signal(), u2=Signal(),
-            u3=Signal(), **{name: Signal(name=name) for name in PIPE_EVENTS}),
+            u3=Signal(), u0_exit_causes=Signal(len(U0_EXIT_CAUSES)),
+            **{name: Signal(name=name) for name in PIPE_EVENTS}),
         pipe            = pipe,
         pipes           = [pipe],
         pipe_cd         = pipe_cd,
@@ -108,6 +110,44 @@ class TestUSB3PHYDebug(unittest.TestCase):
             self.assertEqual((yield dbg._ts1_count.status), 0)
             self.assertEqual((yield dbg._history_count.status), 0)
 
+        run_simulation(dut, generator())
+
+    def test_u0_exit_causes(self):
+        dut = DUT()
+        dbg = dut.debug
+        ts1      = 1 << U0_EXIT_CAUSES.index("ts1")
+        directed = 1 << U0_EXIT_CAUSES.index("directed")
+        lanes    = 1 << U0_EXIT_CAUSES.index("lanes_deskew_lost")
+        def u0_exit(causes):
+            # Triggers active on the last U0 cycle, the LTSSM leaves U0 on the next one.
+            yield dut.phy.ltssm.u0.eq(1)
+            for _ in range(3):
+                yield
+            yield dut.phy.ltssm.u0_exit_causes.eq(causes)
+            yield
+            yield dut.phy.ltssm.u0.eq(0)
+            yield dut.phy.ltssm.u0_exit_causes.eq(0)
+            for _ in range(3):
+                yield
+        def generator():
+            # Triggers outside U0 not counted.
+            yield dut.phy.ltssm.u0_exit_causes.eq(ts1)
+            for _ in range(3):
+                yield
+            yield dut.phy.ltssm.u0_exit_causes.eq(0)
+            yield from u0_exit(ts1)
+            yield from u0_exit(directed | lanes)
+            self.assertEqual((yield dbg._u0_exit_cause.status), directed | lanes)
+            self.assertEqual((yield dbg._u0_exit_ts1_count.status), 1)
+            self.assertEqual((yield dbg._u0_exit_directed_count.status), 1)
+            self.assertEqual((yield dbg._u0_exit_lanes_deskew_lost_count.status), 1)
+            self.assertEqual((yield dbg._u0_exit_timeout_count.status), 0)
+            yield dbg._clear.re.eq(1)
+            yield
+            yield dbg._clear.re.eq(0)
+            yield
+            self.assertEqual((yield dbg._u0_exit_cause.status), 0)
+            self.assertEqual((yield dbg._u0_exit_ts1_count.status), 0)
         run_simulation(dut, generator())
 
     def test_pipe_cd_resynchronization(self):

@@ -111,6 +111,7 @@ D="--port 1240 --csr-csv build/acorn_dbg/csr.csv"
 | Status | LTSSM state, transceiver ready, receive electrical idle, receive polarity |
 | History | Last 32 transitions (or the first ones after a clear, when frozen), state and time |
 | Counters | TS1, inverted TS1 and TS2 detections; LFPS by kind; idle edges; receive error cycles; substituted K28.4 words; U0, Recovery, U1, U2 and U3 entries |
+| U0 exits | Triggers active on the last U0 cycle of the last exit (`u0_exit_cause`) and a count per trigger (`u0_exit_<trigger>_count`): Warm Reset LFPS, TS2 Reset bit, directed Hot Reset (host), TS1 received (partner in Recovery), U0 recovery timeout, Link Layer directed Recovery, Gen 1x2 lanes deskew lost |
 | PHY reset | Holds the PHY in reset with the transmitter in electrical idle |
 | Receiver reset | Re-initializes the receiver of the transceiver |
 
@@ -118,6 +119,9 @@ Two targets build less. With `--lean` and a separate PHY clock domain (Tang Mega
 minimal `usb3_phy_status` register keeps the LTSSM state, U0 and the transceiver ready. The ECPIX-5
 target has no PHY debug core: its link status block (`usb3_link`) gives the LTSSM state and counts
 the U0 and Recovery entries, the receive errors and idles in U0, and the cycles in U0.
+
+The U0 exit triggers tell which side starts a Recovery: a TS1 trigger is the partner's, a directed
+or lanes trigger is this side's (`bench/usb3_lanes.py status`: `u0_exit_cause`, `u0_exits`).
 
 Holding the PHY in reset shows what the link partner sends on its own. The receiver reset restarts
 its equalization, clock recovery and offset calibration. The PHY also does it on each training

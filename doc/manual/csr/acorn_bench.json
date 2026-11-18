@@ -840,6 +840,78 @@
     "offset": 108,
     "reset": null,
     "size": 32
+   },
+   {
+    "access": "ro",
+    "description": "Triggers of the last U0 exit (bits: warm_reset, ts2_reset, hot_reset_req, ts1, timeout, directed, lanes_deskew_lost).",
+    "fields": [],
+    "name": "u0_exit_cause",
+    "offset": 112,
+    "reset": null,
+    "size": 7
+   },
+   {
+    "access": "ro",
+    "description": "U0 exits with the warm_reset trigger active (saturating).",
+    "fields": [],
+    "name": "u0_exit_warm_reset_count",
+    "offset": 116,
+    "reset": null,
+    "size": 16
+   },
+   {
+    "access": "ro",
+    "description": "U0 exits with the ts2_reset trigger active (saturating).",
+    "fields": [],
+    "name": "u0_exit_ts2_reset_count",
+    "offset": 120,
+    "reset": null,
+    "size": 16
+   },
+   {
+    "access": "ro",
+    "description": "U0 exits with the hot_reset_req trigger active (saturating).",
+    "fields": [],
+    "name": "u0_exit_hot_reset_req_count",
+    "offset": 124,
+    "reset": null,
+    "size": 16
+   },
+   {
+    "access": "ro",
+    "description": "U0 exits with the ts1 trigger active (saturating).",
+    "fields": [],
+    "name": "u0_exit_ts1_count",
+    "offset": 128,
+    "reset": null,
+    "size": 16
+   },
+   {
+    "access": "ro",
+    "description": "U0 exits with the timeout trigger active (saturating).",
+    "fields": [],
+    "name": "u0_exit_timeout_count",
+    "offset": 132,
+    "reset": null,
+    "size": 16
+   },
+   {
+    "access": "ro",
+    "description": "U0 exits with the directed trigger active (saturating).",
+    "fields": [],
+    "name": "u0_exit_directed_count",
+    "offset": 136,
+    "reset": null,
+    "size": 16
+   },
+   {
+    "access": "ro",
+    "description": "U0 exits with the lanes_deskew_lost trigger active (saturating).",
+    "fields": [],
+    "name": "u0_exit_lanes_deskew_lost_count",
+    "offset": 140,
+    "reset": null,
+    "size": 16
    }
   ],
   "usb3_serdes_debug": [

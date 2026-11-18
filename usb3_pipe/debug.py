@@ -212,6 +212,36 @@ class USB3PHYDebug(LiteXModule):
                 csr.status.eq(csr.status + 1)
             )
 
+        # U0 exits: triggers active on the last U0 cycle (LTSSM u0_exit_causes, registered: the
+        # last cycle seen on the U0 exit), latched in u0_exit_cause and counted per trigger
+        # (16-bit saturating). The trigger of a Recovery: which side starts it (TS1 = the partner in
+        # Recovery, directed = own Link Layer, lanes_deskew_lost = own Gen 1x2 lanes).
+        from usb3_pipe.ltssm import U0_EXIT_CAUSES
+        if not hasattr(ltssm, "u0_exit_causes"):
+            return
+        causes   = Signal(len(U0_EXIT_CAUSES))
+        u0_d     = Signal()
+        self._u0_exit_cause = CSRStatus(len(U0_EXIT_CAUSES),
+            description="Triggers of the last U0 exit (bits: " + ", ".join(U0_EXIT_CAUSES) + ").")
+        self.sync += [
+            u0_d.eq(ltssm.u0),
+            If(ltssm.u0, causes.eq(ltssm.u0_exit_causes)),
+            If(clear,
+                self._u0_exit_cause.status.eq(0)
+            ).Elif(u0_d & ~ltssm.u0,
+                self._u0_exit_cause.status.eq(causes)
+            ),
+        ]
+        for i, name in enumerate(U0_EXIT_CAUSES):
+            csr = CSRStatus(16, name=f"u0_exit_{name}_count",
+                description=f"U0 exits with the {name} trigger active (saturating).")
+            setattr(self, f"_u0_exit_{name}_count", csr)
+            self.sync += If(clear,
+                csr.status.eq(0)
+            ).Elif(u0_d & ~ltssm.u0 & causes[i] & (csr.status != (2**16 - 1)),
+                csr.status.eq(csr.status + 1)
+            )
+
 # USB3 Lanes Debug ---------------------------------------------------------------------------------
 
 class USB3LanesDebug(LiteXModule):

@@ -86,6 +86,13 @@ class USB3LanesClient:
             "rx_idle_raw_u0_cycles"]]:
             if hasattr(self.bus.regs, f"usb3_lanes_debug_{name}_count"):
                 r[name] = self.reg(f"usb3_lanes_debug_{name}_count").read()
+        # U0 exit triggers (USB3PHYDebug, builds since t40): last exit and counts per trigger.
+        if hasattr(self.bus.regs, "usb3_debug_u0_exit_cause"):
+            from usb3_pipe.ltssm import U0_EXIT_CAUSES
+            cause = self.reg("usb3_debug_u0_exit_cause").read()
+            r["u0_exit_cause"] = [name for i, name in enumerate(U0_EXIT_CAUSES) if (cause >> i) & 1]
+            r["u0_exits"] = {name: self.reg(f"usb3_debug_u0_exit_{name}_count").read()
+                for name in U0_EXIT_CAUSES}
         if hasattr(self.bus.regs, "usb3_lanes_debug_control"):
             control = self.reg("usb3_lanes_debug_control").read()
             r["idle_recovery"]    = (control >> 0) & 0x1

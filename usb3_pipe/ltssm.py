@@ -17,6 +17,10 @@ from litex.gen.genlib.misc import WaitTimer
 from usb3_pipe.common import LTSSM_PIPE_INTERFACE
 from usb3_pipe.lfps   import U1ExitLFPSBurst, U2ExitLFPSBurst, U3WakeupLFPSBurst
 from usb3_pipe.lfps   import exit_burst_cycles, exit_u1_min_cycles, exit_u2_min_cycles
+
+# U0 exit triggers (LTSSM u0_exit_causes bits, in order).
+U0_EXIT_CAUSES = ["warm_reset", "ts2_reset", "hot_reset_req", "ts1", "timeout", "directed",
+    "lanes_deskew_lost"]
 from usb3_pipe.lfps   import exit_u3_min_cycles
 from usb3_pipe.lfps   import LFPSRXFrontEnd, SCDGenerator, SCDChecker, LBPMGenerator, LBPMChecker
 from usb3_pipe.lfps   import LBPM_PHY_CAPABILITY, LBPM_PHY_READY, lbpm_phy_capability
@@ -111,6 +115,7 @@ class USB3LTSSM(LiteXModule):
         # Upper layer directs (7.5) ----------------------------------------------------------------
         self.directed_recovery = Signal()        # i: directed to Recovery
         self.lanes_deskew_lost = Signal()        # i: Gen 1x2 lanes not deskewed in U0 (-> Recovery)
+        self.u0_exit_causes    = Signal(len(U0_EXIT_CAUSES)) # o: U0 exit triggers (debug, U0_EXIT_CAUSES bits)
         self.directed_loopback = Signal()        # i: directed as Loopback master
         self.loopback_capable  = Signal(reset=0) # i: loopback master capability
         self.hot_reset_req     = Signal()        # i: DS directed PORT_RESET (Hot Reset)
@@ -583,6 +588,19 @@ class USB3LTSSM(LiteXModule):
         directed_recovery = self.directed_recovery
         if lanes == 2:
             directed_recovery = self.directed_recovery | self.lanes_deskew_lost
+        # U0 exit triggers (debug: USB3PHYDebug u0_exit_cause/u0_exit_*_count), all the conditions
+        # active in U0 (not prioritized): Warm Reset LFPS, TS2 Reset bit, DS directed Hot Reset,
+        # TS1 (partner in Recovery), tU0RecoveryTimeout, Link Layer directed Recovery, lanes
+        # deskew lost (Gen 1x2).
+        self.comb += self.u0_exit_causes.eq(Cat(
+            self.lfps_rx_reset,
+            self.ts_rx_ts2_reset,
+            self.hot_reset_req & self.ds_port,
+            self.ts_rx_ts1,
+            t_u0_recovery.done,
+            self.directed_recovery,
+            self.lanes_deskew_lost if lanes == 2 else 0,
+        ))
         fsm.act("U0",
             self.u0.eq(1),
             self.rx_ready.eq(1),

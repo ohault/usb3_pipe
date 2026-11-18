@@ -56,6 +56,14 @@ Bank `usb3_debug`.
 | `u1_count` | `0x0064` | 32 | ro | u1 events count (saturating). |
 | `u2_count` | `0x0068` | 32 | ro | u2 events count (saturating). |
 | `u3_count` | `0x006c` | 32 | ro | u3 events count (saturating). |
+| `u0_exit_cause` | `0x0070` | 7 | ro | Triggers of the last U0 exit (bits: warm_reset, ts2_reset, hot_reset_req, ts1, timeout, directed, lanes_deskew_lost). |
+| `u0_exit_warm_` `reset_count` | `0x0074` | 16 | ro | U0 exits with the warm_reset trigger active (saturating). |
+| `u0_exit_ts2_` `reset_count` | `0x0078` | 16 | ro | U0 exits with the ts2_reset trigger active (saturating). |
+| `u0_exit_hot_` `reset_req_` `count` | `0x007c` | 16 | ro | U0 exits with the hot_reset_req trigger active (saturating). |
+| `u0_exit_ts1_` `count` | `0x0080` | 16 | ro | U0 exits with the ts1 trigger active (saturating). |
+| `u0_exit_` `timeout_count` | `0x0084` | 16 | ro | U0 exits with the timeout trigger active (saturating). |
+| `u0_exit_` `directed_count` | `0x0088` | 16 | ro | U0 exits with the directed trigger active (saturating). |
+| `u0_exit_lanes_` `deskew_lost_` `count` | `0x008c` | 16 | ro | U0 exits with the lanes_deskew_lost trigger active (saturating). |
 
 Fields of `status`:
 
