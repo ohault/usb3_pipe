@@ -1244,7 +1244,11 @@ update enable of all the resynchronized outputs, into the lanes TX words: compar
 t34 (8430276): the group paths gone from the Tang Device Core worst list, best p2 120.1MHz (-0.328ns: Link RX AsyncFIFO
 write Gray counter, a buffered FIFO memory read data -> read address; p4 88.4, p3 94.2, p1 113.2, p0 101.5MHz). Warm
 Reset return A/B (6 alternating Tang loads x 8): a842823 0/24 over 1.5s (max 1.12s), 741c3b2 0/24 (max 1.13s): the t33
-slow returns not reproduced. t35: the Device Core runs on p2 (gate waived), route options 0/2 builds.
+slow returns not reproduced. **t35 (8430276, Tang Device Core p2, -0.33ns, gate waived): Acorn scripted host <-> Tang
+Device Core Gen 1x2 200/200 runs on 20 loads, 100/100 on 10 loads with the runs after 20s in U0 (t32: 2/3 failed),
+Gen 1x1 20/20, 0 errors** (t31: 97/100): the scrambler fix confirmed on the Device Core. Route options 0/2 with p2/p1:
+none met (p2: Gowin PR0004 error, no bitstream). One load took 16.5s to U0 (usual ~7.5s). Next: a met Device Core build
+(9371917: registered Link RX FIFO input, the t34 worst path).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
