@@ -469,6 +469,13 @@ def main():
                 step = e & 0xffff
                 info = {"error_ltssm": lanes.dbg.state_name((e >> 16) & 0xff),
                     "error_u0": (e >> 24) & 0x1, "error_x2": (e >> 25) & 0x1}
+                if hasattr(bus.regs, "usb3_script_error_info"):
+                    # Words received at the error (and the one before), mismatch or timeout.
+                    i = lanes.reg("usb3_script_error_info").read()
+                    info.update({
+                        "error_kind": "mismatch" if (i >> 8) & 0x1 else "timeout",
+                        "error_word": f"{lanes.reg('usb3_script_error_data').read():08x}/{i & 0xf:x}",
+                        "error_prev": f"{lanes.reg('usb3_script_error_prev').read():08x}/{(i >> 4) & 0xf:x}"})
             print(json.dumps({"run": run, "result": result, "step": step, "section": section(step),
                 **info, "time_ms": round(1e3*(time.time() - start), 1)}), flush=True)
         lanes.reg("usb3_script_control").write(lanes.reg("usb3_script_control").read() & ~1)

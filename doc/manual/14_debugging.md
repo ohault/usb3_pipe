@@ -310,7 +310,8 @@ counters (`USB3LanesDebug`). The procedure and the results are in
 
 With `--lanes-core`, `usb3_lanes.py script --runs N` runs the scripted host and prints one JSON
 line per run, with the failing step on an error (latched with the LTSSM state at the error in
-`usb3_script_error_step`: the step counter restarts after it). The debug clients decode the LTSSM
+`usb3_script_error_step`: the step counter restarts after it) and the word received at the error
+with the one before (`usb3_script_error_data`/`error_prev`/`error_info`: mismatch or timeout). The debug clients decode the LTSSM
 state with the build's own encoding (`usb3_ltssm_*` constants of `csr.csv`: it depends on the PHY
 options, ex: no U1/U2 states). A Gen 1x2 build changes from one bitstream load
 to the next: `bench/acorn_x2_loads.py` loads both boards N times and runs the script on each load.
@@ -323,7 +324,9 @@ The `lanes` and `realign` LiteScope groups capture the lanes words around the de
 Recovery triggers. The `warm` group captures, for each physical lane, the electrical idle (filtered and raw),
 the decode errors, their hold during a receive re-initialization and the receive reset, with the lanes
 swap and the Warm Reset detection of the Configuration Lane. A Warm Reset LFPS lasts about 100 ms:
-capture it with `litescope_cli --subsampling`.
+capture it with `litescope_cli --subsampling`. The `script` group (scripted host) captures the
+destriped lanes words, the packet aligner output and the words to the script model with its step and
+error (`usb3_analyzer.py capture --trigger error --no-retrain` while the runs go on).
 
 ## Gen 2 {#debug-gen2}
 

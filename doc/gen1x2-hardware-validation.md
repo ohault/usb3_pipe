@@ -1215,6 +1215,14 @@ regression 3/3 clean. t30 (985ed31): Tang Device Core 114.4MHz (p4, sys 62.54MHz
 Link RX buffer: descrambler output not registered; RX errors monitor hold -> errors; TS2 generator -> SerDes 1 TX; deskew
 aligned): the first two fixed next; Acorn scripted host +0.184ns; PRBS regression (Tang p4 125.02MHz, Acorn +0.134ns): 5
 loads x 3 Warm Resets, 0 errors, 610MB/s.
+t31 (a842823): Tang Gen 1x2 Device Core met (p4: lanes 125.04MHz, sys 67.6MHz for 62.5MHz; p3 125.03MHz; worst lanes path
++0.002ns, aligner candidate -> word FIFO write); Acorn scripted host +0.333ns. **First Device Core runs on the Tang: Acorn
+scripted host <-> Tang Device Core Gen 1x2 (SuperSpeedPlus) 97/100 runs on 10 loads (3 Tang loads), 0 timeouts, Gen 1x1
+(x2 disabled on the host) 20/20**; run median 47.3ms (x2) / 76.5ms (x1); Tang `rx_overflow` 0, LBAD/retries 0. The 3
+errors: step 510, `bulk_in_0` first DPP data word (after its SDP), in U0 at x2, on 3 loads (one each). Host Hot Resets per
+load 12-277 (runs restarted after any U0 exit). PRBS regression (Tang p4, Acorn +0.154ns): 5 loads x 3 Warm Resets, 0
+errors, 610MB/s, no resync. Next: the received word at the error (`usb3_script_error_data`/`error_prev`/`error_info`) and
+the `script` LiteScope group (host aligner input/output, model words) on the Acorn host.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

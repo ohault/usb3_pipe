@@ -921,6 +921,38 @@ class USB3HostScript(LiteXModule):
             )
         ]
 
+        # Words received at the last failed test run error (after the earlier CSRs): the word at the
+        # error (mismatch: the word compared, timeout: the last word received) and the one before,
+        # their ctrl and the error kind (mismatch or timeout).
+        self._error_data = CSRStatus(32, description="Word received at the error (mismatch) or last word received (timeout).")
+        self._error_prev = CSRStatus(32, description="Word received before error_data.")
+        self._error_info = CSRStatus(fields=[
+            CSRField("ctrl",      size=4, offset=0, description="error_data ctrl."),
+            CSRField("prev_ctrl", size=4, offset=4, description="error_prev ctrl."),
+            CSRField("mismatch",  size=1, offset=8, description="Mismatch (a word received at the error), else timeout."),
+        ])
+        last_data = Signal(32)
+        last_ctrl = Signal(4)
+        prev_data = Signal(32)
+        prev_ctrl = Signal(4)
+        sink_valid_d = Signal()
+        self.sync += [
+            sink_valid_d.eq(model.sink.valid),
+            If(model.sink.valid & model.sink.ready & ~model.error,
+                last_data.eq(model.sink.data),
+                last_ctrl.eq(model.sink.ctrl),
+                prev_data.eq(last_data),
+                prev_ctrl.eq(last_ctrl),
+            ),
+            If(error & ~error_d,
+                self._error_data.status.eq(last_data),
+                self._error_prev.status.eq(prev_data),
+                self._error_info.fields.ctrl.eq(last_ctrl),
+                self._error_info.fields.prev_ctrl.eq(prev_ctrl),
+                self._error_info.fields.mismatch.eq(sink_valid_d),
+            )
+        ]
+
 # USB3 Analyzer ------------------------------------------------------------------------------------
 
 def usb3_analyzer(soc, group="link", csv="analyzer.csv"):
@@ -928,7 +960,18 @@ def usb3_analyzer(soc, group="link", csv="analyzer.csv"):
     the SoC: soc.analyzer = usb3_analyzer(soc, ...)."""
     groups = usb3_analyzer_groups(soc.usb3_phy, soc.usb3_serdes,
         serdes_debug = getattr(soc, "usb3_serdes_debug", None))
-    assert group in groups, f"{group} group requires --with-serdes-debug."
+    script = getattr(soc, "usb3_script", None)
+    if script is not None:
+        # Scripted host (--role host --lanes-core): destriped lanes words, packet aligner output,
+        # words to the script model, its step and error (usb3_analyzer.py --trigger error).
+        phy, link, model = soc.usb3_phy, soc.usb3_link, script.model
+        groups["script"] = [phy.ltssm_state, phy.ltssm.u0, phy.x2,
+            phy.source.valid, phy.source.data, phy.source.ctrl,
+            link.rx_aligner.source.valid, link.rx_aligner.source.data, link.rx_aligner.source.ctrl,
+            link.rx_aligner.source.words,
+            model.sink.valid, model.sink.data, model.sink.ctrl, model.step, model.error,
+        ]
+    assert group in groups, f"{group} group requires --with-serdes-debug (phase/u3) or --role host --lanes-core (script)."
     return LiteScopeAnalyzer(groups[group],
         depth        = 4096,
         clock_domain = "sys",
@@ -956,7 +999,7 @@ def usb3_soc_args(parser, output_dir, with_uartbone=True):
     parser.add_argument("--link-words",        default=1, type=int, help="Link Layer words: 1 (32-bit), 2 (64-bit) or 4 (128-bit, Gen 2 with wide SerDes words), loopback/bench examples: Gen 2 bandwidth.", choices=[1, 2, 4])
     parser.add_argument("--with-serdes-debug", action="store_true", help="Enable SerDes debug (TX/loopback controls, clocks/RX errors measurements).")
     parser.add_argument("--with-analyzer",     action="store_true", help="Enable LiteScope Analyzer.")
-    parser.add_argument("--analyzer-group",    default="link",      help="LiteScope probes group (phase: requires --with-serdes-debug, lanes/realign/warm: --lanes 2).", choices=USB3_ANALYZER_GROUPS)
+    parser.add_argument("--analyzer-group",    default="link",      help="LiteScope probes group (phase: requires --with-serdes-debug, lanes/realign/warm: --lanes 2, script: --role host --lanes-core).", choices=USB3_ANALYZER_GROUPS)
 
 def usb3_soc_argdict(args):
     """Target SoC arguments from the common bench target arguments: USB3BaseSoC (bridges, CPU),

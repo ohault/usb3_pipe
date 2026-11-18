@@ -1074,7 +1074,7 @@ def gen2_rx_analyzer_signals(rx_datapath):
 
 # USB3 Analyzer Groups -----------------------------------------------------------------------------
 
-USB3_ANALYZER_GROUPS = ["link", "lfps", "ts", "datapath", "phase", "u3", "lanes", "realign", "warm"]
+USB3_ANALYZER_GROUPS = ["link", "lfps", "ts", "datapath", "phase", "u3", "lanes", "realign", "warm", "script"]
 
 def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
     """LiteScope probes groups of a USB3PHY/USB3SerDes (bench/usb3_analyzer.py), returns a dict
