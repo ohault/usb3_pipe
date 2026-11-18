@@ -276,7 +276,13 @@ class USB3PIPE(LiteXModule):
         # framing. The aligner always processes the received words (one word of latency), only its
         # output to the Link Layer is gated by rx_ready.
         if x2_lane:
-            self.comb += descrambler.source.connect(source)
+            # Registered descrambler output (timing: Tang Mega 138K Pro lanes clock, the descrambler
+            # into the lanes datapath/Gen 1x1 words, t30).
+            self.rx_buffer = rx_buffer = stream.PipeValid([("data", 32), ("ctrl", 4)])
+            self.comb += [
+                descrambler.source.connect(rx_buffer.sink),
+                rx_buffer.source.connect(source),
+            ]
         else:
             # Registered descrambler output and ready (timings), registers to the aligner
             # (ready_first).

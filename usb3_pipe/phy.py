@@ -472,16 +472,27 @@ class USB3PHY(LiteXModule):
             hold    = Signal(max=holdoff_cycles + 1)
             reset   = Signal(max=reset_cycles + 1)
             request = Signal()
+            # Re-initialization/holdoff, idle conditions and errors input registered: the window
+            # counters one cycle behind (timing: Tang Mega 138K Pro lanes clock, hold -> errors, t30).
+            busy  = Signal()
+            quiet = Signal()
+            err   = Signal()
             L.sync += [
-                self.rx_errors_reinit[lane].eq(0),
+                busy.eq((reset != 0) | (hold != 0)),
+                quiet.eq(~symbols | s.rx_idle | ~enable),
+                err.eq(getattr(s, "rx_decode_errors", s.rx_errors)),
+            ]
+            L.sync += [
                 If(reset != 0,
                     reset.eq(reset - 1),
                     hold.eq(holdoff_cycles),
                 ).Elif(hold != 0,
                     hold.eq(hold - 1),
-                    count.eq(0),
-                    errors.eq(0),
-                ).Elif(~symbols | s.rx_idle | ~enable,
+                ),
+            ]
+            L.sync += [
+                self.rx_errors_reinit[lane].eq(0),
+                If(busy | quiet,
                     count.eq(0),
                     errors.eq(0),
                 ).Elif(count == window,
@@ -493,7 +504,7 @@ class USB3PHY(LiteXModule):
                     )
                 ).Else(
                     count.eq(count + 1),
-                    errors.eq(errors + getattr(s, "rx_decode_errors", s.rx_errors)),
+                    errors.eq(errors + err),
                 )
             ]
             L.comb += request.eq(reset != 0)

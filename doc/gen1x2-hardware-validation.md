@@ -1209,6 +1209,12 @@ not run on hardware; the aligner needs a redesign for the GW5A. Acorn scripted h
 works (reports matched gowin_timing.py); it now stops when a clock is below 90% of its constraint.
 `LanesPacketAligner` redesigned (per packet rotation, 32-bit slices of a two words window, 4 word FIFOs written in
 rotation): no per symbol placement from a buffer level; aligner tests and the 31 Gen 1x2 simulations pass.
+t29 (6140222): Tang Device Core lanes clock 68.8 -> 111.5MHz (p3; p4 113.8), worst groups ~-0.9ns (TX packets buffer
+-> SerDes TX, idle handshake, deskew mismatch, aligner count): fixed in 985ed31; Acorn scripted host +0.068ns; PRBS
+regression 3/3 clean. t30 (985ed31): Tang Device Core 114.4MHz (p4, sys 62.54MHz met), worst ~-0.74ns (lane RX words ->
+Link RX buffer: descrambler output not registered; RX errors monitor hold -> errors; TS2 generator -> SerDes 1 TX; deskew
+aligned): the first two fixed next; Acorn scripted host +0.184ns; PRBS regression (Tang p4 125.02MHz, Acorn +0.134ns): 5
+loads x 3 Warm Resets, 0 errors, 610MB/s.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
