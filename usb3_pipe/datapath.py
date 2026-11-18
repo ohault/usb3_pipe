@@ -21,7 +21,7 @@ from litex.gen import *
 
 from litex.soc.interconnect import stream
 
-from usb3_pipe.common     import K, COM, SKP, AsyncFIFO, Buffer
+from usb3_pipe.common     import K, COM, SKP, SUB, AsyncFIFO, Buffer
 from usb3_pipe.common     import BLOCK_HEADER_DATA, BLOCK_HEADER_CONTROL, GEN2_SKP_TX_SYMBOLS
 from usb3_pipe.common     import GEN2_SKP, GEN2_SKPEND, GEN2_SDS, GEN2_TS1, GEN2_TS2, GEN2_TSEQ
 from usb3_pipe.common     import GEN2_IDLE
@@ -191,6 +191,13 @@ class RXWordAligner(LiteXModule):
     ordered_sets: COM markers runs of the Ordered Sets (4 COM Symbols for the TS1/TS2), a run
     shortened by errors on its first Symbols kept on the current alignment (default: with the COM
     markers only; not with the Link Layer framing markers).
+
+    With ordered_sets, a wrong alignment kept by that rule is also corrected: after a lane shifted by
+    k Symbols (1-2) while every Ordered Set has its first k COM Symbols received as decode errors
+    (K28.4), the shortened COM runs start on the wrong alignment and keep it (output: a word ending
+    with k K28.4, then a word starting with 4-k COM Symbols and other Symbols: the lanes deskew never
+    pairs again, Tang Mega 138K Pro t43). That output pattern moves the alignment k Symbols earlier
+    (the K28.4 Symbols are the first COM Symbols of the run).
     """
     def __init__(self, markers=(COM,), ordered_sets=None):
         if ordered_sets is None:
@@ -293,6 +300,47 @@ class RXWordAligner(LiteXModule):
                 alignment_d.eq(alignment_sel)
             )
         )
+
+        # Wrong alignment kept on shortened COM runs (see above): output words features registered
+        # (timing), the correction one word later.
+        if ordered_sets:
+            out_ok   = Signal()
+            trail    = Signal(2) # K28.4 Symbols ending the output word (1-2, else 0).
+            lead     = Signal(3) # COM Symbols starting the output word, then another Symbol (2-3).
+            trail_r  = Signal(2)
+            trail_rr = Signal(2)
+            lead_r   = Signal(3)
+            fix      = Signal()
+            sym_is   = lambda i, v: source.ctrl[i] & (source.data[8*i:8*(i+1)] == v.value)
+            self.comb += [
+                out_ok.eq(source.valid & source.ready),
+                If(sym_is(3, SUB) & sym_is(2, SUB) & ~sym_is(1, SUB) & ~sym_is(1, COM),
+                    trail.eq(2)
+                ).Elif(sym_is(3, SUB) & ~sym_is(2, SUB) & ~sym_is(2, COM),
+                    trail.eq(1)
+                ),
+                If(sym_is(0, COM) & sym_is(1, COM) & sym_is(2, COM) & ~sym_is(3, COM),
+                    lead.eq(3)
+                ).Elif(sym_is(0, COM) & sym_is(1, COM) & ~sym_is(2, COM),
+                    lead.eq(2)
+                ),
+                fix.eq((trail_rr != 0) & (lead_r + trail_rr == 4)),
+            ]
+            self.sync += [
+                If(out_ok,
+                    trail_r.eq(trail),
+                    trail_rr.eq(trail_r),
+                    lead_r.eq(lead),
+                ),
+                If(fix,
+                    # Correction applied once (the features cleared).
+                    alignment_d.eq(alignment_d - trail_rr),
+                    pending.eq(0),
+                    trail_r.eq(0),
+                    trail_rr.eq(0),
+                    lead_r.eq(0),
+                ),
+            ]
 
         # Data selection
         data = Cat(buf.source.data, sink.data)

@@ -228,6 +228,44 @@ class TestDatapath(unittest.TestCase):
                         if dut.words[i:i + n] == expected]
                     self.assertNotEqual(found, [], dut.words)
 
+    def test_rx_word_aligner_escapes_shift_kept_on_com_errors(self):
+        # A lane shifted by 1-2 Symbols while every TS1 has its first 1-2 COM Symbols received as
+        # K28.4 (Tang Mega 138K Pro lane 1 in the Hot Reset loops, t43): the shortened COM runs start
+        # on the shifted alignment and kept it (partial COM words, the lanes deskew never paired
+        # again). The output pattern (a word ending with the K28.4 Symbols, then one starting with the
+        # remaining COM Symbols) moves the alignment back: whole COM words again.
+        rng = random.Random(2)
+        SUB_ = (K(28, 4), 1)
+        ts1  = words_to_symbols(ordered_set_words(TS1))
+        com  = (K(28, 5), 1)
+        for errors in [1, 2]:
+            for offset in range(4):
+                with self.subTest(errors=errors, offset=offset):
+                    bad    = [SUB_]*errors + ts1[errors:]
+                    before = ts1*4 + [(rng.randrange(256), 0) for _ in range(32)]
+                    wire   = [(rng.randrange(256), 0) for _ in range(offset)] + before[:-errors] + bad*12
+                    wire  += [(0x00, 0)]*((-len(wire)) % 4) + [(0x00, 0)]*4
+                    words  = symbols_to_words(wire)
+
+                    def generator(dut):
+                        for d, c in words:
+                            yield dut.sink.valid.eq(1)
+                            yield dut.sink.data.eq(d)
+                            yield dut.sink.ctrl.eq(c)
+                            yield
+                        yield dut.sink.valid.eq(0)
+
+                    def checker(dut):
+                        dut.words = yield from stream_monitor(dut.source, len(words) - 1,
+                            timeout=4*len(words))
+
+                    dut = RXWordAligner()
+                    run_simulation(dut, [generator(dut), checker(dut)])
+                    # The last Ordered Sets: their COM run (K28.4 + COM) as one word.
+                    head = symbols_to_words(bad)[0]
+                    tail = dut.words[-4*len(bad)//4*4:]
+                    self.assertGreaterEqual(tail.count(head), 3, dut.words[-24:])
+
     def check_rx_error_types_count(self, rx_reset_at=None):
         # 2 Symbols per word: (decode, disparity, com) flags per Symbol; errors before a COM in the
         # same word and across words (previous word last Symbol), disparity errors counted only

@@ -339,7 +339,11 @@ symbols, the 4 COM symbols of a training sequence cut by a lane that lost symbol
 TS burst, when the two deskewed lanes words disagree. The word aligner keeps its alignment when
 a run of COM symbols starts late but ends where a 4 COM run on the current alignment ends: the
 first COM symbols of the ordered set were received with errors (as K28.4 or as other symbols). It
-would otherwise move to the first intact COM symbol, and stay there after the last TS2. A lane that keeps decoding errors is re-initialized. On Gen 1x2, the receive words are
+would otherwise move to the first intact COM symbol, and stay there after the last TS2. That rule
+also kept a wrong alignment: a lane shifted by one or two symbols, then ordered sets whose first
+COM symbols all arrive as K28.4, start their shortened COM runs on the shifted alignment (on the
+Tang Mega 138K Pro the deskew then never paired again until a retrain). A word ending with those
+K28.4 symbols, followed by a word starting with the other COM symbols, moves the alignment back. A lane that keeps decoding errors is re-initialized. On Gen 1x2, the receive words are
 also kept for the link layer in Polling.Idle and HotReset.Exit until U0 (as in Recovery.Idle):
 the partner can enter U0 first and send its advertisement at once. The transmit words are dropped
 out of U0, so nothing held from before a Recovery is sent ahead of the next advertisement.

@@ -1296,6 +1296,14 @@ loops: `aligned` 0 in 143/160, `deskew_loss` unchanged for seconds); every U0 en
 until a retrain (Acorn Warm Reset after ~2.36s, or Tang eSS.Inactive). Simulation (`--lane-slip 902000,1`, Host lane
 in U0 during the run): re-paired on the first Recovery, not reproduced. Next (t43): sticky deskew inputs flags
 (`deskew_seen`: per lane marker/error/partial COM words, gap, armed, overflow, aligned) read during a loop.
+**t43 (503596f; Tang p2 r1 hung in Gowin routing, p3 r1 met 125.04MHz): Gen 1x2 400/400**, loops on 13/20 loads (5
+long, 2.4s). `deskew_seen` during the long loops (96 windows): markers, gaps and the search armed on both lanes, error
+words on both lanes every window, **Tang lane 1 partial COM words in 84/96**, never aligned nor overflow; reference
+runs: never armed nor partial. Cause (reproduced on `RXWordAligner` alone): after a lane shift of k Symbols (1-2), TS1s
+with their first k COM Symbols received as K28.4 start their shortened COM run on the shifted alignment, which the
+shortened-run rule (t8) keeps: lane 1 stays k Symbols off, its COM words partial, the deskew never pairs (errors
+disarm, no whole marker on lane 1). Fix: the aligner output pattern (a word ending with k K28.4, then a word starting
+with 4-k COM Symbols) moves the alignment back k Symbols (`test_rx_word_aligner_escapes_shift_kept_on_com_errors`).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
