@@ -343,6 +343,38 @@ class USB3LanesDebug(LiteXModule):
                 for i, name in enumerate(["clear", "overflow", "mismatch", "plain", "lane_idle",
                     "realign", "debug_clear", "com_slip"])]
 
+        # Deskew inputs seen since the last deskew_seen_clear write (USB3PHY lanes_deskew_seen).
+        if hasattr(phy, "lanes_deskew_seen"):
+            seen_names = ["marker0", "marker1", "error0", "error1", "partial0", "partial1", "gap0",
+                "gap1", "armed", "overflow", "aligned"]
+            seen_desc = {
+                "marker0": "Lane 0 marker (COM) word.", "marker1": "Lane 1 marker (COM) word.",
+                "error0": "Lane 0 error word (decode error, not a marker).",
+                "error1": "Lane 1 error word (decode error, not a marker).",
+                "partial0": "Lane 0 partial COM word (2-3 COM Symbols then others).",
+                "partial1": "Lane 1 partial COM word (2-3 COM Symbols then others).",
+                "gap0": "Lane 0 gap reached (words without marker nor error).",
+                "gap1": "Lane 1 gap reached (words without marker nor error).",
+                "armed": "Deskew search armed.", "overflow": "Deskew FIFO overflow (word dropped).",
+                "aligned": "Lanes deskewed.",
+            }
+            self._deskew_seen = CSRStatus(fields=[CSRField(name, size=1, offset=i,
+                description=seen_desc[name]) for i, name in enumerate(seen_names)],
+                description="Deskew inputs seen since the last deskew_seen_clear write (sticky).")
+            self._deskew_seen_clear = CSR()
+            seen = level(phy.lanes_deskew_seen)
+            self.comb += [getattr(self._deskew_seen.fields, name).eq(seen[i])
+                for i, name in enumerate(seen_names)]
+            if cd is None:
+                self.comb += phy.lanes_deskew_seen_clear.eq(self._deskew_seen_clear.re)
+            else:
+                seen_ps = PulseSynchronizer("sys", cd)
+                self.submodules += seen_ps
+                self.comb += [
+                    seen_ps.i.eq(self._deskew_seen_clear.re),
+                    phy.lanes_deskew_seen_clear.eq(seen_ps.o),
+                ]
+
         if hasattr(phy, "lanes_idle_recovery"):
             self.comb += phy.lanes_idle_recovery.eq(self._control.fields.idle_recovery)
         if hasattr(phy, "lanes_realign_recovery"):

@@ -293,6 +293,7 @@ counters (`USB3LanesDebug`). The procedure and the results are in
 |------------------------------------|------------------------------------------------------------|
 | `deskew_lost_u0` | U0 entered or kept without the lanes deskew (Recovery requested) |
 | `deskew_loss` | Why the lanes deskew last lost its pairing (held until the next loss, also in the lean and split clock builds): cleared (by a lane idle, a lane realignment, a debug clear or a COM slip), deskew FIFO overflow, second marker mismatch, or a marker against a plain data word |
+| `deskew_seen` | What the deskew received since the last `deskew_seen_clear` write (sticky, also in the lean and split clock builds): per lane marker, error and partial COM words, gap reached, search armed, FIFO overflow, deskewed |
 | `lane_idle_u0` | A lane in electrical idle for 10 µs in U0 (Recovery requested) |
 | `realign_u0` | A lane comma realignment, receive re-initialization or odd SKP run in U0 |
 | `com_slip`, `rx_com_partial` | Partial COM word (starting with 2-3 COM symbols) with the lanes deskewed and their COM words disagreeing (a lane shifted), and per lane in any state |

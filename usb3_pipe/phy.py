@@ -1274,6 +1274,20 @@ class USB3PHY(LiteXModule):
         # reasons (bits 0-3: clear, overflow, second mismatch, marker vs plain data word) and the
         # clear sources (bits 4-7: lane idle, lane realigned in U0, debug clear, COM slip).
         self.lanes_deskew_loss = Signal(8) # o
+        # Deskew inputs seen since the last clear (debug, lanes clock, sticky): per lane marker
+        # words (0-1), error words (2-3), partial COM words (4-5), gap reached (6-7), search armed
+        # (8), FIFO overflow (9), aligned (10). lanes_deskew_seen_clear: pulse (lanes clock).
+        self.lanes_deskew_seen       = Signal(11) # o
+        self.lanes_deskew_seen_clear = Signal()   # i
+        # Registered before the sticky flags (timing: Tang Mega 138K Pro lanes clock).
+        seen = Signal(11)
+        L.sync += seen.eq(Cat(*deskew.markers_in, *deskew.errors_in, *self.lanes_com_partial,
+            *deskew.gaps, deskew.armed, deskew.overflow, deskew.aligned))
+        L.sync += If(self.lanes_deskew_seen_clear,
+            self.lanes_deskew_seen.eq(0)
+        ).Else(
+            self.lanes_deskew_seen.eq(self.lanes_deskew_seen | seen)
+        )
         clear_src = Signal(4)
         L.sync += [
             clear_src.eq(Cat(lanes_idle & idle_recovery, self.lanes_realign, deskew_clear,

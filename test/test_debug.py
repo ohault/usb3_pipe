@@ -267,6 +267,8 @@ class LanesLossDUT(Module):
     def __init__(self):
         self.phy, self.serdes = fake_lanes_phy()
         self.phy.lanes_deskew_loss = Signal(8)
+        self.phy.lanes_deskew_seen       = Signal(11)
+        self.phy.lanes_deskew_seen_clear = Signal()
         self.submodules.debug = USB3LanesDebug(self.phy, self.serdes)
 
 class TestUSB3LanesDebug(unittest.TestCase):
@@ -285,6 +287,18 @@ class TestUSB3LanesDebug(unittest.TestCase):
             for name in names:
                 values.append((yield getattr(fields, name)))
             self.assertEqual(values, [1, 0, 0, 0, 0, 0, 0, 1])
+            # Deskew inputs seen: fields, clear pulse to the PHY.
+            yield dut.phy.lanes_deskew_seen.eq(0b10100000011) # markers, armed, aligned.
+            yield dut.debug._deskew_seen_clear.re.eq(1)
+            yield
+            self.assertEqual((yield dut.phy.lanes_deskew_seen_clear), 1)
+            yield dut.debug._deskew_seen_clear.re.eq(0)
+            yield
+            fields = dut.debug._deskew_seen.fields
+            values = []
+            for name in ["marker0", "marker1", "error0", "armed", "aligned"]:
+                values.append((yield getattr(fields, name)))
+            self.assertEqual(values, [1, 1, 0, 1, 1])
         run_simulation(dut, generator())
 
     def test_xcvr_status(self):

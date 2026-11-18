@@ -1289,6 +1289,13 @@ noisy loads (Acorn comma realignments, `realign_u0`, `skp_odd_u0`, `lane_idle_u0
 all 0). Tang controls on a looping load: realign/idle Recovery off no change, com Recovery off fewer loops (285 vs
 1642-4718 resets / 20 runs), not stopped. `deskew_loss` read 0: CSR status assigned directly while a CSRStatus with
 fields drives it from them (fixed: through the fields). Gen 1x1: Tang Link `pending_hp` ~1290 Recoveries per run again.
+**t42 (3f453ee, both met): Gen 1x2 400/400, loops on 6/20 loads.** With `deskew_loss` working: each loop starts with
+one Tang deskew clear in U0 (`clear,realign`: a lane comma realignment, 4 loops; `clear,com_slip`, 2 loops), then the
+Tang deskew is **never re-acquired** through thousands of Recovery/Hot Reset Training Sequences (fast reads during the
+loops: `aligned` 0 in 143/160, `deskew_loss` unchanged for seconds); every U0 entry then fires `lanes_deskew_lost`
+until a retrain (Acorn Warm Reset after ~2.36s, or Tang eSS.Inactive). Simulation (`--lane-slip 902000,1`, Host lane
+in U0 during the run): re-paired on the first Recovery, not reproduced. Next (t43): sticky deskew inputs flags
+(`deskew_seen`: per lane marker/error/partial COM words, gap, armed, overflow, aligned) read during a loop.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

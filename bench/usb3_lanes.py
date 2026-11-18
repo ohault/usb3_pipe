@@ -91,6 +91,12 @@ class USB3LanesClient:
             loss = self.reg("usb3_lanes_debug_deskew_loss").read()
             r["deskew_loss"] = [name for i, name in enumerate(["clear", "overflow", "mismatch",
                 "plain", "lane_idle", "realign", "debug_clear", "com_slip"]) if (loss >> i) & 1]
+        # Deskew inputs seen since the last deskew_seen_clear (builds since t43).
+        if hasattr(self.bus.regs, "usb3_lanes_debug_deskew_seen"):
+            seen = self.reg("usb3_lanes_debug_deskew_seen").read()
+            r["deskew_seen"] = [name for i, name in enumerate(["marker0", "marker1", "error0",
+                "error1", "partial0", "partial1", "gap0", "gap1", "armed", "overflow", "aligned"])
+                if (seen >> i) & 1]
         # U0 exit triggers (USB3PHYDebug, builds since t40): last exit and counts per trigger.
         if hasattr(self.bus.regs, "usb3_debug_u0_exit_cause"):
             from usb3_pipe.ltssm import U0_EXIT_CAUSES
@@ -129,6 +135,11 @@ class USB3LanesClient:
         # PHY/lanes counters (the PRBS counters are free running, see PRBSLinkTester).
         self.dbg.clear()
         self.reg("usb3_lanes_debug_clear").write(1)
+
+    def deskew_seen_clear(self):
+        # Deskew inputs seen (sticky flags, builds since t43): restart the observation.
+        if hasattr(self.bus.regs, "usb3_lanes_debug_deskew_seen_clear"):
+            self.reg("usb3_lanes_debug_deskew_seen_clear").write(1)
 
     def idle_recovery(self, enable=True):
         # Recovery on a lane in electrical idle in U0 at Gen 1x2 (debug: 0 disables).

@@ -168,6 +168,7 @@ class LaneDeskew(LiteXModule):
         # Input words registered with their marker/error flags (timing: the Symbol compares in their
         # own cycle, not before the FIFO write/gap counter; Tang Mega 138K Pro lanes clock, t16w).
         inputs = []
+        markers_in = []
         for lane in range(2):
             head      = Signal()
             gap_count = Signal(max=gap + 1)
@@ -218,7 +219,12 @@ class LaneDeskew(LiteXModule):
             error = Signal()
             self.comb += error.eq(valid_in & error_in & ~marker_in)
             errors.append(error)
+            markers_in.append(valid_in & marker_in)
         self.heads = heads
+        # Debug: per lane marker words / error words received, gap reached (one cycle each).
+        self.markers_in = markers_in
+        self.errors_in  = errors
+        self.gaps       = gaps
 
         # Search armed after a gap on both lanes (no marker in the FIFOs, dropped while searching),
         # first markers paired; aligned until the markers are no longer paired (second mismatch
@@ -239,6 +245,7 @@ class LaneDeskew(LiteXModule):
             overflow.eq(Reduce("OR", [inputs[n] & ~fifos[n].sink.ready for n in range(2)])),
             flush.eq(overflow & (armed | aligned)),
         ]
+        self.overflow = overflow # o: A word dropped (FIFO full, debug).
         unpaired = Signal()
         self.comb += unpaired.eq(pair_r & (head_r[0] != head_r[1]))
         self.sync += self.lost.eq(Mux(aligned, Cat(
