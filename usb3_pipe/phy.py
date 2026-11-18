@@ -1237,7 +1237,10 @@ class USB3PHY(LiteXModule):
                 out_mask[lane].eq(com | sub),
                 out_partial[lane].eq(deskew.sources[lane].valid & com_head & ((com | sub) != 0b1111)),
             ]
-        L.comb += self.lanes_com_slip.eq(x2 & deskew.aligned & (out_partial != 0) &
+        # Registered (timing: deskew FIFO outputs -> COM masks compare -> deskew clear -> aligned,
+        # 10 levels, Tang Mega 138K Pro lanes clock t37): the clear one cycle later (the word is
+        # corrupted anyway, Recovery).
+        L.sync += self.lanes_com_slip.eq(x2 & deskew.aligned & (out_partial != 0) &
             (out_mask[0] != out_mask[1]))
         self.lanes_idle_recovery    = Signal(reset=1) # i: Recovery on a lane idle (debug: 0 disables).
         self.lanes_realign_recovery = Signal(reset=1) # i: Recovery on a lane realigned in U0 (debug).

@@ -1255,6 +1255,11 @@ clock swings 85-125MHz from one small change to the next. Functionally, on the p
 (incl. 50 after 20s in U0), Gen 1x1 10/10, 0 errors, U0 in 7.51-7.54s on 16 loads; PRBS split p3 met, 5 loads x 3 Warm
 Resets clean. Open: some loads of the fix builds with many host Hot Resets (`resets_csr` 733-4872, t35 up to 213051;
 t31 max 277; every run passes): timing misses or behaviour, to separate on a met build.
+t37 (3eabff2, 9 builds p0-p4 x route options): best p2 99.7MHz; the worst path cell by cell: deskew FIFO output data ->
+COM masks of the deskewed words (`com_slip`) -> deskew clear -> `aligned` (10 levels, 68% routing): `com_slip` now
+registered. 100/100 runs on the p2 build (-2.03ns); the Hot Reset bursts (3 loads, 9472-53976): runs restarted every
+~30us for 0.2-0.8s, Tang Link Layer recovery causes 0, Acorn lanes counters ~100-200, ~1.5 Tang PHY Recoveries per Hot
+Reset: the Tang PHY directs them (the deskew logic failing timing is the likely source).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
