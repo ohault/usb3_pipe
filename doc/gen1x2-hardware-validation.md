@@ -1182,6 +1182,15 @@ median 0.93s, max 0.98s (t22 1.96s); Tang ~1 resync per training (Host PHY held 
 ways, 0 errors; Warm Reset from the Tang Host 15/15 (0.92s, 0 errors); x2 disabled at runtime 2/2 Gen 1x1 (~305MB/s, 0
 errors), back to x2 2/2. The Tang watchdog fired once per Acorn load (Polling.LFPS while the Acorn reloads): the
 watchdog no longer counts Polling.Entry/LFPS/LFPSPlus/ExitToRxDetect. `usb3_lanes.py prbs` MB/s per sample mode (x1).
+t25 (Tang Device 0629fed `--with-lanes-counters` p3 125.02MHz; Tang Host 47514a9 125.07MHz): Tang resync off, 10 loads x
+10 Warm Resets: 3/110 bad (G), PRBS lane check: clean 0 half markers; bad ~3.90 half markers, 0.008 lane1_late, 0
+lane1_early per packet: matches (generator model) **Lane 1 paired 4 lane words (one TS Ordered Set) early**, not one word;
+same offset in the 3 cases. Cause: Lane 1's first marker one TS later than Lane 0's (identical TS Ordered Sets: no mismatch
+while they last), the single mismatch at the end of the TS stream tolerated. Fix: a marker against a plain data word (no K
+Symbol: Logical Idle/TS body, not a corrupted marker) clears the pairing at once (`LaneDeskew`, re-armed on the gap: deskew
+lost, Recovery; `test_deskew_os_apart_end_of_stream`). Tang Host watchdog at 47514a9: 0 on 3 Acorn reloads, x2 at 8.0s.
+LiteX Gowin parser patch: clocks/Fmax/TNS/met identical to gowin_timing.py on 3 builds, WNS from the path list wrong (sys
+-> JTAG TCK paths first): WNS now from the per clock Fmax.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

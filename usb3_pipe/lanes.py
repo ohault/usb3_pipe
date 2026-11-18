@@ -101,7 +101,11 @@ class LaneDeskew(LiteXModule):
     gap), as clear (ex: a lane in electrical idle). A single mismatch is tolerated: the last markers of
     an Ordered Sets stream one word apart on the lanes (ex: a decode error substituted at the end of
     the TS2 Ordered Sets on one lane, Logical Idle after them: two Acorn Minis), the lanes still
-    paired.
+    paired; but not a marker against a plain data word (no K Symbol: Logical Idle or a TS body word,
+    not a corrupted marker): the lanes paired Ordered Sets apart, seen only at the end of the
+    Ordered Sets stream (identical TS Ordered Sets: Tang Mega 138K Pro Lane 1 paired one TS early,
+    every packet marker then split in U0, t25), the pairing is cleared (re-armed on the gap, deskew
+    lost: Recovery).
 
     The sinks are never held (continuous lanes streams, a held lane would overflow the SerDes RX
     buffers): words received with a full FIFO are dropped. A word dropped while armed (a lane held
@@ -216,6 +220,8 @@ class LaneDeskew(LiteXModule):
         # without paired markers in between).
         both     = Signal()
         mismatch = Signal()
+        plain    = [Signal(name=f"plain{n}") for n in range(2)] # Head word without K Symbol.
+        self.comb += [plain[n].eq(fifos[n].source.valid & (fifos[n].source.ctrl == 0)) for n in range(2)]
         overflow = Signal() # A word received with a full FIFO (dropped).
         self.comb += [
             both.eq(fifos[0].source.valid & fifos[1].source.valid),
@@ -238,7 +244,9 @@ class LaneDeskew(LiteXModule):
                     armed.eq(0)
                 )
             ).Elif(both & (heads[0] != heads[1]),
-                If(mismatch,
+                # Second mismatch, or a marker against a plain data word (no K Symbol: not a
+                # corrupted marker): the lanes are no longer paired / were paired Ordered Sets apart.
+                If(mismatch | (heads[0] & plain[1]) | (heads[1] & plain[0]),
                     aligned.eq(0)
                 ).Else(
                     mismatch.eq(1)

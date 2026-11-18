@@ -285,9 +285,34 @@ class TestLanes(unittest.TestCase):
             self.assertEqual(out, last + data, f"armed={armed}")
         lane0 = [self.stripe(w, 0) for w in [(0, 0)]*24 + first + idle + last + data]
         lane1 = garbage + [self.stripe(w, 1) for w in first[late:] + idle + last + data]
-        # Without the error Symbol check, the garbage is a gap: the lanes paired one Ordered Set apart.
+        # Without the error Symbol check, the garbage is a gap: the lanes paired one Ordered Set apart,
+        # seen at the end of the TS stream (a marker against Logical Idle): pairing cleared, the next
+        # TS paired.
         out = self.run_deskew([lane0, lane1], cycles=400)
-        self.assertNotEqual(out[-len(data):], data)
+        self.assertEqual(out[-len(last + data):], last + data)
+
+    def test_deskew_os_apart_end_of_stream(self):
+        # Lane 1 paired one TS Ordered Set early (its first marker lost without a decode error: Tang
+        # Mega 138K Pro, t25): identical TS Ordered Sets, no mismatch until the end of the stream, where
+        # Lane 0's last marker meets Lane 1's Logical Idle (plain data word): pairing cleared at once,
+        # re-armed on the gap (deskew lost, Recovery).
+        rng    = random.Random(9)
+        marker = (0xbcbcbcbcbcbcbcbc, 0xff)
+        def ts(n):
+            r = []
+            for _ in range(n):
+                r += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
+            return r
+        gap, first = [(0, 0)]*20, ts(8)
+        idle = [(rng.getrandbits(64), 0) for _ in range(40)]
+        lane0 = [self.stripe(w, 0) for w in gap + first + idle]
+        lane1 = [self.stripe(w, 1) for w in gap + [(0, 0)]*4 + first[4:] + idle + [(0, 0)]*4]
+        trace = self.run_deskew_aligned([lane0, lane1])
+        aligned = [a for a, _ in trace]
+        self.assertIn(1, aligned)                    # Paired (one Ordered Set apart).
+        lost = len(aligned) - aligned[::-1].index(1)
+        self.assertLess(lost, len(gap + first) + 8)  # Cleared at the end of the TS stream.
+        self.assertEqual(trace[-1], (0, 1))          # Re-armed on the gap.
 
     def test_deskew_first_com_errors_armed(self):
         # Search armed on a gap, the first COM Symbols of the first TS Ordered Set received as K28.4
