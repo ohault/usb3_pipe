@@ -23,6 +23,8 @@ Build: ./bench/sipeed_tang_mega_138k_pro.py --build [--example <name>]. Shared o
 bench/usb3_soc.py; bring-up options: --help.
 """
 
+import os
+import re
 import argparse
 
 import common # Repository root on the path.
@@ -836,6 +838,44 @@ class USB3X2SoC(USB3BaseSoC):
         if with_analyzer:
             self.analyzer = usb3_analyzer(self, analyzer_group, analyzer_csv)
 
+def gowin_fmax(gateware_dir):
+    """Gowin Max Frequency Summary: [(clock, constraint MHz, Fmax MHz)] from impl/pnr/project.tr or,
+    Gowin 1.9.12 tools, its HTML version (project_tr_content.html)."""
+    pnr = os.path.join(gateware_dir, "impl", "pnr")
+    for name in ["project.tr", "project_tr_content.html"]:
+        path = os.path.join(pnr, name)
+        if os.path.exists(path):
+            with open(path, errors="replace") as f:
+                text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", f.read()))
+            m = re.search(r"Max Frequency Summary:?(.*?)(Total Negative Slack|$)", text)
+            rows = re.findall(r"\d+ (\S+) ([\d.]+)\(MHz\) ([\d.]+)\(MHz\)", m.group(1) if m else "")
+            return [(c, float(a), float(b)) for c, a, b in rows]
+    return []
+
+def gowin_place_auto(soc, gateware_dir, first):
+    """Place and route again with the next place options until every clock meets its constraint."""
+    cwd = os.getcwd()
+    for option in [first] + [o for o in [2, 1, 0, 4] if o != first]:
+        if option != first:
+            print(f"--place-auto: place option {option}.")
+            os.chdir(gateware_dir)
+            try:
+                with open("run.tcl") as f:
+                    tcl = f.read()
+                with open("run.tcl", "w") as f:
+                    f.write(re.sub(r"set_option -place_option \d+", f"set_option -place_option {option}", tcl))
+                soc.platform.toolchain.run_script(None)
+            finally:
+                os.chdir(cwd)
+        clocks = gowin_fmax(gateware_dir)
+        for clock, constraint, fmax in clocks:
+            print(f"--place-auto: place option {option}: {clock} {fmax:.3f}MHz / {constraint:.3f}MHz.")
+        if clocks and all(fmax >= constraint for _, constraint, fmax in clocks):
+            print(f"--place-auto: timings met with place option {option}.")
+            return option
+    print("--place-auto: timings not met with any place option (last build kept).")
+    return None
+
 def main():
     parser = argparse.ArgumentParser(
         description="USB3-PIPE on the Sipeed Tang Mega 138K Pro (Gowin GW5AST-138B GTR12).")
@@ -857,6 +897,7 @@ def main():
     parser.add_argument("--with-gtr12-debug",    action="store_true", help="GTR12/PIPE bring-up debug (transitions, RX snapshots, SSP status).")
     parser.add_argument("--with-gtr12-analyzer", action="store_true", help="LiteScope Analyzer on the GTR12 raw RX words.")
     parser.add_argument("--place-option",   default=None, type=int, help="Gowin place algorithm (default: 3 for the --lanes 2 PRBS split builds, else 2).", choices=[0, 1, 2, 3, 4])
+    parser.add_argument("--place-auto",     action="store_true", help="With --build: after the build, place and route again with the next place options (2, 1, 0, 4) until every clock meets its constraint (Gowin Max Frequency Summary; the --lanes 2 builds meet 125MHz on some options only, varying with the design, t27).")
     parser.add_argument("--route-option",   default=1, type=int, help="Gowin route algorithm.", choices=[0, 1, 2])
     x2_group = parser.add_argument_group(title="Gen 1x2 (two lanes, SFP0/SFP1: two boards link tests, as bench/acorn.py --lanes 2)")
     x2_group.add_argument("--lanes",      default=1, type=int, help="Lanes: 1 (Gen 1x1, --sfp) or 2 (Gen 1x2, SFP0/SFP1, sys on the Lane 0 TX clock at 125MHz).", choices=[1, 2])
@@ -908,6 +949,8 @@ def main():
             lanes_counters  = args.with_lanes_counters,
             **usb3_args)
         usb3_soc_build(parser, args, soc)
+        if args.build and args.place_auto:
+            gowin_place_auto(soc, os.path.join(args.output_dir, "gateware"), args.place_option)
         return
     soc = USB3SoC(platform,
         sys_clk_freq        = args.sys_clk_freq,

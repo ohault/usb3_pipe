@@ -111,7 +111,8 @@ The `msc_dram` example is only available on the Acorn, the only target with a DR
 | `--lanes-core` | off | With `--lanes 2`: device core (device role) or scripted host (host role) instead of the PRBS stand-ins |
 | `--with-gtr12-debug` | off | GTR12 and PIPE bring-up debug |
 | `--with-gtr12-analyzer` | off | LiteScope on the raw GTR12 receive words |
-| `--place-option` | 2 | Gowin place algorithm: 0 to 4; 3 for the `--lanes 2` PRBS builds |
+| `--place-option` | 2 | Gowin place algorithm: 0 to 4; 3 for the `--lanes 2` split builds |
+| `--place-auto` | off | With `--build`: place and route again with the next place options until every clock meets its constraint (load the bitstream afterwards) |
 | `--route-option` | 1 | Gowin route algorithm: 0, 1 or 2 |
 
 With the default 62.5 MHz system clock, the link words are 2 at least and U1 and U2 are only built
