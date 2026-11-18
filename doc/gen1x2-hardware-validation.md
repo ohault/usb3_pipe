@@ -1199,6 +1199,10 @@ Warm Resets: **0/110 bad** (t25 3/110, t23 14/110), back to x2 U0 median 0.94s (
 Device deskew, 10 loads x 5 Warm Resets: x2 5/5 each, back in 0.94s each, 0 errors, Acorn resyncs in training 12 vs 28
 (pairings cleared and re-paired: no measurable cost). LiteX parser patch `wns` = min(1/constraint - 1/Fmax): +0.021,
 -2.001, -0.927ns on 3 builds, matching the worst lanes clock paths.
+t27 (final Acorn Host <-> Tang Device PRBS regression; Tang Device 64b1d9b: p3 101.9MHz (lane 1 RX clock crossing/
+descrambler -> PRBS checker, -1.8ns: placement, the same design met at p3 in t26), **p2 125.09MHz** used; Acorn Host
+4bf5263): 20/20 Acorn loads at x2 in 8.0s, first 10s 610MB/s each way, 0 errors, 0 resyncs; 5 Warm Resets on 4 loads 20/20
+back in 0.91-0.96s, 0 errors; 0/40 garbage/stuck. The Tang placement must be checked per build (p3 default, p2 fallback).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
