@@ -1535,13 +1535,24 @@ class USB3PHYX2Link(LiteXModule):
             ),
             # No back-pressure (timing: the FIFO ready not through the aligner/lanes datapath; words
             # received at the line rate): dropped (counted) when the FIFO is full.
-            rx_in.connect(rx_cdc.sink, omit={"ready"}),
             rx_in.ready.eq(1),
             rx_cdc.source.connect(rx),
         ]
+        # Registered FIFO input (timing: aligner output -> FIFO write Gray counter, Tang Mega 138K
+        # Pro lanes clock t34).
+        rx_reg = stream.Endpoint(link_pairs_layout())
+        sync_cd += [
+            rx_reg.valid.eq(rx_in.valid),
+            If(rx_in.valid,
+                rx_reg.first.eq(rx_in.first),
+                rx_reg.last.eq(rx_in.last),
+                rx_reg.payload.eq(rx_in.payload),
+            ),
+        ]
+        self.comb += rx_reg.connect(rx_cdc.sink, omit={"ready"})
         drop_cd     = Signal()
         overflow_cd = Signal()
-        self.comb += drop_cd.eq(rx_in.valid & ~rx_cdc.sink.ready)
+        self.comb += drop_cd.eq(rx_reg.valid & ~rx_cdc.sink.ready)
         sync_cd += If(drop_cd | rx_aligner.overflow, overflow_cd.eq(1))
         drop_ps = PulseSynchronizer(cd, "sys")
         self.submodules += drop_ps
