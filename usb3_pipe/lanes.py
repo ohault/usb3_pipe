@@ -155,7 +155,7 @@ class LaneDeskew(LiteXModule):
                 Reduce("AND", [m | e for m, e in zip(is_m, is_e)]) & Reduce("OR", is_m))
         # Marker flag computed on the sink side and stored with the word (timing: the heads are a
         # single FIFO output bit, not a word compare).
-        self.fifos = fifos = [ResetInserter()(stream.SyncFIFO(lane_layout() + [("marker", 1)], depth,
+        self.fifos = fifos = [ResetInserter()(stream.SyncFIFO(lane_layout() + [("marker", 1), ("plain", 1)], depth,
             buffered=True))
             for _ in range(2)]
         self.submodules += fifos
@@ -175,6 +175,7 @@ class LaneDeskew(LiteXModule):
             data_in   = Signal(len(sinks[lane].data))
             ctrl_in   = Signal(len(sinks[lane].ctrl))
             marker_in = Signal()
+            plain_in  = Signal()
             error_in  = Signal()
             self.comb += [
                 sinks[lane].ready.eq(1),
@@ -189,6 +190,7 @@ class LaneDeskew(LiteXModule):
                 data_in.eq(sinks[lane].data),
                 ctrl_in.eq(sinks[lane].ctrl),
                 marker_in.eq(marker_c),
+                plain_in.eq(sinks[lane].ctrl == 0),
                 error_in.eq(error_c),
             ]
             self.comb += [
@@ -196,6 +198,7 @@ class LaneDeskew(LiteXModule):
                 fifos[lane].sink.data.eq(data_in),
                 fifos[lane].sink.ctrl.eq(ctrl_in),
                 fifos[lane].sink.marker.eq(marker_in),
+                fifos[lane].sink.plain.eq(plain_in),
                 head.eq(fifos[lane].source.valid & fifos[lane].source.marker),
             ]
             inputs.append(valid_in)
@@ -220,8 +223,9 @@ class LaneDeskew(LiteXModule):
         # without paired markers in between).
         both     = Signal()
         mismatch = Signal()
-        plain    = [Signal(name=f"plain{n}") for n in range(2)] # Head word without K Symbol.
-        self.comb += [plain[n].eq(fifos[n].source.valid & (fifos[n].source.ctrl == 0)) for n in range(2)]
+        # Head word without K Symbol (flag stored with the word, timing: Tang Mega 138K Pro lanes clock).
+        plain    = [Signal(name=f"plain{n}") for n in range(2)]
+        self.comb += [plain[n].eq(fifos[n].source.valid & fifos[n].source.plain) for n in range(2)]
         overflow = Signal() # A word received with a full FIFO (dropped).
         self.comb += [
             both.eq(fifos[0].source.valid & fifos[1].source.valid),
