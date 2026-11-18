@@ -1203,6 +1203,10 @@ t27 (final Acorn Host <-> Tang Device PRBS regression; Tang Device 64b1d9b: p3 1
 descrambler -> PRBS checker, -1.8ns: placement, the same design met at p3 in t26), **p2 125.09MHz** used; Acorn Host
 4bf5263): 20/20 Acorn loads at x2 in 8.0s, first 10s 610MB/s each way, 0 errors, 0 resyncs; 5 Warm Resets on 4 loads 20/20
 back in 0.91-0.96s, 0 errors; 0/40 garbage/stuck. The Tang placement must be checked per build (p3 default, p2 fallback).
+t28 (Tang Gen 1x2 Device Core split, 297761a): lanes clock 68.8MHz (p3) / 46.5MHz (p2) for 125MHz, all worst paths in
+`LanesPacketAligner` (buffer level -> symbol destinations -> 32-symbol buffer write in one cycle, 9-11 levels, -6.5ns):
+not run on hardware; the aligner needs a redesign for the GW5A. Acorn scripted host build met (+0.239ns). `--place-auto`
+works (reports matched gowin_timing.py); it now stops when a clock is below 90% of its constraint.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

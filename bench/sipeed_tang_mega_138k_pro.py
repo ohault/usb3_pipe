@@ -873,6 +873,10 @@ def gowin_place_auto(soc, gateware_dir, first):
         if clocks and all(fmax >= constraint for _, constraint, fmax in clocks):
             print(f"--place-auto: timings met with place option {option}.")
             return option
+        if any(fmax < 0.9*constraint for _, constraint, fmax in clocks):
+            # Beyond what another placement recovers (t28: 68.8MHz for 125MHz, ~1h per run).
+            print("--place-auto: a clock below 90% of its constraint: design timing, not placement, stopped.")
+            return None
     print("--place-auto: timings not met with any place option (last build kept).")
     return None
 
