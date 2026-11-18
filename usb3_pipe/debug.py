@@ -516,7 +516,8 @@ class LanesTrainingWatchdog(LiteXModule):
     did not recover them (t17).
 
     The watchdog counts the time (tick_cycles sys cycles per ms) spent in the training states
-    (Polling, Recovery, Hot Reset, eSS.Inactive: a link partner present, not Rx.Detect) since the last
+    (Polling past the LFPS handshake, Recovery, Hot Reset, eSS.Inactive: a link partner present, not
+    Rx.Detect nor Polling.Entry/LFPS/LFPSPlus/ExitToRxDetect: a partner reloading its bitstream, t24) since the last
     stable U0 (U0 held u0_stable_ms: the failing link passes through U0 ~65 times per second, t17).
     After timeout_ms of it (timeout CSR, runtime: 0 disables), it pulses reinit (one sys cycle), then
     after warm_delay_ms (transceivers initialization) requests a Warm Reset (warm_reset_req, Host:
@@ -540,7 +541,8 @@ class LanesTrainingWatchdog(LiteXModule):
         warm      = Signal()
         self.comb += [
             training.eq(Reduce("OR", [phy.ltssm_state == value for name, value in
-                states.items() if name.split(".")[0] in ["Polling", "Recovery", "HotReset", "eSS"]])),
+                states.items() if (name.split(".")[0] in ["Polling", "Recovery", "HotReset", "eSS"]) and
+                (name not in ["Polling.Entry", "Polling.LFPS", "Polling.LFPSPlus", "Polling.ExitToRxDetect"])])),
             warm.eq(phy.ltssm_state == states["WarmReset"]) if "WarmReset" in states else warm.eq(0),
         ]
         tick    = Signal()

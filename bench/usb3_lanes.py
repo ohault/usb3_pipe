@@ -386,12 +386,16 @@ def main():
         recovery = lanes.dbg.status()["recovery"]
         x2       = lanes.status()["x2"]
         word_bytes = PRBS_WORD_BYTES[x2] # Counters of the negotiated mode.
+        tx_bytes = rx_bytes = 0
         while time.time() - start < args.duration:
             time.sleep(args.period)
             t     = time.time()
             prbs  = lanes.prbs()
             delta = counters_delta(prbs, last)
+            word_bytes = PRBS_WORD_BYTES[lanes.status()["x2"]] # Mode may change (x2-disable/retrain).
             total = {k: total[k] + delta[k] for k in total}
+            tx_bytes += delta["tx_words"]*word_bytes
+            rx_bytes += delta["rx_words"]*word_bytes
             last  = prbs
             print(json.dumps({
                 "time_s"       : round(t - start, 1),
@@ -406,13 +410,13 @@ def main():
         status  = lanes.status()
         print(json.dumps({
             "duration_s"   : round(elapsed, 1),
-            "tx_bytes"     : total["tx_words"]*word_bytes,
-            "rx_bytes"     : total["rx_words"]*word_bytes,
+            "tx_bytes"     : tx_bytes,
+            "rx_bytes"     : rx_bytes,
             "rx_packets"   : total["rx_packets"],
             "rx_errors"    : total["rx_errors"],
             "rx_resyncs"   : total.get("rx_resyncs"),
             **{k: total[k] for k in ["rx_half_markers", "rx_lane1_late", "rx_lane1_early"] if k in total},
-            "rx_MBps"      : round(total["rx_words"]*word_bytes/elapsed/1e6, 1),
+            "rx_MBps"      : round(rx_bytes/elapsed/1e6, 1),
             "recoveries"   : status["recovery_count"] - recovery,
             "x2"           : status["x2"],
         }))

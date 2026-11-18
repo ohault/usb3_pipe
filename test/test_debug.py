@@ -518,7 +518,7 @@ class TestLanesTrainingWatchdog(unittest.TestCase):
         # Training loop (Polling/eSS.Inactive, Rx.Detect visits not counted, brief U0 visits not
         # clearing the training time) without a stable U0: a re-initialization per 5ms (20 cycles) of
         # training time, each followed by a Warm Reset request ~2ms (8 cycles) later.
-        loop = [("Polling.LFPS", 8), ("U0", 2), ("Polling.RxEQ", 4), ("eSS.Inactive", 4),
+        loop = [("Polling.LFPS", 8), ("Polling.RxEQ", 8), ("U0", 2), ("Polling.RxEQ", 4), ("eSS.Inactive", 4),
             ("Rx.Detect.Quiet", 30)]
         out = self.run_watchdog(loop*12, warm_ack=True)
         self.assertGreaterEqual(out["count"], 3)
@@ -529,17 +529,19 @@ class TestLanesTrainingWatchdog(unittest.TestCase):
 
     def test_warm_request_bounded(self):
         # No WarmReset entry: the request is held warm_max_ms (4ms, 16 cycles) at most.
-        out = self.run_watchdog([("Polling.LFPS", 60)])
+        out = self.run_watchdog([("Polling.RxEQ", 60)])
         self.assertEqual(out["count"], 1)
         self.assertTrue(12 <= out["warm_cycles"] <= 20, out["warm_cycles"])
 
     def test_u0_reached(self):
         # Stable U0 reached within the timeout: no re-initialization (the training time restarts).
-        out = self.run_watchdog([("Polling.LFPS", 16), ("U0", 40), ("Recovery.Active", 16), ("U0", 40)]*3)
+        out = self.run_watchdog([("Polling.RxEQ", 16), ("U0", 40), ("Recovery.Active", 16), ("U0", 40)]*3)
         self.assertEqual(out["count"], 0)
 
     def test_no_partner_disabled(self):
-        # Rx.Detect only (no link partner), U3: no re-initialization; timeout 0: disabled.
-        self.assertEqual(self.run_watchdog([("Rx.Detect.Quiet", 400), ("U3", 400)])["count"], 0)
-        out = self.run_watchdog([("Polling.LFPS", 400)], timeout_ms=0)
+        # Rx.Detect only (no link partner), Polling.LFPS (a partner reloading its bitstream, t24), U3:
+        # no re-initialization; timeout 0: disabled.
+        self.assertEqual(self.run_watchdog([("Rx.Detect.Quiet", 400), ("Polling.LFPS", 400),
+            ("U3", 400)])["count"], 0)
+        out = self.run_watchdog([("Polling.RxEQ", 400)], timeout_ms=0)
         self.assertEqual((out["count"], out["warm_cycles"]), (0, 0))

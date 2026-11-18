@@ -1174,6 +1174,14 @@ lane word apart?). PRBS lane check added for the diagnosis builds (`--with-lanes
 `rx_lane1_late`, `rx_lane1_early`: a packet marker on a single lane, then on the other lane the next word).
 Gowin 1.9.12.02 SP2 timing report: `impl/pnr/project.tr.html` is a frameset, the data is in `project_tr_content.html`
 (HTML tables; the setup path list starts with sys -> JTAG TCK crossings of negative slack while the per clock TNS is 0).
+t24 (28b0d99, all builds met: Tang Device split 125.34MHz / sys 71.4MHz, Tang Host split 125.14 / 70.6MHz, Acorn Host
+WNS +0.269ns, Acorn Device +0.169ns): A. Acorn Host <-> Tang Device, 5 loads x 10 Warm Resets, resync on both: 0/55
+garbage/stuck; first window ignored (db8a95e): Acorn resyncs 11/50 trainings, 21 in all (t22: 54/100, 218), back to x2 U0
+median 0.93s, max 0.98s (t22 1.96s); Tang ~1 resync per training (Host PHY held in reset 1s: no words in U0, harmless).
+**B. Tang Host <-> Acorn Device at Gen 1x2**: 10/10 Acorn loads (Tang loaded 3 times) x2 U0 in 8.0s, first 10s 610MB/s both
+ways, 0 errors; Warm Reset from the Tang Host 15/15 (0.92s, 0 errors); x2 disabled at runtime 2/2 Gen 1x1 (~305MB/s, 0
+errors), back to x2 2/2. The Tang watchdog fired once per Acorn load (Polling.LFPS while the Acorn reloads): the
+watchdog no longer counts Polling.Entry/LFPS/LFPSPlus/ExitToRxDetect. `usb3_lanes.py prbs` MB/s per sample mode (x1).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
