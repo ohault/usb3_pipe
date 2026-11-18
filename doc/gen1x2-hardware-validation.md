@@ -1260,6 +1260,11 @@ COM masks of the deskewed words (`com_slip`) -> deskew clear -> `aligned` (10 le
 registered. 100/100 runs on the p2 build (-2.03ns); the Hot Reset bursts (3 loads, 9472-53976): runs restarted every
 ~30us for 0.2-0.8s, Tang Link Layer recovery causes 0, Acorn lanes counters ~100-200, ~1.5 Tang PHY Recoveries per Hot
 Reset: the Tang PHY directs them (the deskew logic failing timing is the likely source).
+**t38 (c260fd2): Tang Gen 1x2 Device Core met** (p2 route 1: lanes 125.09MHz, sys 63.55MHz; p2 route 0 125.05MHz; p3
+119.7, p4 99.0, p1 92.7, p0 82.3MHz; worst lanes paths +0.006ns: Link TX buffer -> SerDes 1 TX, SerDes RX CDC outputs).
+**Acorn scripted host <-> Tang Device Core: Gen 1x2 110/110 runs, Gen 1x1 10/10, 0 errors, host Hot Resets per load
+10-43** (the t35-t37 bursts came with the timing misses); one run 181ms (eSS.Inactive, Polling retrains, completed).
+PRBS split p3 met (125.16MHz): 5 loads x 3 Warm Resets clean.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
