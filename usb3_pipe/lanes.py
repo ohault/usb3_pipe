@@ -132,6 +132,8 @@ class LaneDeskew(LiteXModule):
         self.aligned = aligned = Signal() # o
         self.armed   = armed   = Signal() # o: Search armed (gap seen, pairing on the next markers).
         self.clear   = Signal()           # i: Pairing cleared (search re-armed on the next gap).
+        self.lost    = Signal(4)          # o: Pairing lost (debug, registered, one cycle): clear,
+                                          #    overflow, second mismatch, marker vs plain data word.
 
         # # #
 
@@ -237,6 +239,14 @@ class LaneDeskew(LiteXModule):
             overflow.eq(Reduce("OR", [inputs[n] & ~fifos[n].sink.ready for n in range(2)])),
             flush.eq(overflow & (armed | aligned)),
         ]
+        unpaired = Signal()
+        self.comb += unpaired.eq(pair_r & (head_r[0] != head_r[1]))
+        self.sync += self.lost.eq(Mux(aligned, Cat(
+            self.clear,
+            overflow & ~self.clear,
+            unpaired & mismatch & ~self.clear & ~overflow,
+            unpaired & ~mismatch & ((head_r[0] & plain_r[1]) | (head_r[1] & plain_r[0])) &
+                ~self.clear & ~overflow), 0))
         self.sync += [
             If(self.clear | (overflow & (armed | aligned)),
                 aligned.eq(0),

@@ -86,6 +86,11 @@ class USB3LanesClient:
             "rx_idle_raw_u0_cycles"]]:
             if hasattr(self.bus.regs, f"usb3_lanes_debug_{name}_count"):
                 r[name] = self.reg(f"usb3_lanes_debug_{name}_count").read()
+        # Last deskew pairing loss (builds since t41).
+        if hasattr(self.bus.regs, "usb3_lanes_debug_deskew_loss"):
+            loss = self.reg("usb3_lanes_debug_deskew_loss").read()
+            r["deskew_loss"] = [name for i, name in enumerate(["clear", "overflow", "mismatch",
+                "plain", "lane_idle", "realign", "debug_clear", "com_slip"]) if (loss >> i) & 1]
         # U0 exit triggers (USB3PHYDebug, builds since t40): last exit and counts per trigger.
         if hasattr(self.bus.regs, "usb3_debug_u0_exit_cause"):
             from usb3_pipe.ltssm import U0_EXIT_CAUSES

@@ -1274,6 +1274,14 @@ host takes it as a U0 exit and restarts the run with a new Hot Reset (2 Acorn Re
 Recovery timeout (12ms Acorn/6ms Tang) -> eSS.Inactive -> 1-3 Polling retrains. Tang Link Layer at Gen 1x2:
 `pending_hp` only, 0-4 per load (26, 69, 552 on three loads). Gen 1x1 (open): Tang Link 3085-18379 `pending_hp`
 and 53-122 `lcrd` Recoveries per load (Acorn <-> Acorn: ~20), runs still pass at normal times.
+**t40 (63847af, U0 exit triggers on both boards; Tang p2 r1 met 125.01MHz): Gen 1x2 400/400, Gen 1x1 80/80, 0
+errors.** Hot Reset loops on 6/20 loads (resets 174216-808302): **the Tang starts them with `lanes_deskew_lost`**
+(saturated on every loop load, >= 1 per loop) right after `HotReset.Exit -> U0`; the Acorn exits are `ts1` (the Tang
+Recovery) and `hot_reset_req` (scripted host run restart); Tang Link `directed` 0-1 on loop loads. Loops end only on a
+retrain (Tang eSS.Inactive, Acorn WarmReset/Polling), 1.6-4.7s per looping run. Clean loads: occasional Tang deskew
+lost or Link `pending_hp` Recoveries, single. Gen 1x1: ~1000-1750 Tang Link Layer Recoveries per run (`directed` =
+`pending_hp` ~99% + `lcrd`), no lanes trigger, no loop: a Tang Device Core Link issue at Gen 1x1 (open). Next: the
+deskew loss reason on the Tang (`deskew_loss`, t41).
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement

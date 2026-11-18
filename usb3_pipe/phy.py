@@ -1270,6 +1270,18 @@ class USB3PHY(LiteXModule):
             deskew.clear.eq((lanes_idle & idle_recovery) | self.lanes_realign |
                 deskew_clear | (self.lanes_com_slip & com_recovery)),
         ]
+        # Last deskew pairing loss (debug, lanes clock, held until the next one): LaneDeskew lost
+        # reasons (bits 0-3: clear, overflow, second mismatch, marker vs plain data word) and the
+        # clear sources (bits 4-7: lane idle, lane realigned in U0, debug clear, COM slip).
+        self.lanes_deskew_loss = Signal(8) # o
+        clear_src = Signal(4)
+        L.sync += [
+            clear_src.eq(Cat(lanes_idle & idle_recovery, self.lanes_realign, deskew_clear,
+                self.lanes_com_slip & com_recovery)),
+            If(deskew.lost != 0,
+                self.lanes_deskew_loss.eq(Cat(deskew.lost, Mux(deskew.lost[0], clear_src, 0))),
+            ),
+        ]
 
         # RX: Gen 1x1 (Lane 0) ---------------------------------------------------------------------
         # Framing alignment of the Lane 0 words (as USB3PIPE in Gen 1x1, words shifted by the SKP

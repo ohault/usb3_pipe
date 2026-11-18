@@ -202,7 +202,9 @@ class TestLanes(unittest.TestCase):
                 yield dut.sources[lane].ready.eq(1)
             for _ in range(max(len(l) for l in lanes) + 16):
                 trace.append(((yield dut.aligned), (yield dut.armed)))
+                self.lost.append((yield dut.lost))
                 yield
+        self.lost = [] # Pairing loss reasons per cycle (LaneDeskew.lost).
         run_simulation(dut, [lane_gen(dut, 0), lane_gen(dut, 1), checker(dut)])
         return trace
 
@@ -225,6 +227,7 @@ class TestLanes(unittest.TestCase):
         lane1 = [self.stripe(w, 1) for w in gap + first + last + idle]
         trace = self.run_deskew_aligned([lane0, lane1])
         self.assertEqual(trace[-1][0], 1)
+        self.assertEqual(set(self.lost), {0})        # No pairing loss.
         self.assertEqual(self.run_deskew([lane0, lane1])[-len(idle):], idle)
 
     def test_deskew_late_lane_overflow(self):
@@ -313,6 +316,7 @@ class TestLanes(unittest.TestCase):
         lost = len(aligned) - aligned[::-1].index(1)
         self.assertLess(lost, len(gap + first) + 8)  # Cleared at the end of the TS stream.
         self.assertEqual(trace[-1], (0, 1))          # Re-armed on the gap.
+        self.assertEqual([l for l in self.lost if l], [0b1000]) # Lost once: marker vs plain word.
 
     def test_deskew_first_com_errors_armed(self):
         # Search armed on a gap, the first COM Symbols of the first TS Ordered Set received as K28.4

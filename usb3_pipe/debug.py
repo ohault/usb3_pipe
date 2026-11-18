@@ -324,6 +324,20 @@ class USB3LanesDebug(LiteXModule):
             self._status.fields.rx_polarity.eq(level(Cat(*[s.rx_polarity for s in serdes]))),
         ]
 
+        # Last deskew pairing loss (USB3PHY lanes_deskew_loss, held until the next one).
+        if hasattr(phy, "lanes_deskew_loss"):
+            self._deskew_loss = CSRStatus(fields=[
+                CSRField("clear",       size=1, offset=0, description="Pairing cleared (clear sources: bits 4-7)."),
+                CSRField("overflow",    size=1, offset=1, description="Deskew FIFO overflow (lanes skewed beyond the FIFOs)."),
+                CSRField("mismatch",    size=1, offset=2, description="Second marker mismatch (lanes no longer paired)."),
+                CSRField("plain",       size=1, offset=3, description="Marker against a plain data word (lanes paired Ordered Sets apart)."),
+                CSRField("lane_idle",   size=1, offset=4, description="Clear: lane in electrical idle (10us)."),
+                CSRField("realign",     size=1, offset=5, description="Clear: lane realigned in U0 (comma realignment, RX re-initialization, odd SKP run)."),
+                CSRField("debug_clear", size=1, offset=6, description="Clear: debug/simulation clear."),
+                CSRField("com_slip",    size=1, offset=7, description="Clear: partial COM word, deskewed lanes disagreeing."),
+            ], description="Last deskew pairing loss (held until the next one).")
+            self.comb += self._deskew_loss.status.eq(level(phy.lanes_deskew_loss))
+
         if hasattr(phy, "lanes_idle_recovery"):
             self.comb += phy.lanes_idle_recovery.eq(self._control.fields.idle_recovery)
         if hasattr(phy, "lanes_realign_recovery"):
