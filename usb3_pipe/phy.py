@@ -1302,8 +1302,22 @@ class USB3PHY(LiteXModule):
 
         # RX: Gen 1x1 (Lane 0) ---------------------------------------------------------------------
         # Framing alignment of the Lane 0 words (as USB3PIPE in Gen 1x1, words shifted by the SKP
-        # Ordered Sets removal), output gated by rx_ready.
+        # Ordered Sets removal), output gated by rx_ready, and kept until U0 (rx_keep) from the
+        # partner's first Logical Idle word in the Idle handshake states, as at Gen 1x2: after a Hot
+        # Reset the partner can enter U0 first and send its Advertisement at once (LGOOD_n and
+        # LCRD_A-D: the first ones dropped, a Link Layer Recovery on the out of order LCRD/LGOOD or
+        # the PENDING_HP_TIMER; Gen 1x1 Recovery storm with the Tang Mega 138K Pro Device, whose
+        # LTSSM at half the lanes clock enters U0 ~30 cycles after the Host).
         framing_aligner = self.lanes_add("framing_aligner", RXWordAligner(markers=[SHP, SDP, SLC]))
+        rx_keep_open_x1 = Signal()
+        rx_pass_x1      = Signal()
+        L.sync += If(~ltssm.rx_keep,
+            rx_keep_open_x1.eq(0)
+        ).Elif(framing_aligner.source.valid & (framing_aligner.source.data == 0) &
+            (framing_aligner.source.ctrl == 0),
+            rx_keep_open_x1.eq(1)
+        )
+        L.comb += rx_pass_x1.eq(ltssm.rx_ready | (ltssm.rx_keep & rx_keep_open_x1))
         L.comb += [
             If(x2,
                 pipes[0].source.connect(deskew.sinks[0]),
@@ -1311,8 +1325,8 @@ class USB3PHY(LiteXModule):
                 pipes[0].source.connect(framing_aligner.sink),
             ),
             framing_aligner.source.connect(source_x1, omit={"valid", "ready"}),
-            source_x1.valid.eq(framing_aligner.source.valid & ltssm.rx_ready & ~x2),
-            framing_aligner.source.ready.eq(source_x1.ready | ~ltssm.rx_ready | x2),
+            source_x1.valid.eq(framing_aligner.source.valid & rx_pass_x1 & ~x2),
+            framing_aligner.source.ready.eq(source_x1.ready | ~rx_pass_x1 | x2),
         ]
 
 # USB3 PHY Gen 1x1 Link Interface (Gen 1x2 PHY) ----------------------------------------------------

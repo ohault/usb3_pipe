@@ -357,7 +357,8 @@ Tang Mega 138K Pro the deskew then never paired again until a retrain). A word e
 K28.4 symbols, followed by a word starting with the other COM symbols, moves the alignment back.
 A lane that keeps decoding errors is re-initialized. On Gen 1x2, the receive words are
 also kept for the link layer in Polling.Idle and HotReset.Exit until U0 (as in Recovery.Idle):
-the partner can enter U0 first and send its advertisement at once. The transmit words are dropped
+the partner can enter U0 first and send its advertisement at once. The same applies at Gen 1x1 on the
+configuration lane. The transmit words are dropped
 out of U0, so nothing held from before a Recovery is sent ahead of the next advertisement.
 
 The device finds which receiver gets the configuration lane from the partner's Polling LFPS and

@@ -485,6 +485,18 @@ class TestPHYX2Core(unittest.TestCase):
         # packets stored and forwarded, no Logical Idle inside a packet).
         self.run_sim("core_x2_dev_pipe_cd_x1", ["--dev-mode", "x1", "--dev-pipe-cd"])
 
+    def test_core_x2_dev_pipe_cd_x2_disable_host_script(self):
+        # Gen 1x1 negotiated by an x2 capable split Device (x2 disabled at runtime) with the hardware
+        # scripted host: after the run's Hot Reset the Host enters U0 ~30 cycles before the Device
+        # and sends its Advertisement at once. The Gen 1x1 RX words are kept from the Host's first
+        # Logical Idle word (rx_keep, as at Gen 1x2): no Device Link Layer Recovery (without it:
+        # LCRD_C first, out of order, a Recovery after each Hot Reset: the Gen 1x1 Recovery storm of
+        # the Tang Mega 138K Pro Device Core on hardware).
+        out = self.run_sim("core_x2_dev_pipe_cd_x2_disable_host_script", ["--dev-pipe-cd",
+            "--dev-x2-disable", "--host-script", "2000"])
+        self.assertRegex(out, r"HOST\s*entering HotReset.Active state")
+        self.assertNotIn("DEV  Link Layer Recovery request", out)
+
     def test_core_x2_crossed(self):
         # Gen 1x2 with a flipped USB Type-C plug (lanes swap).
         out = self.run_sim("core_x2_crossed", ["--dev-mode", "x2", "--lanes-crossed"])

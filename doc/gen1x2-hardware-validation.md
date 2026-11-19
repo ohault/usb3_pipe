@@ -1350,6 +1350,14 @@ burst (the search kept armed through the K28.4 words, both lanes' markers paired
 Gen 1x1 40/40 (one load back at Gen 1x1 in 7.34s after x2-disable instead of ~0.65s: not investigated). PRBS 18/18 Warm
 Resets in 1.08-1.11s, 0 errors, 610MB/s.
 
+**Gen 1x1 Recovery storm (Tang Device Core, ~700-1750 Link Layer Recoveries per run since t40): reproduced in
+simulation** (`sim.py --lanes 2 --lanes-core --dev-pipe-cd --dev-x2-disable --host-script 2000`: 4 Device Link Layer
+Recovery requests, cause LCRD out of order, 0 at Gen 1x2). After the run's Hot Reset the Host enters U0 ~30 cycles
+before the split Device and sends its Advertisement at once; the Gen 1x1 RX words on the Configuration Lane were
+passed only in U0 (the `rx_keep` of the Gen 1x2 path missing there): `LGOOD_n`/`LCRD_A`/`LCRD_B` dropped, `LCRD_C`
+first, Recovery, again after each re-entry. Fix: the same `rx_keep` rule on the Gen 1x1 path
+(`test_core_x2_dev_pipe_cd_x2_disable_host_script`). Hardware A/B in t50.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits
