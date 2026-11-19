@@ -1370,6 +1370,14 @@ Gen 1x2 on the same pair 0 (Hot Reset Recoveries only). 32b2eae Tang Device Core
 X1 FIFO/TX paths). Fix: idle compare and `rx_pass_x1` registered (one word later, within the partner's Logical
 Idle). A/B in t51.
 
+**t51 (c2dadeb Tang Device Core p2 r1 met, lanes 125.01MHz, sys 63.29MHz; p4 r1 109.0MHz): Gen 1x1 Recovery storm
+fixed.** A/B alternating, Acorn scripted Host (t49, x2 disabled) <-> Tang Device Core, 4 loads x 20 runs each: A (t49
+Device) 80/80 runs, resets 81-93 per load, Tang Recoveries 13482-44807 per load (`pending_hp` 97150, `lcrd` 735 in all);
+**B (c2dadeb) 80/80 runs, 20 resets and 40 Recoveries per load (1 Hot Reset and 2 Recoveries per run, the floor), no Link
+Layer Recovery cause**. Return to Gen 1x1 after `x2-disable`: B 0.67s on every load, A 0.67-5.68s (the t49 7.34s return
+was this storm). Gen 1x2 regression with B: 40/40 runs, 0 errors, 20 resets per load (load 2: 32 Tang deskew lost
+Recoveries cleared without extra Hot Resets, 3 `pending_hp` with them).
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits
