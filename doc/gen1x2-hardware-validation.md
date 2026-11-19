@@ -1390,6 +1390,22 @@ Gray counter (lanes side), lane 0 RX CDC -> word aligner input buffer and the pa
 routing; the script/noise monitor/CSR paths no longer among them. Acorn Device Core met (+0.244ns). t52b: functional
 run with the gate waived + leaner Tang Host builds.
 
+**t52b (979b153): Tang scripted Host <-> Acorn Device Core, the last pairing, 420/420 runs, 0 errors.** Tang Host builds
+without `--with-deskew-trace`/`--with-clk-meters`: p3 r1 met 125.575MHz (+0.037ns), p3 r0 met 125.081MHz, p2 r1
+118.6MHz (sys 69-73MHz met). Met p3 r1: Gen 1x2 200/200 on 10 loads (resets 22-37 per load, median 28; Acorn Device
+`pending_hp` 2-78 per load, no other cause), Gen 1x1 80/80 on 4 loads (20 resets per load, no Link cause, return to
+Gen 1x1 0.66-0.69s). Met p3 r0: Gen 1x2 100/100 on 5 loads. Gate waived (t52 p3 r1, -0.27ns): Gen 1x2 100/100, Gen 1x1
+40/40. The Gen 1x2 noise follows the Acorn Device load (noisy loads 27-37 resets and 23-43 Tang Host deskew losses,
+quiet loads 20-22 and 1-4; changes only on an Acorn reload: the t12/t13 transceivers start-up draw, here seen by the
+Tang receiver). Each Tang Host deskew loss is the t48/t49 pairing loss mid TS burst (lane 0 COM word against a lane 1
+TS body word, deskew trace of the gate-waived build), re-paired ~130 cycles later (no loop); the Acorn Device follows
+with 1-2 `pending_hp` Recoveries per loss (bursts of ~650 in one run on the gate-waived build, no failed run). Runs
+~86ms (polling over the Tang JTAG, ~47ms with the Acorn Host).
+
+**All four Gen 1x2 pairings validated on hardware with the Device Core and the scripted host**: Acorn <-> Acorn (t8+),
+Acorn Host <-> Tang Device (t49/t51), Tang Host <-> Acorn Device (t52b), both at Gen 1x2 and Gen 1x1. Open: the
+lanes pairing loss mid TS burst (both receivers: Tang Device t49, Tang Host t52b), now recovered without a loop.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits
