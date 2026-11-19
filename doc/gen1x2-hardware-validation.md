@@ -1305,6 +1305,12 @@ shortened-run rule (t8) keeps: lane 1 stays k Symbols off, its COM words partial
 disarm, no whole marker on lane 1). Fix: the aligner output pattern (a word ending with k K28.4, then a word starting
 with 4-k COM Symbols) moves the alignment back k Symbols (`test_rx_word_aligner_escapes_shift_kept_on_com_errors`).
 
+**t44 (8ef1a79): no Tang Device Core build met timing** (p2 r1 98.9MHz, p3 r1 107.5MHz, p2 r0/p4 r1 worse; PRBS
+split p3 113.8MHz): the worst paths end at the new aligner features (`trail_r`/`lead_r`, -0.8 to -2.1ns: alignment
+selection -> output Symbol compares). The soak on the missed p3 r1 build shows long loops on loads 1, 3 and 4
+(168k-252k resets): no verdict on the fix with a failing build. Change: the aligner output word registered before the
+features, the correction two words later (still in the TS body). Next (t45): rebuild, soak.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits

@@ -301,17 +301,20 @@ class RXWordAligner(LiteXModule):
             )
         )
 
-        # Wrong alignment kept on shortened COM runs (see above): output words features registered
-        # (timing), the correction one word later.
+        # Wrong alignment kept on shortened COM runs (see above): the output word registered first
+        # (timing: the alignment selection to the Symbol compares was the Tang lanes clock worst path),
+        # its features registered, the correction two words later (in the TS body).
         if ordered_sets:
             out_ok   = Signal()
-            trail    = Signal(2) # K28.4 Symbols ending the output word (1-2, else 0).
-            lead     = Signal(3) # COM Symbols starting the output word, then another Symbol (2-3).
+            out_data = Signal(32)
+            out_ctrl = Signal(4)
+            trail    = Signal(2) # K28.4 Symbols ending the word (1-2, else 0).
+            lead     = Signal(3) # COM Symbols starting the word, then another Symbol (2-3).
             trail_r  = Signal(2)
             trail_rr = Signal(2)
             lead_r   = Signal(3)
             fix      = Signal()
-            sym_is   = lambda i, v: source.ctrl[i] & (source.data[8*i:8*(i+1)] == v.value)
+            sym_is   = lambda i, v: out_ctrl[i] & (out_data[8*i:8*(i+1)] == v.value)
             self.comb += [
                 out_ok.eq(source.valid & source.ready),
                 If(sym_is(3, SUB) & sym_is(2, SUB) & ~sym_is(1, SUB) & ~sym_is(1, COM),
@@ -328,6 +331,8 @@ class RXWordAligner(LiteXModule):
             ]
             self.sync += [
                 If(out_ok,
+                    out_data.eq(source.data),
+                    out_ctrl.eq(source.ctrl),
                     trail_r.eq(trail),
                     trail_rr.eq(trail_r),
                     lead_r.eq(lead),
