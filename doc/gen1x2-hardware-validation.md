@@ -1378,6 +1378,14 @@ Layer Recovery cause**. Return to Gen 1x1 after `x2-disable`: B 0.67s on every l
 was this storm). Gen 1x2 regression with B: 40/40 runs, 0 errors, 20 resets per load (load 2: 32 Tang deskew lost
 Recoveries cleared without extra Hot Resets, 3 `pending_hp` with them).
 
+**Tang scripted Host split (after t51)**: the Tang `--role host --lanes-core` build now has the Device role split
+(lanes side of `USB3PHYX2Link` at 125MHz, LTSSM/SoC/scripted host at 62.5MHz; was a single 125MHz domain at
+81-89MHz, t50). Simulated with `sim.py --lanes 2 --lanes-core --host-pipe-cd --host-script N` (Gen 1x2, Gen 1x1 by
+x2 disable or a Device not x2 capable, crossed lanes, both sides split): script done, no Device Recovery request.
+Found on the way: the script sends its words one per pair entry, a DPH + 1024-byte DPP is 259 entries, more than
+the 256 entry Gen 1x1 TX packets buffer of the split link (the DPP never sent at Gen 1x1): 512 entries for the
+split Host (`test_core_x2_host_pipe_cd_x1`). Hardware in t52.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits

@@ -497,6 +497,23 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertRegex(out, r"HOST\s*entering HotReset.Active state")
         self.assertNotIn("DEV  Link Layer Recovery request", out)
 
+    def test_core_x2_host_pipe_cd(self):
+        # Hardware scripted host with its LTSSM/script at half the lanes frequency (USB3PHYX2Link
+        # lanes side in the PIPE domain: Tang Mega 138K Pro split Host build) and a split Device (two
+        # Tang Mega 138K Pro), Gen 1x2.
+        out = self.run_sim("core_x2_host_pipe_cd", ["--host-pipe-cd", "--dev-pipe-cd", "--dev-mode",
+            "x2", "--lanes-crossed", "--host-script", "2000"])
+        self.assertRegex(out, r"HOST\s*SSP entering DONE state \(x2: 1, gen2: 0\)")
+        self.assertNotIn("DEV  Link Layer Recovery request", out)
+
+    def test_core_x2_host_pipe_cd_x1(self):
+        # Split scripted host, Gen 1x1 (Device x2 disabled at runtime): the script words go one per
+        # entry to the Gen 1x1 TX packets buffer (DPH + 1024-byte DPP: 259 entries, more than the 256
+        # of the Device Core link: the DPP never sent, script timeout without the 512 entries buffer).
+        out = self.run_sim("core_x2_host_pipe_cd_x1", ["--host-pipe-cd", "--dev-x2-disable",
+            "--host-script", "2000"])
+        self.assertNotIn("DEV  Link Layer Recovery request", out)
+
     def test_core_x2_crossed(self):
         # Gen 1x2 with a flipped USB Type-C plug (lanes swap).
         out = self.run_sim("core_x2_crossed", ["--dev-mode", "x2", "--lanes-crossed"])

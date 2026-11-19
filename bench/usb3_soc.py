@@ -539,8 +539,8 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     64-bit endpoints example (USB3PHYX2Link cd: its lanes side in phy_cd, the Link Layer/Core in sys,
     words pairs through AsyncFIFOs)."""
     sys_clk_freq = soc.sys_clk_freq
-    assert (phy_cd is None) or (not with_core) or (role == "device" and example in ["loopback",
-        "wishbone", "bench"]), "phy_cd: PRBS stand-ins or the Device Core (64-bit endpoints examples)."
+    assert (phy_cd is None) or (not with_core) or (role == "host") or (example in ["loopback",
+        "wishbone", "bench"]), "phy_cd: PRBS stand-ins, the scripted host or the Device Core (64-bit endpoints examples)."
     assert len(serdes) == 2
     host_script = with_core and (role == "host")
     lanes_x2    = host_script or (with_core and (example in ["loopback", "wishbone", "bench"]))
@@ -572,8 +572,11 @@ def add_usb3_lanes_link(soc, serdes, role="device", x2_capable=True, leds=[], le
     if host_script:
         # Scripted USB Host ------------------------------------------------------------------------
         # RX buffer: a Device 1024-byte DPP (128 pairs at two words per cycle) taken by the script at
-        # one word per cycle.
-        soc.usb3_link   = usb3_link = USB3PHYX2Link(usb3_phy, rx_buffer_depth=512)
+        # one word per cycle. phy_cd: the USB3PHYX2Link lanes side in phy_cd, the script in sys (as
+        # the Device Core), its TX packets buffers of 512 entries (the script words one per entry: DPH
+        # + 1024-byte DPP 259 entries).
+        soc.usb3_link   = usb3_link = USB3PHYX2Link(usb3_phy, rx_buffer_depth=512,
+            tx_buffer_depth=256 if phy_cd is None else 512, cd=phy_cd)
         # SuperSpeedPlus script at Gen 1x2, SuperSpeed script when the Host is not x2 capable (Gen 1x1
         # negotiated: as a Gen 1x1 USB host with the Device).
         soc.usb3_script = USB3HostScript(usb3_link, sys_clk_freq=sys_clk_freq)

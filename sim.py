@@ -372,6 +372,10 @@ class USB3PIPESim(SoCMini):
     lanes logic (PIPEs, lanes datapath) and its PRBS stand-ins at the SerDes frequency, its
     LTSSM/SuperSpeedPlus Polling at half of it (Tang Mega 138K Pro Gen 1x2).
 
+    host_pipe_cd (lanes=2, with_core, host_script_delay): the Host lanes logic and its USB3PHYX2Link
+    lanes side at the SerDes frequency, its LTSSM and the hardware scripted host at half of it (Tang
+    Mega 138K Pro split Host build).
+
     gen2 (lanes=1, gen2_capable): SerDes models with Gen 2 raw words, the training continues at
     Gen 2 (Gen2PIPE: TSEQ/TS1/TS2 128b/132b blocks, SDS/Logical Idle) to U0, Link Layer packets
     with the Gen 2 framing in the Data Blocks, SuperSpeedPlus Link Layer (Host script and Device
@@ -382,7 +386,7 @@ class USB3PIPESim(SoCMini):
         host_status_gap=64, host_pm=False, host_lpm=False, host_itp=False, lanes=1,
         lane_delays=(0, 1), lane1_word_shift=2, lane_skp=4096, prbs_gap_bits=4, dev_mode="x2",
         lanes_crossed=False, lanes_tx_shift=0, lanes_tx_inverted=False, gen2_capable=False, gen2=False,
-        link_words=1, dev_pipe_cd=False, dev_u1u2=True, dev_ss=False, gen2_data_width=None,
+        link_words=1, dev_pipe_cd=False, host_pipe_cd=False, dev_u1u2=True, dev_ss=False, gen2_data_width=None,
         host_recovery=False, host_hot_reset=0, host_deskew_clear=False, host_start_delay=0,
         host_port_reset=False, dev_x2_disable=False, host_script_delay=None,
         host_burst_out=0, host_burst_len=64, host_burst_stream=0, dev_loopback_depth=512,
@@ -453,6 +457,19 @@ class USB3PIPESim(SoCMini):
             # Words pairs (or quads: --link-words 4, Gen 2 wide words).
             if lanes == 1:
                 link_words = max(link_words, 2)
+        if host_pipe_cd:
+            # Host LTSSM/scripted host at the Host frequency/2 (Tang Mega 138K Pro split Host build:
+            # lanes side of its USB3PHYX2Link in the PIPE domain, the script in the slow domain).
+            assert (lanes == 2) and with_core and (host_script_delay is not None), \
+                "--host-pipe-cd: --lanes 2 --lanes-core --host-script only."
+            self.cd_host_link = ClockDomain()
+            host_link_clk = Signal()
+            getattr(self.sync, cds["host"]).__iadd__(host_link_clk.eq(~host_link_clk))
+            self.comb += [
+                self.cd_host_link.clk.eq(host_link_clk),
+                self.cd_host_link.rst.eq(ResetSignal("sys")),
+            ]
+            ltssm_cds["host"] = "host_link"
 
         # USB3 Host (Host = Downstream Port) / Device (Device = Upstream Port).
         phys     = {}
@@ -469,7 +486,7 @@ class USB3PIPESim(SoCMini):
                 rx_clock_domain = "rx",
                 gen2_capable    = gen2,
                 gen2_dw         = gen2_data_width)) for lane in range(lanes_n)]
-            pipe_cd = "usb3" if (dev_pipe_cd and name == "dev") else None
+            pipe_cd = "usb3" if {"dev": dev_pipe_cd, "host": host_pipe_cd}[name] else None
             if pipe_cd is not None:
                 renamer = ClockDomainsRenamer({"sys": ltssm_cds[name], "usb3": cds[name],
                     "tx": cds[name], "rx": cds[partner]})
@@ -499,8 +516,11 @@ class USB3PIPESim(SoCMini):
             link_phy = phy
             if with_core and (lanes_n == 2):
                 link_phy = renamer(USB3PHYX2Link(phy,
-                    rx_buffer_depth = {"host": 4096, "dev": 512 if pipe_cd else 64}[name],
+                    rx_buffer_depth = {"host": 4096 if pipe_cd is None else 512,
+                        "dev": 512 if pipe_cd else 64}[name],
                     tx_symbol_shift = lanes_tx_shift,
+                    # Split Host: the script words one per entry (DPH + 1024-byte DPP: 259 entries).
+                    tx_buffer_depth = 512 if (pipe_cd is not None) and (name == "host") else 256,
                     cd              = pipe_cd))
                 self.add_module(name=f"{name}_usb3_phy_x2", module=link_phy)
             if lanes_n == 1:
@@ -521,14 +541,14 @@ class USB3PIPESim(SoCMini):
                 from usb3_soc import USB3HostScript
                 script_enable = Signal()
                 script_timer  = Signal(32)
-                sync = getattr(self.sync, cds[name])
+                sync = getattr(self.sync, ltssm_cds[name])
                 sync += If(script_timer != int(host_script_delay),
                     script_timer.eq(script_timer + 1),
                 ).Else(
                     script_enable.eq(1),
                 )
                 # Idle link initialization after 0.5ms without a run (10ms on the boards).
-                host_script = renamer(USB3HostScript(link_phy, sys_clk_freq=sys_clk_freq,
+                host_script = renamer(USB3HostScript(link_phy, sys_clk_freq=link_clk_freq,
                     idle_delay=0.5e-3, enable=script_enable))
                 self.add_module(name="host_script", module=host_script)
                 host_model = host_script.model
@@ -1155,6 +1175,7 @@ def main():
     parser.add_argument("--host-port-reset", action="store_true", help="Host port reset policy: Warm Reset when U0 is not reached (bench/usb3_soc.py USB3HostPortReset).")
     parser.add_argument("--host-itp",      action="store_true", help="Host model Isochronous Timestamp Packets between the transfers.")
     parser.add_argument("--dev-pipe-cd",   action="store_true", help="Device LTSSM/Link Layer/Core at half the PIPE frequency (USB3PHY pipe_cd, 64-bit Link Layer words).")
+    parser.add_argument("--host-pipe-cd",  action="store_true", help="--lanes 2 --lanes-core --host-script: Host LTSSM/scripted host at half the PIPE frequency (USB3PHY pipe_cd, as the Tang Mega 138K Pro split Host build).")
     parser.add_argument("--gen2-data-width", default=None, type=int, help="Gen 2 raw words width of the SerDes models (default: 40, ex: 80 as GW5 GTR12 1:4 at 125MHz).")
     parser.add_argument("--dev-ss",        action="store_true", help="With --gen2-capable: SuperSpeed Device (not SuperSpeedPlus capable), SuperSpeed fallback of the Host.")
     parser.add_argument("--dev-no-u1u2",   action="store_true", help="Device USB3PHY without U1/U2 Link Power Management.")
@@ -1199,6 +1220,7 @@ def main():
         gen2                  = args.gen2,
         link_words            = int(args.link_words),
         dev_pipe_cd           = args.dev_pipe_cd,
+        host_pipe_cd          = args.host_pipe_cd,
         dev_u1u2              = not args.dev_no_u1u2,
         dev_ss                = args.dev_ss,
         gen2_data_width       = args.gen2_data_width,

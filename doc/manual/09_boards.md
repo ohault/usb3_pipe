@@ -258,9 +258,9 @@ from `usb3_5g_x2.toml` (the 1.9.12 tools do not accept the 1.9.10 TOML files), o
 With the PRBS stand-ins (default), the lanes logic (PIPEs, lanes datapath, transceiver logic) and the
 stand-ins run at 125 MHz on the lane 0 TX clock (met at 0766db0: 125.35 MHz), and the LTSSM and the SoC
 at 62.5 MHz, as the Gen 1x1 build splits its PHY; the lanes debug registers then have no event counters, unless `--with-lanes-counters` adds the lanes events (deskew, realignments, odd SKP runs, COM slips, per lane TS and receive errors) in the lanes clock domain, which costs the lanes clock timing. With `--lanes-core`
-(scripted host or device core) everything runs at 125 MHz on the lane 0 TX clock, so the bridge only
-answers once the dock reference clock is programmed; these builds do not reach 125 MHz on the GW5A
-(69 to 80 MHz measured). `--lean` leaves out the lanes event/error counters and the noise monitor.
+the split is the same: the lanes side of `USB3PHYX2Link` runs at 125 MHz, and the device core
+(`--role device`) or the scripted host (`--role host`) at 62.5 MHz in sys, word pairs crossing through
+asynchronous FIFOs (the scripted host builds were a single 125 MHz domain before, at 81 to 89 MHz). `--lean` leaves out the lanes event/error counters and the noise monitor.
 `usb3_gtr12_lane{n}_rx_invalid` counts the cycles without a word in each lane's GTR12 receive
 interface FIFO (`RX_VLD_OUT` low); `--rx-valid-gate` takes the RX words only with it (on hardware it
 starved lane 1 during the training). A lane receive reset only resets the GTR12 PCS: `--cdr-toggle`
