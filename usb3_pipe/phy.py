@@ -1309,15 +1309,21 @@ class USB3PHY(LiteXModule):
         # the PENDING_HP_TIMER; Gen 1x1 Recovery storm with the Tang Mega 138K Pro Device, whose
         # LTSSM at half the lanes clock enters U0 ~30 cycles after the Host).
         framing_aligner = self.lanes_add("framing_aligner", RXWordAligner(markers=[SHP, SDP, SLC]))
+        # Idle word compare and gate registered (timing: Tang Mega 138K Pro lanes clock; one word
+        # later, within the partner's Logical Idle).
+        rx_idle_x1      = Signal()
         rx_keep_open_x1 = Signal()
         rx_pass_x1      = Signal()
-        L.sync += If(~ltssm.rx_keep,
-            rx_keep_open_x1.eq(0)
-        ).Elif(framing_aligner.source.valid & (framing_aligner.source.data == 0) &
-            (framing_aligner.source.ctrl == 0),
-            rx_keep_open_x1.eq(1)
-        )
-        L.comb += rx_pass_x1.eq(ltssm.rx_ready | (ltssm.rx_keep & rx_keep_open_x1))
+        L.sync += [
+            rx_idle_x1.eq(framing_aligner.source.valid & (framing_aligner.source.data == 0) &
+                (framing_aligner.source.ctrl == 0)),
+            If(~ltssm.rx_keep,
+                rx_keep_open_x1.eq(0)
+            ).Elif(rx_idle_x1,
+                rx_keep_open_x1.eq(1)
+            ),
+            rx_pass_x1.eq(ltssm.rx_ready | (ltssm.rx_keep & rx_keep_open_x1)),
+        ]
         L.comb += [
             If(x2,
                 pipes[0].source.connect(deskew.sinks[0]),

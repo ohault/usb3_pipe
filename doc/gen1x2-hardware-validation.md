@@ -1358,6 +1358,18 @@ passed only in U0 (the `rx_keep` of the Gen 1x2 path missing there): `LGOOD_n`/`
 first, Recovery, again after each re-entry. Fix: the same `rx_keep` rule on the Gen 1x1 path
 (`test_core_x2_dev_pipe_cd_x2_disable_host_script`). Hardware A/B in t50.
 
+**t50 (12eb2e5 builds + a 32b2eae Tang Device Core): fix not run on hardware, timing.** Tang scripted Host role (one
+125MHz domain, not split): no build met (p2/p3/p4 r1 81.1/83.6/89.0MHz; paths across the script model, the lanes noise
+monitor, the CSR bus, the LTSSM state replicas): Tang Host <-> Acorn Device Core not run (needs the split clocking of the
+Device role or a lean Host build). Storm on the t49 pair (Acorn scripted Host -> Tang Device Core): Gen 1x1 40/40 runs
+but Tang Link Layer Recoveries 38921 and 4926 on two loads (causes `pending_hp` 38690/4676, `lcrd` 163/214, about one
+per reset; median 736 and 72.5 per run), the Acorn Host only follows them (Host ts1 exits = Tang directed Recoveries);
+Gen 1x2 on the same pair 0 (Hot Reset Recoveries only). 32b2eae Tang Device Core: lanes clock 109.6MHz (p2 r1) and
+105.8MHz (p4 r1), p3 r1 hung in routing; 12eb2e5 p2 r1 124.35MHz: the fix costs ~1.1ns (worst path to
+`rx_keep_open_x1`: resynchronized `rx_keep` + the 32-bit idle compare on the aligner output; `rx_pass_x1` gate on the
+X1 FIFO/TX paths). Fix: idle compare and `rx_pass_x1` registered (one word later, within the partner's Logical
+Idle). A/B in t51.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits
