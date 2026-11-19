@@ -1311,6 +1311,16 @@ selection -> output Symbol compares). The soak on the missed p3 r1 build shows l
 (168k-252k resets): no verdict on the fix with a failing build. Change: the aligner output word registered before the
 features, the correction two words later (still in the TS body). Next (t45): rebuild, soak.
 
+**t45 (06f2d8f; Tang Device Core p2 r1 met 125.045MHz, aligner off the worst paths; p3 r1 120.4MHz; Acorn hosts
+rebuilt, met): Gen 1x2 400/400, 0 errors; loads > 100 resets 2/20 (t43 13/20, t44 7/20), median resets per load 20
+(one per run, the floor; t43 4835, t44 31.5), runs > 100ms 2 (t43 28, t44 34), no run between 100ms and 2.3s; the
+t44 lane 0 partial COM words gone (timing miss). Two long loops left (loads 2, 18, ended by the Acorn Warm Reset): Tang
+markers, error words on both lanes, gaps, armed, never aligned in 32/32 windows, lane 1 partial only in 20/32 (load 2:
+12/16 windows without partial, `deskew_loss` plain): not the Symbol shift alone (open: error words disarming every
+search, or lanes an Ordered Set apart); the Acorn stays paired, neither load Acorn-noisy. Gen 1x1 40/40 (resets 51/41,
+no deskew lost, Tang Link `pending_hp` storm unchanged). PRBS (Tang p3 met 125.15MHz) resync on/off: 0 garbage/errors,
+610MB/s, 3/18 Warm Reset returns 2.3s (load 2, not investigated).
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits
