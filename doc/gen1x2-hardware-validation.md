@@ -1332,6 +1332,16 @@ lanes, never paired. Gen 1x1 40/40, PRBS 18/18 Warm Resets 1.08-1.10s, 0 errors.
 Replaced by a purpose-built recorder (`--with-deskew-trace`, `LanesDeskewTrace`: block RAM ring buffer of deskew
 events, frozen after deskew_lost). Next (t48): capture loops with it.
 
+**t48 (d8c1afe + `--with-deskew-trace`, Tang p3 r1 met 125.11MHz): 25 loads, 0 errors**, long loops on load 1 only (and
+short ones on load 2): 31 trace dumps. A loop starts with the lanes paired and the pairing lost mid TS burst (a marker
+against a plain word: one lane off by a word or more, cause open); the search re-arms on the Logical Idle gap after the
+burst, the Tang enters U0 unpaired and leaves it at once; then **~50 words before each next TS burst, isolated error
+words on both lanes (a K28.4 word, then K28.4 K28.4 D0.0 D0.0 5-6 words later; also before every clean Hot Reset, where
+they do no harm) disarm the search before any marker**, and no gap comes again before the burst's markers (fewer than 16
+valid words between: the receiver leaving electrical idle): never paired until a retrain. Fix: once a lane reached its
+gap, up to 3 isolated error words neither break it nor disarm (`max_isolated`, `test_deskew_isolated_errors_in_gap`);
+error words in quick succession (a lane not word aligned) still disarm. Next (t49): soak with the fix.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits

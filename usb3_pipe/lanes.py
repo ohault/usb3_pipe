@@ -126,7 +126,7 @@ class LaneDeskew(LiteXModule):
     then paired with a later Ordered Set of the other lane, the lanes Ordered Sets apart without any
     FIFO overflow, t16s).
     """
-    def __init__(self, marker_data, marker_ctrl, depth=8, gap=16, error_symbol=None):
+    def __init__(self, marker_data, marker_ctrl, depth=8, gap=16, error_symbol=None, max_isolated=3):
         self.sinks   = sinks   = [stream.Endpoint(lane_layout()) for _ in range(2)]
         self.sources = sources = [stream.Endpoint(lane_layout()) for _ in range(2)]
         self.aligned = aligned = Signal() # o
@@ -145,6 +145,7 @@ class LaneDeskew(LiteXModule):
         # after an idle period often arrive as K28.4 on hardware, on one lane only the lanes would be
         # paired an Ordered Set apart, t16v).
         nsym = len(sinks[0].ctrl)
+        assert 0 <= max_isolated <= 3
         def marker_match(data, ctrl):
             if error_symbol is None:
                 return (data == marker_data) & (ctrl == marker_ctrl)
@@ -165,6 +166,7 @@ class LaneDeskew(LiteXModule):
         heads  = []
         gaps   = []
         errors = []
+        disarms = []
         # Input words registered with their marker/error flags (timing: the Symbol compares in their
         # own cycle, not before the FIFO write/gap counter; Tang Mega 138K Pro lanes clock, t16w).
         inputs = []
@@ -184,6 +186,8 @@ class LaneDeskew(LiteXModule):
             error_in  = Signal()
             trail_in  = Signal()
             trail_hold = Signal()
+            tolerated  = Signal(2) # Isolated error words tolerated since the gap was reached.
+            isolated   = Signal()  # Error word tolerated (gap reached, budget left).
             self.comb += [
                 sinks[lane].ready.eq(1),
                 marker_c.eq(marker_match(sinks[lane].data, sinks[lane].ctrl)),
@@ -216,10 +220,23 @@ class LaneDeskew(LiteXModule):
             ]
             inputs.append(valid_in)
             words_in.append((data_in, ctrl_in))
-            # Words without marker (nor error Symbol) received on the lane (saturated to gap).
+            # Words without marker (nor error Symbol) received on the lane (saturated to gap). Once
+            # the gap is reached, up to max_isolated error words neither break it nor disarm the search
+            # (isolated errors in a Logical Idle: Acorn Mini TX -> Tang Mega 138K Pro, a K28.4 then a
+            # K28.4 K28.4 D0.0 D0.0 word ~50 words before each TS burst on both lanes: the search,
+            # armed on the gap, was disarmed before the first markers of every Recovery, the lanes never
+            # paired until a retrain, t48). A lane not word aligned yet receives garbage with error
+            # words in quick succession: still disarms.
+            self.comb += isolated.eq((gap_count == gap) & (tolerated != max_isolated))
             self.sync += If(valid_in,
-                If(marker_in | error_in,
-                    gap_count.eq(0)
+                If(marker_in,
+                    gap_count.eq(0),
+                    tolerated.eq(0),
+                ).Elif(error_in & isolated,
+                    tolerated.eq(tolerated + 1)
+                ).Elif(error_in,
+                    gap_count.eq(0),
+                    tolerated.eq(0),
                 ).Elif(gap_count != gap,
                     gap_count.eq(gap_count + 1)
                 )
@@ -235,10 +252,14 @@ class LaneDeskew(LiteXModule):
             # after the gap: the search was disarmed, no gap again before U0 (Recovery/Hot Reset TS
             # stream), the lanes never paired (Tang Mega 138K Pro Hot Reset loops, t45). Decided on the
             # next word (registered, timing).
+            disarm = Signal(name=f"disarm{lane}")
+            self.sync += If(valid_in, trail_hold.eq(error_in & ~marker_in & trail_in & ~isolated))
+            self.comb += disarm.eq(valid_in & (
+                (error_in & ~marker_in & ~trail_in & ~isolated) | (trail_hold & ~marker_in)))
+            disarms.append(disarm)
+            # Debug: error words (not corrupted marker words), disarming or not.
             error = Signal(name=f"error{lane}")
-            self.sync += If(valid_in, trail_hold.eq(error_in & ~marker_in & trail_in))
-            self.comb += error.eq(valid_in & (
-                (error_in & ~marker_in & ~trail_in) | (trail_hold & ~marker_in)))
+            self.comb += error.eq(valid_in & error_in & ~marker_in)
             errors.append(error)
             marker_seen = Signal(name=f"marker_in{lane}")
             self.comb += marker_seen.eq(valid_in & marker_in)
@@ -248,6 +269,7 @@ class LaneDeskew(LiteXModule):
         self.markers_in = markers_in
         self.words_in   = words_in
         self.errors_in  = errors
+        self.disarms    = disarms
         self.gaps       = gaps
 
         # Search armed after a gap on both lanes (no marker in the FIFOs, dropped while searching),
@@ -285,7 +307,7 @@ class LaneDeskew(LiteXModule):
                 mismatch.eq(0)
             ).Elif(~aligned,
                 mismatch.eq(0),
-                If(errors[0] | errors[1],
+                If(disarms[0] | disarms[1],
                     armed.eq(0)
                 ).Elif(gaps[0] & gaps[1],
                     armed.eq(1)

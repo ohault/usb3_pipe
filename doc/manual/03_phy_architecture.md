@@ -331,7 +331,10 @@ yet receives garbage without COM symbols, and its first COM symbol would otherwi
 later training sequence of the other lane. A word whose K28.4 symbols end it and that is followed by
 a COM word does not disarm the search: those are the symbol before the first COM symbol, or the first
 COM symbols themselves, received with errors. Recovery and Hot Reset send no gap, so a disarm at that
-point would leave the lanes unpaired until the next retrain. The
+point would leave the lanes unpaired until the next retrain. Once a lane has reached its gap, up to
+three isolated error words do not disarm the search either. An Acorn Mini sends a few of them about 50
+words before each TS burst, as its receiver partner leaves electrical idle. A lane that is not word
+aligned yet produces error words in quick succession, so it still disarms. The
 destriper then rebuilds the words (`LaneDestriper`). In U0 the PHY goes to Recovery when the
 deskew is lost, when a lane stays in electrical idle for 10 µs, when a lane realigns its words,
 or when a lane receives a run of SKP symbols of odd length. SKP ordered sets are two symbols, so

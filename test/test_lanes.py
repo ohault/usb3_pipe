@@ -385,10 +385,40 @@ class TestLanes(unittest.TestCase):
                 lanes[lane][len(gap) - 1] = word
                 out = self.run_deskew(lanes, error_symbol=0x9c)
                 self.assertEqual(out, tss + data)
-        # Error Symbol not ending the word (followed by the marker word): disarms.
+        # Error words in quick succession before the marker word (more than the isolated errors
+        # budget, a lane not word aligned yet): disarms.
         lanes = [[self.stripe(w, n) for w in stream] for n in range(2)]
-        lanes[1][len(gap) - 1] = (0x009c0000, 0b0100)
+        for k in range(2, 6):
+            lanes[1][len(gap) - k] = (0x009c0000, 0b0100)
         self.assertEqual(self.run_deskew(lanes, error_symbol=0x9c), [])
+
+    def test_deskew_isolated_errors_in_gap(self):
+        # Search armed on a gap, then isolated error words in the Logical Idle before the first TS
+        # burst on both lanes (Acorn Mini TX -> Tang Mega 138K Pro: a K28.4, then K28.4 K28.4 D0.0
+        # D0.0 ~50 words before each burst, t48): the search stays armed, the first TS paired (they
+        # disarmed it before the first markers of every Recovery: Hot Reset loops until a retrain).
+        rng    = random.Random(11)
+        marker = (0xbcbcbcbcbcbcbcbc, 0xff)
+        def ts(n):
+            r = []
+            for _ in range(n):
+                r += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
+            return r
+        tss  = ts(6)
+        data = [(rng.getrandbits(64), rng.getrandbits(8) & 0x7f) for _ in range(16)]
+        # Fewer than a gap of Logical Idle words between the error words and the burst (hardware: no
+        # gap reached again before the markers, the receiver coming out of electrical idle).
+        single = (0x009c0000, 0b0100)
+        pair   = (0x00009c9c, 0b0011)
+        for errors in [[single], [single, pair], [single, pair, single]]:
+            with self.subTest(errors=len(errors)):
+                stream = [(0, 0)]*20
+                for w in errors:
+                    stream += [w] + [(0, 0)]*5
+                stream += [(0, 0)]*3 + tss + data
+                lanes = [[self.stripe(w, n) for w in stream] for n in range(2)]
+                out = self.run_deskew(lanes, error_symbol=0x9c)
+                self.assertEqual(out, tss + data)
 
     def test_deskew_lost_on_lane_shift(self):
         # Lane 0 one word late from the middle of the TS stream (word dropped on Lane 1: lanes no
