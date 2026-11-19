@@ -1384,7 +1384,11 @@ Recoveries cleared without extra Hot Resets, 3 `pending_hp` with them).
 x2 disable or a Device not x2 capable, crossed lanes, both sides split): script done, no Device Recovery request.
 Found on the way: the script sends its words one per pair entry, a DPH + 1024-byte DPP is 259 entries, more than
 the 256 entry Gen 1x1 TX packets buffer of the split link (the DPP never sent at Gen 1x1): 512 entries for the
-split Host (`test_core_x2_host_pipe_cd_x1`). Hardware in t52.
+split Host (`test_core_x2_host_pipe_cd_x1`). t52 (979b153 builds): Tang Host lanes clock 118.0/120.9/109.5MHz at
+p2/p3/p4 r1 (best p3 r1 -0.270ns, sys 65.5MHz met; t50 single domain 81-89MHz), worst paths now the Link AsyncFIFO
+Gray counter (lanes side), lane 0 RX CDC -> word aligner input buffer and the packet aligner mode -> count, mostly
+routing; the script/noise monitor/CSR paths no longer among them. Acorn Device Core met (+0.244ns). t52b: functional
+run with the gate waived + leaner Tang Host builds.
 
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
