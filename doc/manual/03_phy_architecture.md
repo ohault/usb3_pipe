@@ -328,7 +328,10 @@ On receive, the deskew pairs the first COM symbols of each lane after a gap, the
 TS1 or the Logical Idle before a Recovery, whatever the lanes latencies (`LaneDeskew`). A word holding a
 decode error (K28.4) is not part of a gap and disarms the search: a lane that is not word aligned
 yet receives garbage without COM symbols, and its first COM symbol would otherwise be paired with a
-later training sequence of the other lane. The
+later training sequence of the other lane. A word whose K28.4 symbols end it and that is followed by
+a COM word does not disarm the search: those are the symbol before the first COM symbol, or the first
+COM symbols themselves, received with errors. Recovery and Hot Reset send no gap, so a disarm at that
+point would leave the lanes unpaired until the next retrain. The
 destriper then rebuilds the words (`LaneDestriper`). In U0 the PHY goes to Recovery when the
 deskew is lost, when a lane stays in electrical idle for 10 µs, when a lane realigns its words,
 or when a lane receives a run of SKP symbols of odd length. SKP ordered sets are two symbols, so

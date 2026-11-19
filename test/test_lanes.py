@@ -361,6 +361,35 @@ class TestLanes(unittest.TestCase):
         self.assertEqual(len(out), len(tss + data))
         self.assertEqual(out[1:], tss[1:] + data)
 
+    def test_deskew_trailing_error_before_first_marker(self):
+        # Search armed on a gap, the word before the first marker word on a lane ending with K28.4
+        # (the Symbol before the first COM, or the first COM Symbols of a shifted lane, received as
+        # errors): not an error word disarming the search (the next word is a marker), the first TS
+        # Ordered Set paired (Tang Mega 138K Pro t45: disarmed, no gap again before U0, the lanes
+        # never paired). An error word followed by a non-marker word still disarms (no pairing on
+        # the TS stream without a new gap).
+        rng    = random.Random(10)
+        marker = (0xbcbcbcbcbcbcbcbc, 0xff)
+        def ts(n):
+            r = []
+            for _ in range(n):
+                r += [marker] + [(rng.getrandbits(64), 0) for _ in range(3)]
+            return r
+        gap  = [(0, 0)]*20
+        tss  = ts(6)
+        data = [(rng.getrandbits(64), rng.getrandbits(8) & 0x7f) for _ in range(16)]
+        stream = gap + tss + data
+        for lane, word in [(0, (0x9c000000, 0b1000)), (1, (0x9c9c0000, 0b1100)), (1, (0x9c9c9c9c, 0xf))]:
+            with self.subTest(lane=lane, word=hex(word[0])):
+                lanes = [[self.stripe(w, n) for w in stream] for n in range(2)]
+                lanes[lane][len(gap) - 1] = word
+                out = self.run_deskew(lanes, error_symbol=0x9c)
+                self.assertEqual(out, tss + data)
+        # Error Symbol not ending the word (followed by the marker word): disarms.
+        lanes = [[self.stripe(w, n) for w in stream] for n in range(2)]
+        lanes[1][len(gap) - 1] = (0x009c0000, 0b0100)
+        self.assertEqual(self.run_deskew(lanes, error_symbol=0x9c), [])
+
     def test_deskew_lost_on_lane_shift(self):
         # Lane 0 one word late from the middle of the TS stream (word dropped on Lane 1: lanes no
         # longer paired, a mismatch at each Ordered Set): pairing lost (second mismatch), search

@@ -174,20 +174,28 @@ class LaneDeskew(LiteXModule):
             gap_count = Signal(max=gap + 1)
             marker_c  = Signal()
             error_c   = Signal()
+            trail_c   = Signal()
             valid_in  = Signal()
             data_in   = Signal(len(sinks[lane].data))
             ctrl_in   = Signal(len(sinks[lane].ctrl))
             marker_in = Signal()
             plain_in  = Signal()
             error_in  = Signal()
+            trail_in  = Signal()
+            trail_hold = Signal()
             self.comb += [
                 sinks[lane].ready.eq(1),
                 marker_c.eq(marker_match(sinks[lane].data, sinks[lane].ctrl)),
             ]
             # Error Symbol in the word.
             if error_symbol is not None:
-                self.comb += error_c.eq(Reduce("OR", [sinks[lane].ctrl[i] &
-                    (sinks[lane].data[8*i:8*(i+1)] == error_symbol) for i in range(nsym)]))
+                is_e = [sinks[lane].ctrl[i] & (sinks[lane].data[8*i:8*(i+1)] == error_symbol)
+                    for i in range(nsym)]
+                self.comb += [
+                    error_c.eq(Reduce("OR", is_e)),
+                    # Error Symbols only as a run ending the word.
+                    trail_c.eq(is_e[-1] & Reduce("AND", [~is_e[i] | is_e[i+1] for i in range(nsym - 1)])),
+                ]
             self.sync += [
                 valid_in.eq(sinks[lane].valid),
                 data_in.eq(sinks[lane].data),
@@ -195,6 +203,7 @@ class LaneDeskew(LiteXModule):
                 marker_in.eq(marker_c),
                 plain_in.eq(sinks[lane].ctrl == 0),
                 error_in.eq(error_c),
+                trail_in.eq(trail_c),
             ]
             self.comb += [
                 fifos[lane].sink.valid.eq(valid_in),
@@ -215,9 +224,17 @@ class LaneDeskew(LiteXModule):
             )
             heads.append(head)
             gaps.append(gap_count == gap)
-            # Error word (not a corrupted marker word): disarms an armed search.
+            # Error word (not a corrupted marker word): disarms an armed search. An error word whose
+            # error Symbols end it (trailing run) disarms only if the next word on the lane is not a
+            # marker word: the first COM Symbols of a TS Ordered Set (or the Symbol before it) received
+            # as error_symbol at the end of the word before the marker word, on the first Ordered Set
+            # after the gap: the search was disarmed, no gap again before U0 (Recovery/Hot Reset TS
+            # stream), the lanes never paired (Tang Mega 138K Pro Hot Reset loops, t45). Decided on the
+            # next word (registered, timing).
             error = Signal()
-            self.comb += error.eq(valid_in & error_in & ~marker_in)
+            self.sync += If(valid_in, trail_hold.eq(error_in & ~marker_in & trail_in))
+            self.comb += error.eq(valid_in & (
+                (error_in & ~marker_in & ~trail_in) | (trail_hold & ~marker_in)))
             errors.append(error)
             markers_in.append(valid_in & marker_in)
         self.heads = heads
