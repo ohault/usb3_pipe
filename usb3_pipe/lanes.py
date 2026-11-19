@@ -223,7 +223,9 @@ class LaneDeskew(LiteXModule):
                 )
             )
             heads.append(head)
-            gaps.append(gap_count == gap)
+            gap_reached = Signal(name=f"gap{lane}")
+            self.comb += gap_reached.eq(gap_count == gap)
+            gaps.append(gap_reached)
             # Error word (not a corrupted marker word): disarms an armed search. An error word whose
             # error Symbols end it (trailing run) disarms only if the next word on the lane is not a
             # marker word: the first COM Symbols of a TS Ordered Set (or the Symbol before it) received
@@ -231,12 +233,14 @@ class LaneDeskew(LiteXModule):
             # after the gap: the search was disarmed, no gap again before U0 (Recovery/Hot Reset TS
             # stream), the lanes never paired (Tang Mega 138K Pro Hot Reset loops, t45). Decided on the
             # next word (registered, timing).
-            error = Signal()
+            error = Signal(name=f"error{lane}")
             self.sync += If(valid_in, trail_hold.eq(error_in & ~marker_in & trail_in))
             self.comb += error.eq(valid_in & (
                 (error_in & ~marker_in & ~trail_in) | (trail_hold & ~marker_in)))
             errors.append(error)
-            markers_in.append(valid_in & marker_in)
+            marker_seen = Signal(name=f"marker_in{lane}")
+            self.comb += marker_seen.eq(valid_in & marker_in)
+            markers_in.append(marker_seen)
         self.heads = heads
         # Debug: per lane marker words / error words received, gap reached (one cycle each).
         self.markers_in = markers_in

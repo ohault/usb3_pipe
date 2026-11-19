@@ -1321,6 +1321,12 @@ search, or lanes an Ordered Set apart); the Acorn stays paired, neither load Aco
 no deskew lost, Tang Link `pending_hp` storm unchanged). PRBS (Tang p3 met 125.15MHz) resync on/off: 0 garbage/errors,
 610MB/s, 3/18 Warm Reset returns 2.3s (load 2, not investigated).
 
+**t46 (eef441f, `LaneDeskew` trailing error word before a marker word not disarming; Tang p2 r1 met 125.43MHz): Gen 1x2
+400/400, loads > 100 resets 3/20 (t45 2/20), median 20, runs > 100ms 4, 2 long loops (loads 6, 16; load 17 ended alone
+after ~0.5s): no change; partial COM words 0/38 loop windows; in the loops the search armed, error words on both
+lanes, never paired. Gen 1x1 40/40, PRBS 18/18 Warm Resets 1.08-1.10s, 0 errors. Next (t47): `deskew` LiteScope group
+(lanes clock domain) captured in a loop (`--trigger deskew_lost --no-retrain`).
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits

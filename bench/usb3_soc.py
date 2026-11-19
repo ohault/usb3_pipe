@@ -39,7 +39,7 @@ from usb3_pipe.prbs     import PRBSLinkTester
 from usb3_pipe.gen      import get_ltssm_state_localparam
 from usb3_pipe.datapath import Gen2RXDatapath
 from usb3_pipe.debug    import USB3PHYDebug, USB3LanesDebug, USB3SerDesDebug, Gen2RXDebug
-from usb3_pipe.debug    import usb3_analyzer_groups, USB3_ANALYZER_GROUPS
+from usb3_pipe.debug    import usb3_analyzer_groups, usb3_analyzer_clock_domain, USB3_ANALYZER_GROUPS
 
 from usb3_core.examples import add_usb3_example, USB3_EXAMPLES
 
@@ -974,7 +974,7 @@ def usb3_analyzer(soc, group="link", csv="analyzer.csv"):
     assert group in groups, f"{group} group requires --with-serdes-debug (phase/u3) or --role host --lanes-core (script)."
     return LiteScopeAnalyzer(groups[group],
         depth        = 4096,
-        clock_domain = "sys",
+        clock_domain = usb3_analyzer_clock_domain(soc.usb3_phy, group),
         register     = True,
         csr_csv      = csv
     )

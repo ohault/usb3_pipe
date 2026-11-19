@@ -1155,7 +1155,17 @@ def gen2_rx_analyzer_signals(rx_datapath):
 
 # USB3 Analyzer Groups -----------------------------------------------------------------------------
 
-USB3_ANALYZER_GROUPS = ["link", "lfps", "ts", "datapath", "phase", "u3", "lanes", "realign", "warm", "script"]
+USB3_ANALYZER_GROUPS = ["link", "lfps", "ts", "datapath", "phase", "u3", "lanes", "realign", "warm", "script",
+    "deskew"]
+
+# Groups sampled in the lanes clock domain (USB3PHY pipe_cd), else sys.
+USB3_ANALYZER_LANES_GROUPS = ["deskew"]
+
+def usb3_analyzer_clock_domain(phy, group):
+    """Clock domain of a usb3_analyzer_groups group."""
+    if group in USB3_ANALYZER_LANES_GROUPS and getattr(phy, "pipe_cd", None) is not None:
+        return phy.pipe_cd
+    return "sys"
 
 def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
     """LiteScope probes groups of a USB3PHY/USB3SerDes (bench/usb3_analyzer.py), returns a dict
@@ -1171,6 +1181,11 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
                  triggers, both lanes SerDes RX status (comma realignments, elastic buffer errors,
                  decode errors, idle) and RX words before the word aligner (a lane losing symbols
                  at the end of a TS burst): a lane realigned in U0 (no TX/destriped words).
+    - deskew   : Gen 1x2 deskew search in the lanes clock domain (USB3PHY pipe_cd: capture in that
+                 domain, usb3_analyzer_clock_domain): LTSSM view levels (u0, tx_ready, rx_keep), lanes
+                 RX words at the deskew input, per lane marker/error/gap/partial COM inputs, search
+                 armed, aligned, clear, overflow, heads, lanes Recovery triggers: a search disarmed and
+                 never paired (Tang Mega 138K Pro Hot Reset loops, t46).
     - u3       : LTSSM + U3 exit: LFPS TX/RX, TS1 detection, SerDes RX stream, RX vs TX clocks phase
                  (requires serdes_debug).
     """
@@ -1242,6 +1257,17 @@ def usb3_analyzer_groups(phy, serdes, serdes_debug=None):
             # a lane losing symbols at the end of a TS burst, before or in the RX word alignment.
             getattr(s.rx_datapath.cdc.source, name) for s in getattr(phy, "lanes_phys_serdes", [])
             if hasattr(s, "rx_datapath") for name in ["valid", "data", "ctrl"]]
+    if hasattr(phy, "deskew") and hasattr(phy, "lanes_lt"):
+        lt = phy.lanes_lt
+        groups["deskew"] = [
+            *[getattr(lt, name) for name in ["u0", "tx_ready", "rx_keep", "idle_handshake"]
+                if hasattr(lt, name)],
+            deskew.armed, deskew.aligned, deskew.clear, deskew.overflow, *deskew.heads,
+            *deskew.markers_in, *deskew.errors_in, *deskew.gaps,
+            *([phy.lanes_com_partial] if hasattr(phy, "lanes_com_partial") else []),
+            *[getattr(deskew.sinks[lane], name) for lane in range(2) for name in ["valid", "data", "ctrl"]],
+        ] + [getattr(phy, name) for name in ["lanes_realign", "lanes_deskew_lost", "lanes_idle",
+            "lanes_com_slip"] if hasattr(phy, name)]
     if hasattr(phy, "lanes_phys_serdes"):
         # Warm Reset detection per physical lane (levels: capture with litescope_cli --subsampling,
         # the LFPS lasts ~100ms): electrical idle (filtered/raw), decode errors, RX reset, the

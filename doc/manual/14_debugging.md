@@ -333,6 +333,11 @@ swap and the Warm Reset detection of the Configuration Lane. A Warm Reset LFPS l
 capture it with `litescope_cli --subsampling`. The `script` group (scripted host) captures the
 destriped lanes words, the packet aligner output and the words to the script model with its step and
 error (`usb3_analyzer.py capture --trigger error --no-retrain` while the runs go on).
+The `deskew` group captures the deskew search in the lanes clock domain, which is the 125 MHz pipe
+clock on the Tang split builds. It records the U0 and TX ready levels as the lanes logic sees them, the
+lanes words at the deskew input, the marker, error, gap and partial COM inputs of each lane, and the
+search state (armed, aligned, clear, overflow, FIFO heads) with the Recovery triggers. Use it on a
+looping load with `--trigger deskew_lost --no-retrain`. Samples are 8 ns apart.
 
 ## Gen 2 {#debug-gen2}
 
