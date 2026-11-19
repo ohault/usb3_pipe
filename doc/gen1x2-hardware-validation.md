@@ -1327,6 +1327,11 @@ after ~0.5s): no change; partial COM words 0/38 loop windows; in the loops the s
 lanes, never paired. Gen 1x1 40/40, PRBS 18/18 Warm Resets 1.08-1.10s, 0 errors. Next (t47): `deskew` LiteScope group
 (lanes clock domain) captured in a loop (`--trigger deskew_lost --no-retrain`).
 
+**t47 (416214c): not run.** Every Tang Device Core build with the `deskew` LiteScope group missed timing by 3-5 ns
+(90.9/81.4/77.7MHz): the LiteScope trigger (mask/value memory, compare, gray counter) at 125MHz with the 98-bit group.
+Replaced by a purpose-built recorder (`--with-deskew-trace`, `LanesDeskewTrace`: block RAM ring buffer of deskew
+events, frozen after deskew_lost). Next (t48): capture loops with it.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits

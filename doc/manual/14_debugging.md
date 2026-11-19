@@ -338,6 +338,17 @@ clock on the Tang split builds. It records the U0 and TX ready levels as the lan
 lanes words at the deskew input, the marker, error, gap and partial COM inputs of each lane, and the
 search state (armed, aligned, clear, overflow, FIFO heads) with the Recovery triggers. Use it on a
 looping load with `--trigger deskew_lost --no-retrain`. Samples are 8 ns apart.
+On the Tang Mega 138K Pro, the LiteScope trigger logic in the 125 MHz lanes clock misses timing by
+3-5 ns. Use the deskew trace there instead (`--with-deskew-trace`, `LanesDeskewTrace`). It is a 64-entry
+block RAM ring buffer in the lanes clock that records the deskew search events with the input words of
+both lanes:
+- level changes: U0, TX ready, armed, aligned, deskew lost, both lanes in a gap;
+- error words, overflows and clears;
+- marker words while the search is armed.
+
+The buffer freezes 8 entries after the deskew-lost request (or after the U0 entry).
+`usb3_lanes.py deskew-trace --trace-trigger lost` arms it, and `usb3_lanes.py deskew-trace` prints it
+oldest first, with timestamps in lanes clock cycles.
 
 ## Gen 2 {#debug-gen2}
 

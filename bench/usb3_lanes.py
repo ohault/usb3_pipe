@@ -141,6 +141,39 @@ class USB3LanesClient:
         if hasattr(self.bus.regs, "usb3_lanes_debug_deskew_seen_clear"):
             self.reg("usb3_lanes_debug_deskew_seen_clear").write(1)
 
+    # Deskew search events recorder (LanesDeskewTrace, --with-deskew-trace builds).
+    def has_deskew_trace(self):
+        return hasattr(self.bus.regs, "usb3_lanes_debug_deskew_trace_status")
+
+    def deskew_trace_arm(self, trigger="lost"):
+        # Clear and restart the recording, frozen after the trigger (lost: deskew_lost rising, u0:
+        # U0 entry).
+        self.reg("usb3_lanes_debug_deskew_trace_control").write((int(trigger == "u0") << 1) | 1)
+
+    def deskew_trace_status(self):
+        v = self.reg("usb3_lanes_debug_deskew_trace_status").read()
+        return {"frozen": v & 1, "ptr": (v >> 8) & 0xff, "count": (v >> 16) & 0xffff}
+
+    def deskew_trace_read(self):
+        # Entries oldest first: (timestamp in lanes clock cycles, flags names, lane words).
+        from usb3_pipe.debug import DESKEW_TRACE_FLAGS
+        st    = self.deskew_trace_status()
+        depth = 64
+        n     = min(st["count"], depth)
+        start = st["ptr"] if st["count"] >= depth else 0
+        out = []
+        for k in range(n):
+            self.reg("usb3_lanes_debug_deskew_trace_index").write((start + k) % depth)
+            time.sleep(0.001)
+            e = 0
+            for i in range(4):
+                e |= self.reg(f"usb3_lanes_debug_deskew_trace_entry{i}").read() << (32*i)
+            ts    = (e & 0xffff) | ((e >> 104) << 16)
+            flags = [name for j, name in enumerate(DESKEW_TRACE_FLAGS) if (e >> (16 + j)) & 1]
+            words = [((e >> (32 + 36*lane)) & 0xffffffff, (e >> (64 + 36*lane)) & 0xf) for lane in range(2)]
+            out.append((ts, flags, words))
+        return out
+
     def idle_recovery(self, enable=True):
         # Recovery on a lane in electrical idle in U0 at Gen 1x2 (debug: 0 disables).
         control = self.reg("usb3_lanes_debug_control").read()
@@ -312,7 +345,9 @@ def main():
         "prbs-enable", "prbs-disable", "script",
         "idle-recovery-enable", "idle-recovery-disable", "rx-reinit-enable", "rx-reinit-disable",
         "x2-enable", "x2-disable", "skp-recovery-enable", "skp-recovery-disable",
-        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit", "drp-dump", "monitor", "watchdog", "tx-diffctrl", "tx-idle-force"])
+        "com-recovery-enable", "com-recovery-disable", "tx-postcursor", "xcvr-reinit", "drp-dump", "monitor", "watchdog", "tx-diffctrl", "tx-idle-force",
+        "deskew-trace"])
+    parser.add_argument("--trace-trigger", default=None, choices=["lost", "u0"], help="deskew-trace: (re)arm the recording, frozen after the trigger (lost: deskew_lost rising, u0: U0 entry); without it: dump the recording.")
     args = parser.parse_args()
 
     bus   = open_remote(args)
@@ -510,6 +545,19 @@ def main():
             "fails_csr": lanes.reg("usb3_script_fails").read(), **resets, "x2": status["x2"],
             "lane_swap": status["lane_swap"], "recovery_count": status["recovery_count"],
             "rx_overflow": status["rx_overflow"]}))
+    elif args.command == "deskew-trace":
+        if not lanes.has_deskew_trace():
+            print("No deskew trace in this build (--with-deskew-trace).")
+        elif args.trace_trigger is not None:
+            lanes.deskew_trace_arm(args.trace_trigger)
+            print("armed:", args.trace_trigger)
+        else:
+            print(lanes.deskew_trace_status())
+            t0 = None
+            for ts, flags, words in lanes.deskew_trace_read():
+                t0 = ts if t0 is None else t0
+                w = " ".join(f"{d:08x}/{c:x}" for d, c in words)
+                print(f"{ts - t0:10d} {w}  {','.join(flags)}")
     elif args.command == "prbs-enable":
         lanes.prbs_enable(True)
     elif args.command == "prbs-disable":

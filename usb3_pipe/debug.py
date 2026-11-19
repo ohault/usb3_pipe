@@ -244,6 +244,159 @@ class USB3PHYDebug(LiteXModule):
 
 # USB3 Lanes Debug ---------------------------------------------------------------------------------
 
+# Lanes Deskew Trace -------------------------------------------------------------------------------
+
+DESKEW_TRACE_FLAGS = ["u0", "armed", "aligned", "overflow", "clear", "error0", "error1", "marker0",
+    "marker1", "gap0", "gap1", "deskew_lost", "tx_ready", "head0", "head1", "partial"]
+
+class LanesDeskewTrace(LiteXModule):
+    """Gen 1x2 deskew search events recorder (debug, lanes clock domain: no LiteScope trigger logic,
+    which missed the Tang Mega 138K Pro 125MHz lanes clock by 3-5ns, t47).
+
+    A ring buffer (block RAM, depth entries of 128 bits) records the deskew events in the lanes clock
+    domain: changes of the levels (u0, armed, aligned, deskew_lost, tx_ready, both lanes gap), error
+    words, overflows and clears, and the marker words while the search is armed (only then: the TS
+    stream would fill the buffer). Entry: timestamp
+    bits 0-15 (lanes clock cycles), DESKEW_TRACE_FLAGS bits 16-31, Lane 0 input word (data, ctrl)
+    bits 32-67, Lane 1 input word bits 68-103, timestamp bits 16-39 at bits 104-127.
+
+    Frozen post entries after the trigger (deskew_lost rising, or U0 entry with trigger=1), until
+    rearm. CSRs (sys): control (rearm pulse, trigger select), status (frozen, write pointer = oldest
+    entry once wrapped, entries written saturated), index (entry to read), entry0-3 (32 bits each,
+    entry0 = bits 0-31). The buffer is read while frozen (quasi-static, resynchronized).
+    """
+    def __init__(self, phy, depth=64, post=8):
+        cd     = getattr(phy, "pipe_cd", None) or "sys"
+        deskew = phy.deskew
+        lt     = getattr(phy, "lanes_lt", None)
+        aw     = log2_int(depth)
+        self._control = CSRStorage(fields=[
+            CSRField("rearm",   size=1, offset=0, pulse=True, description="Clear and restart the recording."),
+            CSRField("trigger", size=1, offset=1, description="Freeze trigger: 0 deskew_lost rising, 1 U0 entry."),
+        ])
+        self._status = CSRStatus(fields=[
+            CSRField("frozen", size=1,  offset=0,  description="Recording frozen (trigger + post entries)."),
+            CSRField("ptr",    size=aw, offset=8,  description="Write pointer (oldest entry once wrapped)."),
+            CSRField("count",  size=16, offset=16, description="Entries written (saturated)."),
+        ])
+        self._index = CSRStorage(aw, description="Entry to read (entry0-3).")
+        self._entries = [CSRStatus(32, name=f"entry{i}", description=f"Entry bits {32*i}-{32*i+31}.")
+            for i in range(4)]
+        for i, csr in enumerate(self._entries):
+            setattr(self, f"_entry{i}", csr)
+
+        # # #
+
+        # Lanes clock domain logic.
+        L = ClockDomainsRenamer({"sys": cd})(LiteXModule()) if cd != "sys" else LiteXModule()
+        self.logic = L
+
+        def lvl(name):
+            return getattr(lt, name) if (lt is not None and hasattr(lt, name)) else Constant(0)
+        partial = getattr(phy, "lanes_com_partial", Constant(0, 2))
+        flags_c = Cat(lvl("u0"), deskew.armed, deskew.aligned, deskew.overflow, deskew.clear,
+            *deskew.errors_in, *deskew.markers_in, *deskew.gaps,
+            getattr(phy, "lanes_deskew_lost", Constant(0)), lvl("tx_ready"), *deskew.heads,
+            partial != 0)
+        assert len(flags_c) == 16
+        # Inputs registered (timing: Tang Mega 138K Pro lanes clock), with their words.
+        flags = Signal(16)
+        prev  = Signal(16)
+        words = Signal(72)
+        L.sync += [
+            flags.eq(flags_c),
+            prev.eq(flags),
+            words.eq(Cat(*[Cat(d, c) for d, c in deskew.words_in])),
+        ]
+        f = {name: flags[i] for i, name in enumerate(DESKEW_TRACE_FLAGS)}
+        p = {name: prev[i]  for i, name in enumerate(DESKEW_TRACE_FLAGS)}
+        levels = ["u0", "armed", "aligned", "deskew_lost", "tx_ready"]
+        record = Signal()
+        L.comb += record.eq(
+            Reduce("OR", [f[n] ^ p[n] for n in levels]) |
+            ((f["gap0"] & f["gap1"]) ^ (p["gap0"] & p["gap1"])) |
+            f["error0"] | f["error1"] | f["overflow"] | f["clear"] |
+            ((f["marker0"] | f["marker1"]) & (f["armed"] | p["armed"])))
+
+        # Recording.
+        timestamp = Signal(40)
+        ptr       = Signal(aw)
+        count     = Signal(16)
+        frozen    = Signal()
+        post_n    = Signal(max=post + 1)
+        trigger_c = Signal()
+        rearm     = Signal()
+        trig_sel  = Signal()
+        mem  = Memory(128, depth)
+        wr   = mem.get_port(write_capable=True, clock_domain=cd)
+        rd   = mem.get_port(clock_domain=cd)
+        self.specials += mem, wr, rd
+        L.comb += [
+            trigger_c.eq(Mux(trig_sel, f["u0"] & ~p["u0"], f["deskew_lost"] & ~p["deskew_lost"])),
+            wr.adr.eq(ptr),
+            wr.dat_w.eq(Cat(timestamp[:16], flags, words, timestamp[16:])),
+            wr.we.eq(record & ~frozen),
+        ]
+        L.sync += [
+            timestamp.eq(timestamp + 1),
+            If(rearm,
+                ptr.eq(0),
+                count.eq(0),
+                frozen.eq(0),
+                post_n.eq(0),
+            ).Elif(~frozen,
+                If(record,
+                    ptr.eq(ptr + 1),
+                    If(count != 0xffff, count.eq(count + 1)),
+                ),
+                If(post_n != 0,
+                    If(record,
+                        # Last post entry written on this cycle.
+                        If(post_n == post,
+                            frozen.eq(1)
+                        ).Else(
+                            post_n.eq(post_n + 1)
+                        )
+                    )
+                ).Elif(trigger_c,
+                    post_n.eq(1)
+                )
+            )
+        ]
+
+        # Control/status/readout (sys <-> lanes clock domain: levels, quasi-static while frozen).
+        index_cd = Signal(aw)
+        entry_cd = Signal(128)
+        if cd != "sys":
+            rearm_ps = PulseSynchronizer("sys", cd)
+            self.submodules += rearm_ps
+            self.comb += rearm_ps.i.eq(self._control.fields.rearm)
+            L.comb += rearm.eq(rearm_ps.o)
+            self.specials += [
+                MultiReg(self._control.fields.trigger, trig_sel, cd),
+                MultiReg(self._index.storage, index_cd, cd),
+            ]
+            status = Signal(1 + aw + 16)
+            status_sys = Signal(len(status))
+            entry_sys  = Signal(128)
+            L.sync += [status.eq(Cat(frozen, ptr, count)), entry_cd.eq(rd.dat_r)]
+            self.specials += [MultiReg(status, status_sys), MultiReg(entry_cd, entry_sys)]
+        else:
+            self.comb += [
+                rearm.eq(self._control.fields.rearm),
+                trig_sel.eq(self._control.fields.trigger),
+                index_cd.eq(self._index.storage),
+            ]
+            status_sys = Cat(frozen, ptr, count)
+            entry_sys  = rd.dat_r
+        L.comb += rd.adr.eq(index_cd)
+        self.comb += [
+            self._status.fields.frozen.eq(status_sys[0]),
+            self._status.fields.ptr.eq(status_sys[1:1 + aw]),
+            self._status.fields.count.eq(status_sys[1 + aw:]),
+            *[self._entries[i].status.eq(entry_sys[32*i:32*(i + 1)]) for i in range(4)],
+        ]
+
 class USB3LanesDebug(LiteXModule):
     """USB3 Gen 1x2 Lanes Debug (CSRs, hardware bring-up of USB3PHY(lanes=2)), with USB3PHYDebug on
     the Configuration Lane (Lane 0):
@@ -266,7 +419,7 @@ class USB3LanesDebug(LiteXModule):
       training without U0 (0: disabled).
     """
     def __init__(self, phy, serdes, link=None, reinit_cycles=1024, monitor_tick_cycles=None,
-        with_counters=True, training_watchdog_ms=None, with_cd_counters=False):
+        with_counters=True, training_watchdog_ms=None, with_cd_counters=False, deskew_trace=False):
         # with_counters=False: status/control/re-initialization only, no event/RX errors counters
         # nor noise monitor (lean builds: timings on slow fabrics). With a PHY lanes logic in its
         # pipe_cd: status resynchronized to sys, re-initialization to pipe_cd, no counters.
@@ -374,6 +527,10 @@ class USB3LanesDebug(LiteXModule):
                     seen_ps.i.eq(self._deskew_seen_clear.re),
                     phy.lanes_deskew_seen_clear.eq(seen_ps.o),
                 ]
+
+        # Deskew search events recorder (opt-in, diagnosis builds).
+        if deskew_trace:
+            self.deskew_trace = LanesDeskewTrace(phy)
 
         if hasattr(phy, "lanes_idle_recovery"):
             self.comb += phy.lanes_idle_recovery.eq(self._control.fields.idle_recovery)

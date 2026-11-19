@@ -16,7 +16,7 @@ from litex.soc.interconnect import stream
 
 from usb3_pipe.common import K
 from usb3_pipe.ltssm  import U0_EXIT_CAUSES
-from usb3_pipe.debug  import USB3PHYDebug, USB3LanesDebug, LanesNoiseMonitor, LanesTrainingWatchdog, USB3PHY_DEBUG_HISTORY_DEPTH
+from usb3_pipe.debug  import USB3PHYDebug, USB3LanesDebug, LanesNoiseMonitor, LanesTrainingWatchdog, USB3PHY_DEBUG_HISTORY_DEPTH, LanesDeskewTrace, DESKEW_TRACE_FLAGS
 
 # Fake PHY/SerDes ----------------------------------------------------------------------------------
 
@@ -622,3 +622,80 @@ class TestLanesTrainingWatchdog(unittest.TestCase):
             ("U3", 400)])["count"], 0)
         out = self.run_watchdog([("Polling.RxEQ", 400)], timeout_ms=0)
         self.assertEqual((out["count"], out["warm_cycles"]), (0, 0))
+
+class DeskewTraceDUT(Module):
+    def __init__(self):
+        from types import SimpleNamespace
+        deskew = SimpleNamespace(
+            armed=Signal(), aligned=Signal(), overflow=Signal(), clear=Signal(),
+            errors_in=[Signal(), Signal()], markers_in=[Signal(), Signal()], gaps=[Signal(), Signal()],
+            heads=[Signal(), Signal()], words_in=[(Signal(32), Signal(4)) for _ in range(2)])
+        self.phy = SimpleNamespace(pipe_cd=None, deskew=deskew,
+            lanes_lt=SimpleNamespace(u0=Signal(), tx_ready=Signal()),
+            lanes_deskew_lost=Signal(), lanes_com_partial=Signal(2))
+        self.submodules.trace = LanesDeskewTrace(self.phy, depth=16, post=2)
+
+class TestLanesDeskewTrace(unittest.TestCase):
+    def test_trace(self):
+        # Events recorded with their words (error word on lane 1), markers only while armed, frozen
+        # 2 entries after the deskew_lost rising edge, entries read back by index; rearm restarts.
+        dut = DeskewTraceDUT()
+        d   = dut.phy.deskew
+        t   = dut.trace
+        def generator():
+            def step(n=1):
+                for _ in range(n):
+                    yield
+            yield from step(4)
+            yield d.markers_in[0].eq(1)           # Marker while not armed: not recorded.
+            yield from step()
+            yield d.markers_in[0].eq(0)
+            yield d.armed.eq(1)                   # 1: armed.
+            yield from step()
+            yield d.markers_in[1].eq(1)           # 2: marker while armed.
+            yield from step()
+            yield d.markers_in[1].eq(0)
+            yield d.errors_in[1].eq(1)            # 3: error word on lane 1, with its word.
+            yield d.words_in[1][0].eq(0x9c123456)
+            yield d.words_in[1][1].eq(0b1000)
+            yield d.armed.eq(0)
+            yield from step()
+            yield d.errors_in[1].eq(0)
+            yield from step(3)
+            yield dut.phy.lanes_deskew_lost.eq(1) # 4: trigger, then 2 entries.
+            yield from step()
+            yield dut.phy.lanes_deskew_lost.eq(0) # 5.
+            yield from step()
+            yield d.overflow.eq(1)                # 6: last entry, frozen.
+            yield from step()
+            yield d.overflow.eq(0)
+            yield d.clear.eq(1)                   # Not recorded (frozen).
+            yield from step(4)
+            self.assertEqual((yield t._status.fields.frozen), 1)
+            self.assertEqual((yield t._status.fields.count), 6)
+            entries = []
+            for i in range(6):
+                yield t._index.storage.eq(i)
+                yield from step(3)
+                e = 0
+                for k in range(4):
+                    e |= (yield t._entries[k].status) << (32*k)
+                entries.append(e)
+            names = DESKEW_TRACE_FLAGS
+            flags = [[n for j, n in enumerate(names) if (e >> (16 + j)) & 1] for e in entries]
+            self.assertEqual(flags[0], ["armed"])
+            self.assertEqual(flags[1], ["armed", "marker1"])
+            self.assertEqual(flags[2], ["error1"])
+            self.assertEqual((entries[2] >> 68) & 0xfffffffff, (0b1000 << 32) | 0x9c123456)
+            self.assertEqual(flags[3], ["deskew_lost"])
+            self.assertEqual(flags[4], [])
+            self.assertEqual(flags[5], ["overflow"])
+            ts = [(e & 0xffff) | ((e >> 104) << 16) for e in entries]
+            self.assertEqual(ts, sorted(ts))
+            # Rearm.
+            yield t._control.fields.rearm.eq(1)
+            yield from step()
+            yield t._control.fields.rearm.eq(0)
+            yield from step(2)
+            self.assertEqual((yield t._status.fields.frozen), 0)
+        run_simulation(dut, generator())
