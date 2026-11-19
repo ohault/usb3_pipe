@@ -1342,6 +1342,14 @@ valid words between: the receiver leaving electrical idle): never paired until a
 gap, up to 3 isolated error words neither break it nor disarm (`max_isolated`, `test_deskew_isolated_errors_in_gap`);
 error words in quick succession (a lane not word aligned) still disarm. Next (t49): soak with the fix.
 
+**t49 (5f11aa8; Tang Device Core p2 r1 + deskew trace met 125.48MHz, p3 r1 failed in Gowin routing; Tang PRBS split p3
+met 125.09MHz; Acorn hosts met): Gen 1x2 400/400, 0 errors, no Hot Reset loop**: loads > 100 resets 0/20 (t43 13, t44 7,
+t45 2, t46 3), median resets per load 20 (max 25), runs > 100ms 0, long loops 0. The loop start event (lanes pairing lost
+mid TS burst, lane 0 COM word against a lane 1 TS body word) still occurs 7 times in 400 runs, now re-paired on the next
+burst (the search kept armed through the K28.4 words, both lanes' markers paired ~+1230 cycles): 1-5 Hot Resets each.
+Gen 1x1 40/40 (one load back at Gen 1x1 in 7.34s after x2-disable instead of ~0.65s: not investigated). PRBS 18/18 Warm
+Resets in 1.08-1.11s, 0 errors, 610MB/s.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits
