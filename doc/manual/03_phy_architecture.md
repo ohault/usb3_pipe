@@ -325,17 +325,22 @@ so a lane never sends a word the other lane does not send. Each lane has its own
 and its own polarity.
 
 On receive, the deskew pairs the first COM symbols of each lane after a gap, the TSEQ before the
-TS1 or the Logical Idle before a Recovery, whatever the lanes latencies (`LaneDeskew`). A word holding a
-decode error (K28.4) is not part of a gap and disarms the search: a lane that is not word aligned
-yet receives garbage without COM symbols, and its first COM symbol would otherwise be paired with a
-later training sequence of the other lane. A word whose K28.4 symbols end it and that is followed by
-a COM word does not disarm the search: those are the symbol before the first COM symbol, or the first
-COM symbols themselves, received with errors. Recovery and Hot Reset send no gap, so a disarm at that
-point would leave the lanes unpaired until the next retrain. Once a lane has reached its gap, up to
-three isolated error words do not disarm the search either. An Acorn Mini sends a few of them about 50
-words before each TS burst, as its receiver partner leaves electrical idle. A lane that is not word
-aligned yet produces error words in quick succession, so it still disarms. The
-destriper then rebuilds the words (`LaneDestriper`). In U0 the PHY goes to Recovery when the
+TS1 or the Logical Idle before a Recovery, whatever the lanes latencies (`LaneDeskew`).
+
+The deskew also handles symbols received with 8b/10b errors, which the PHY replaces with K28.4:
+
+- A COM word with some of its symbols replaced still counts as a marker. The first COM symbols of a
+  TS1 after an idle period often arrive with errors.
+- Other words with errors disarm the search. A lane that is not word aligned yet receives garbage,
+  and its first marker would otherwise be paired with a later TS1 of the other lane.
+- There are two exceptions: a word that ends with K28.4 right before a COM word, and up to three
+  isolated error words once a lane has reached its gap. Recovery and Hot Reset send no gap, so
+  disarming at that point would leave the lanes unpaired until the next retrain.
+
+A FIFO overflow, or a marker against a plain data word, clears the pairing. Either one means the
+lanes were paired a TS1 apart: identical TS1s would otherwise hide this until the end of the burst.
+
+The destriper then rebuilds the words (`LaneDestriper`). In U0 the PHY goes to Recovery when the
 deskew is lost, when a lane stays in electrical idle for 10 µs, when a lane realigns its words,
 or when a lane receives a run of SKP symbols of odd length. SKP ordered sets are two symbols, so
 an odd run means a SKP symbol received with an error, kept by the SKP removal, or a symbol taken
@@ -349,7 +354,8 @@ would otherwise move to the first intact COM symbol, and stay there after the la
 also kept a wrong alignment: a lane shifted by one or two symbols, then ordered sets whose first
 COM symbols all arrive as K28.4, start their shortened COM runs on the shifted alignment (on the
 Tang Mega 138K Pro the deskew then never paired again until a retrain). A word ending with those
-K28.4 symbols, followed by a word starting with the other COM symbols, moves the alignment back. A lane that keeps decoding errors is re-initialized. On Gen 1x2, the receive words are
+K28.4 symbols, followed by a word starting with the other COM symbols, moves the alignment back.
+A lane that keeps decoding errors is re-initialized. On Gen 1x2, the receive words are
 also kept for the link layer in Polling.Idle and HotReset.Exit until U0 (as in Recovery.Idle):
 the partner can enter U0 first and send its advertisement at once. The transmit words are dropped
 out of U0, so nothing held from before a Recovery is sent ahead of the next advertisement.
