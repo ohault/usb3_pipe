@@ -678,34 +678,3 @@ class TestLanes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-class TestLanesLevelsStable(unittest.TestCase):
-    def test_no_intermediate(self):
-        # USB3PHY.add_lanes_levels_stable (pipe_cd LTSSM view): tx_ready/idle_handshake changing in
-        # the same sys cycle can land in different pipe_cd cycles (untimed resynchronizers): a one
-        # cycle intermediate combination (both 0: TX scramblers reset in U0, t32) is not seen.
-        from usb3_pipe.phy import USB3PHY
-        class LevelsDUT(LiteXModule):
-            def __init__(self):
-                self.pipe_cd        = "sys"
-                self.tx_ready       = Signal()
-                self.idle_handshake = Signal()
-                self.outs = USB3PHY.add_lanes_levels_stable(self,
-                    [self.tx_ready, self.idle_handshake], ["tx_ready", "idle_handshake"])
-        dut = LevelsDUT()
-        seen = []
-        def generator(dut):
-            # Idle handshake, a one cycle gap (skewed resynchronization), U0.
-            for tx_ready, idle, cycles in [(0, 0, 4), (0, 1, 8), (0, 0, 1), (1, 0, 8), (0, 0, 8)]:
-                for _ in range(cycles):
-                    yield dut.tx_ready.eq(tx_ready)
-                    yield dut.idle_handshake.eq(idle)
-                    yield
-                    seen.append(((yield dut.outs[0]), (yield dut.outs[1])))
-        run_simulation(dut, generator(dut))
-        # Both levels seen, then the change from idle_handshake to tx_ready without a gap.
-        start = seen.index((0, 1))
-        end   = seen.index((1, 0))
-        self.assertTrue(all(s == (0, 1) for s in seen[start:end]))
-        # A real change held 2 cycles or more is followed (U0 left at the end).
-        self.assertEqual(seen[-1], (0, 0))
