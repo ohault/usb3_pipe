@@ -134,9 +134,10 @@ class TestTraining(unittest.TestCase):
                     yield dut.sink.ctrl.eq(0b1111 if j == 0 else 0b0000)
                     yield dut.sink.data.eq(word)
                     yield
+                    loopback = (yield dut.loopback)
                     if (yield dut.detected):
-                        log.append(("detected", n, (yield dut.loopback)))
-                    if (yield dut.loopback) and not log or (yield dut.loopback) and log[-1][0] != "loopback":
+                        log.append(("detected", n, loopback))
+                    if loopback and not any(kind == "loopback" for kind, _, _ in log):
                         log.append(("loopback", n, 1))
             for i in range(16):
                 yield
