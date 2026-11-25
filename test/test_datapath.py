@@ -230,7 +230,7 @@ class TestDatapath(unittest.TestCase):
 
     def test_rx_word_aligner_escapes_shift_kept_on_com_errors(self):
         # A lane shifted by 1-2 Symbols while every TS1 has its first 1-2 COM Symbols received as
-        # K28.4 (Tang Mega 138K Pro lane 1 in the Hot Reset loops, t43): the shortened COM runs start
+        # K28.4 (Gen 1x2 lane on hardware, Hot Reset loops): the shortened COM runs start
         # on the shifted alignment and kept it (partial COM words, the lanes deskew never paired
         # again). The output pattern (a word ending with the K28.4 Symbols, then one starting with the
         # remaining COM Symbols) moves the alignment back: whole COM words again.

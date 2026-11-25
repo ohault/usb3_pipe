@@ -195,8 +195,8 @@ class RXWordAligner(LiteXModule):
     With ordered_sets, a wrong alignment kept by that rule is also corrected: after a lane shifted by
     k Symbols (1-2) while every Ordered Set has its first k COM Symbols received as decode errors
     (K28.4), the shortened COM runs start on the wrong alignment and keep it (output: a word ending
-    with k K28.4, then a word starting with 4-k COM Symbols and other Symbols: the lanes deskew never
-    pairs again, Tang Mega 138K Pro t43). That output pattern moves the alignment k Symbols earlier
+    with k K28.4, then a word starting with 4-k COM Symbols and other Symbols: a lane stays k Symbols
+    off, with Gen 1x2 the lanes deskew never pairs again). That output pattern moves the alignment k Symbols earlier
     (the K28.4 Symbols are the first COM Symbols of the run).
     """
     def __init__(self, markers=(COM,), ordered_sets=None):
@@ -245,7 +245,7 @@ class RXWordAligner(LiteXModule):
         # alignment of the word after the run start (this word for a run earlier, the next word for
         # a run later), where a 4 COM run on the current alignment ends: a run starting k Symbols
         # late and ending there is a TS1/TS2 whose first k COM Symbols were received with errors
-        # (two Acorn Minis: the first COM Symbols of the TS1/TS2 often corrupted, as K28.4
+        # (on hardware the first COM Symbols of the TS1/TS2 are often corrupted, as K28.4
         # substitutions or other Symbols), the alignment is kept. Without it, the alignment moved
         # k Symbols later, back on the next Ordered Set, or never after the last TS2 before the
         # Logical Idle (a lane k Symbols off in U0). A real alignment change (SKP removal, symbol
@@ -302,7 +302,7 @@ class RXWordAligner(LiteXModule):
         )
 
         # Wrong alignment kept on shortened COM runs (see above): the output word registered first
-        # (timing: the alignment selection to the Symbol compares was the Tang lanes clock worst path),
+        # (timing: the alignment selection to the Symbol compares otherwise),
         # its features registered, the correction two words later (in the TS body).
         if ordered_sets:
             out_ok   = Signal()
