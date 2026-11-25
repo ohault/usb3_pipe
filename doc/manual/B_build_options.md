@@ -181,7 +181,7 @@ Numbers are in cycles of the 133 MHz simulation clock unless stated.
 | `--lane1-word-shift` | 2 | Receive word shift of device lane 1 (symbols, two lanes) |
 | `--lane-skp` | 4096 | Period of the extra SKPs on one lane (0: none, two lanes) |
 | `--lane-skp-error` | none | Two lanes: `CYCLES,DIR,LANE`, one SKP symbol error on host lane `LANE` (`h2d`, `d2h`) after U0 |
-| `--lane-slip` | none | Two lanes, 0 ppm: `CYCLE,LANE`, 2 symbols dropped by the host lane receiver at `CYCLE` |
+| `--lane-slip` | none | Two lanes, 0 ppm: `CYCLE,LANE` (repeated), 2 symbols dropped by the host lane receiver at each `CYCLE` |
 | `--lane-com-error` | none | Two lanes, 0 ppm: `CYCLE,LANE[,KIND]`, the first 2 COM symbols of the next host lane receiver word with COM symbols after `CYCLE` as decode errors (K28.4, `sub`, default) or data symbols (D10.2, `data`) |
 | `--lane-rx-log` | none | Two lanes, 0 ppm: `START,END`, host and device lanes decoded words displayed |
 | `--gen2-capable` | off | Gen 2 advertised and negotiated in the SuperSpeedPlus polling |

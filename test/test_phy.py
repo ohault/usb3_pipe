@@ -609,6 +609,18 @@ class TestPHYX2Core(unittest.TestCase):
         self.assertRegex(out, r"HOST\s*lanes partial COM word")
         self.assertNotIn("DEV  Link Layer Recovery request", out)
 
+    def test_core_x2_lane_slip_recovery_idle(self):
+        # Host Lane 1 losing a 16-bit word after the last COM of the Device's Recovery TS2s, Host in
+        # Recovery.Idle with the Device already in U0 (t55, Tang Lane 1 RX_VLD_OUT gap): the lane
+        # descrambler out of step never sees the Idle Symbols; the Device Recovery TS1 bring the
+        # Host back to Recovery.Active (was: Recovery.Idle until tRecoveryIdleTimeout, eSS.Inactive
+        # on both sides and a retrain through Polling).
+        out = self.run_sim("core_x2_lane_slip_recovery_idle", ["--dev-mode", "x2", "--lanes-crossed",
+            "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000",
+            "--lane-slip", "900648,1,900941,1"])
+        self.assertRegex(out, r"\[00900941\] HOST LANE\s+1 RX SLIP")
+        self.assertNotRegex(out, r"(HOST|DEV)\s*entering eSS.Inactive state")
+
     def test_core_x2_lanes_reinit(self):
         # Device transceivers re-initialized in U0 (USB3LanesDebug xcvr_reinit: both SerDes TX in
         # electrical idle and RX words lost for 10us, as the GTP TX/RX and Quad PLL reset sequences):

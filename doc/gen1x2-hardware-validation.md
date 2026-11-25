@@ -1425,6 +1425,17 @@ delivering for ~200 cycles; Tang `usb3_gtr12_lane{n}_rx_gaps`/`rx_gap_time`/`rx_
 low cycles: count, LTSSM state at the last gap start/end, start time on the `usb3_debug` timestamp/LTSSM history
 timebase, length) to place the gap in the training.
 
+**t55 (f274c97, Tang Device Core p3 r1 125.17MHz, 10 loads x 20 runs)**: 200/200, 0 errors (Hot Resets per load 20
+except 25/65, Tang deskew losses 0-124 per load). The t54 gap (Lane 1 only, 198-201 rx cycles) is rare and placed
+at a received pattern change: 1us after the Recovery.Active entry (Logical Idle -> TS1), or across Recovery.Active ->
+Configuration (TS1 -> TS2). Lane 1 also gaps hundreds to thousands of times per Polling training (RxEQ/Active, never
+lane 0, never in U0). 9 of the 11 gap windows are a Tang retrain: a deskew loss after HotReset.Exit -> U0, then the
+Tang held 2ms in Recovery.Idle (eSS.Inactive, Polling) while the Acorn Host went to U0 and later timed out its own
+Recovery.Active: reproduced in simulation (`--lane-slip 900648,1,900941,1`: a Host lane word lost after the last COM
+of the Device's TS2, the lane descrambler out of step never sees the Idle Symbols, the Device's later Recovery TS1
+ignored in Recovery.Idle). Fix: at Gen 1x2 a new TS1 in Recovery.Idle -> Recovery.Active
+(`test_core_x2_lane_slip_recovery_idle`). 16 losses without any gap (clear/com_slip, clear/realign: separate).
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits

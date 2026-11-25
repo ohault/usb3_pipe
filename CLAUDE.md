@@ -239,6 +239,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   `--rx-valid-gate`, 400/400 runs): each loss follows a ~200 rx cycle GTR12 Lane 1 RX_VLD_OUT gap (rx_invalid 0 in all
   361 loss-free runs), the gate only changes the symptom (plain -> overflow loss): kept off; gap placement CSRs added
   (`usb3_gtr12_lane{n}_rx_gaps`/`rx_gap_time`/`rx_gap_len`, t55).
+  t55: 200/200; the Lane 1 gap at received pattern changes (Recovery.Active entry, TS1 -> TS2); most gap windows = a
+  Tang retrain after a 2ms Recovery.Idle (lane descrambler out of step, partner TS1 ignored): fix Gen 1x2 new TS1 in
+  Recovery.Idle -> Recovery.Active (`--lane-slip` several slips, `test_core_x2_lane_slip_recovery_idle`), t56 to run.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
