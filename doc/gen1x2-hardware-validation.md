@@ -1436,6 +1436,12 @@ of the Device's TS2, the lane descrambler out of step never sees the Idle Symbol
 ignored in Recovery.Idle). Fix: at Gen 1x2 a new TS1 in Recovery.Idle -> Recovery.Active
 (`test_core_x2_lane_slip_recovery_idle`). 16 losses without any gap (clear/com_slip, clear/realign: separate).
 
+**t56 (Tang A f274c97 p3 r1 met / B 90b7e6e p3 r1 -0.13ns, gate waived: no B placement met, 20 loads alternating x
+20 runs)**: A 200/200, B 200/200, 0 errors, every run ~46ms; Tang retrains A 4 (2 noisy loads), B 0 (p 0.17: none of
+B's loads was noisy, inconclusive); the new transition seen once on hardware (B load 19: HotReset.Exit -> U0, deskew
+lost, Recovery.Idle, a new TS1 2us later -> Recovery.Active, back in 12us with one extra Hot Reset, no retrain;
+before: 2ms Recovery.Idle, eSS.Inactive, Polling). Gen 1x1 4/4. Kept.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits
