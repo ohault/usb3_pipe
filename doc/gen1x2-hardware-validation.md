@@ -1406,6 +1406,25 @@ with 1-2 `pending_hp` Recoveries per loss (bursts of ~650 in one run on the gate
 Acorn Host <-> Tang Device (t49/t51), Tang Host <-> Acorn Device (t52b), both at Gen 1x2 and Gen 1x1. Open: the
 lanes pairing loss mid TS burst (both receivers: Tang Device t49, Tang Host t52b), now recovered without a loop.
 
+**t53 (analysis of the t48/t49/t52/t52b deskew trace dumps, 76 dumps, 27 mid TS burst losses)**: the off lane is
+always the Tang Lane 1 (24/24 decoded), late: its descrambler (reset on any COM Symbol) ran 28-36 Symbols without a
+COM at the loss (a whole TS head word missed), lane 0 normal; 20 losses with no error word, overflow or partial COM
+before them; only held/repeated words plus a missing COM word explain all the offsets. Side finding: every lane 0
+TS2 word 2/3 received with Symbol 2 as K28.4 (outside the loss windows, open).
+
+**t54 (6b17a37, Acorn scripted Host <-> Tang Device Core, Gen 1x2, 20 loads alternating A default / B
+`--rx-valid-gate`, p2 r1 met for both, 20 runs each)**: A 200/200, B 200/200, 0 errors; B trains normally now (the
+t16q starvation was before the Acorn TX swing fix). Tang deskew-lost U0 exits A 34 (12 runs), B 114 (27 runs, 102
+on two noisy loads: load variance). Lane `rx_invalid` (GTR12 RX_VLD_OUT low cycles) stays 0 in all 361 runs
+without a loss and moves in 28/39 runs with one (Fisher p 3.5e-10 A, 2.1e-23 B): typically a single ~200 rx cycle
+(1.6us) gap on Lane 1 only (lane 0 0), no Warm Reset/LFPS in those runs. The gap is the mechanism: without the
+gate Lane 1 delivers held words (`plain` loss, the t53 signature), with it nothing for ~200 cycles (`overflow`
+loss, the deskew FIFO is 8 words); the gate does not help (kept off). 11 losses without rx_invalid (mostly
+`clear,realign`: a lane word realignment, separate). Gen 1x1 8/8. Open: why the Lane 1 GTR12 RX interface stops
+delivering for ~200 cycles; Tang `usb3_gtr12_lane{n}_rx_gaps`/`rx_gap_time`/`rx_gap_len` CSRs added (gaps of 16+
+low cycles: count, LTSSM state at the last gap start/end, start time on the `usb3_debug` timestamp/LTSSM history
+timebase, length) to place the gap in the training.
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits

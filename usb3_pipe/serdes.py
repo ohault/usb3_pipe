@@ -845,6 +845,25 @@ class GW5USB3SerDes(USB3SerDes):
             self.rx_invalid_count = Signal(32) # o (sys)
             self.rx_invalid_sync  = bs = BusSynchronizer(32, "rx", "sys")
             self.comb += [bs.i.eq(count), self.rx_invalid_count.eq(bs.o)]
+            # RX_VLD_OUT gaps (rx_gap_cycles+ consecutive low cycles, t54: ~200 cycles on Lane 1 at
+            # each mid TS burst lanes pairing loss): rx_gap_start/rx_gap_end toggle at the start/end
+            # of each gap, rx_gap_len = length of the last ended gap (rx clock cycles, saturated);
+            # rx clock domain (a toggle and a quasi-static value: resynchronized by the reader).
+            rx_gap_cycles = 16
+            gap_len = Signal(16)
+            self.rx_gap_start = Signal()
+            self.rx_gap_end   = Signal()
+            self.rx_gap_len   = Signal(16)
+            self.sync.rx += If(self.rx_invalid,
+                If(gap_len != 0xffff, gap_len.eq(gap_len + 1)),
+                If(gap_len == (rx_gap_cycles - 1), self.rx_gap_start.eq(~self.rx_gap_start))
+            ).Else(
+                gap_len.eq(0),
+                If(gap_len >= rx_gap_cycles,
+                    self.rx_gap_len.eq(gap_len),
+                    self.rx_gap_end.eq(~self.rx_gap_end)
+                )
+            )
 
         # TX Electrical Idle (UPAR writes of the lane TX driver control register): no TX Electrical
         # Idle from the fabric data (constant words: DC level on the AC coupled link, seen on

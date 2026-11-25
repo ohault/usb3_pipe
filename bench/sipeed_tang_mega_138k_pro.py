@@ -683,6 +683,52 @@ class USB3SoC(USB3BaseSoC):
 
 # Gen 1x2 (two lanes) -------------------------------------------------------------------------------
 
+def add_gtr12_rx_gaps(soc, n, serdes):
+    """Lane n GTR12 RX_VLD_OUT gaps (16+ low rx cycles) placed in the LTSSM (t54: a ~200 cycles
+    Lane 1 gap at each mid TS burst lanes pairing loss): gaps count, LTSSM state at the start/end
+    of the last gap, its start time (us, the usb3_debug timestamp/LTSSM history timebase) and
+    length (rx clock cycles); sys clock domain (LTSSM), quasi-static reads."""
+    start = Signal()
+    end   = Signal()
+    soc.specials += [MultiReg(serdes.rx_gap_start, start), MultiReg(serdes.rx_gap_end, end)]
+    start_d = Signal()
+    end_d   = Signal()
+    count       = Signal(16)
+    start_state = Signal(8)
+    end_state   = Signal(8)
+    start_time  = Signal(32)
+    state       = soc.usb3_phy.ltssm_state
+    soc.sync += [
+        start_d.eq(start),
+        end_d.eq(end),
+        If(start != start_d,
+            count.eq(count + 1),
+            start_state.eq(state),
+            start_time.eq(soc.usb3_debug._timestamp.status),
+        ),
+        If(end != end_d, end_state.eq(state)),
+    ]
+    gaps = CSRStatus(fields=[
+        CSRField("count",       size=16, offset=0,  description="Gaps started (wrapping)."),
+        CSRField("start_state", size=8,  offset=16, description="LTSSM state at the last gap start."),
+        CSRField("end_state",   size=8,  offset=24, description="LTSSM state at the last gap end."),
+    ], name=f"usb3_gtr12_lane{n}_rx_gaps",
+        description=f"Lane {n} GTR12 RX_VLD_OUT gaps (16+ low rx cycles).")
+    gap_time = CSRStatus(32, name=f"usb3_gtr12_lane{n}_rx_gap_time",
+        description=f"Lane {n} last RX_VLD_OUT gap start (us, usb3_debug timestamp).")
+    gap_len = CSRStatus(16, name=f"usb3_gtr12_lane{n}_rx_gap_len",
+        description=f"Lane {n} last ended RX_VLD_OUT gap length (rx clock cycles, saturated).")
+    setattr(soc, f"usb3_gtr12_lane{n}_rx_gaps",     gaps)
+    setattr(soc, f"usb3_gtr12_lane{n}_rx_gap_time", gap_time)
+    setattr(soc, f"usb3_gtr12_lane{n}_rx_gap_len",  gap_len)
+    soc.comb += [
+        gaps.fields.count.eq(count),
+        gaps.fields.start_state.eq(start_state),
+        gaps.fields.end_state.eq(end_state),
+        gap_time.status.eq(start_time),
+    ]
+    soc.specials += MultiReg(serdes.rx_gap_len, gap_len.status)
+
 class USB3X2SoC(USB3BaseSoC):
     """Gen 1x2 on the dock SFP0 (Lane 0, GTR12 Q1 lane 0) and SFP1 (Lane 1, Q1 lane 1): PRBS Link-Layer
     stand-ins or, with lanes_core, the scripted host (Host role) / Device Core (Device role), as the
@@ -790,6 +836,7 @@ class USB3X2SoC(USB3BaseSoC):
                 description=f"Lane {n} GTR12 RX_VLD_OUT low cycles (rx clock, wrapping).")
             setattr(self, f"usb3_gtr12_lane{n}_rx_invalid", csr)
             self.comb += csr.status.eq(serdes.rx_invalid_count)
+            add_gtr12_rx_gaps(self, n, serdes)
             if hasattr(serdes, "cdr_toggle"):
                 csr = CSRStatus(16, name=f"usb3_gtr12_lane{n}_cdr_toggles",
                     description=f"Lane {n} CDR re-acquisitions (signal detect toggles, gtr12 clock domain).")
