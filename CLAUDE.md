@@ -268,6 +268,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   Recovery.Idle -> Recovery.Active (`--lane-slip` several slips, `test_core_x2_lane_slip_recovery_idle`); t56: 400/400,
   the new transition seen once on hardware (back in 12us, no retrain), retrains A 4 / B 0 (p 0.17, B loads all quiet),
   B build -0.13ns (no placement met): kept.
+  t57 (running): Lane 1 gaps vs the quad RX clock root: the x2 `.csr` is the lane 0/1 configurations merged, 0x908870
+  (`q1.preload_fpcs_clock_root`) ORed to lane 1's 0x10000 while `usb3_5g_x2.toml` intends LN0 (per lane settings
+  identical): A/B `--serdes-csr` 0x10000 vs 0x0.
   Open: Host Advertisement lost when the
   Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
