@@ -123,6 +123,12 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   elaboration; fast suite 7 known. Upstream PR
   [enjoy-digital/usb3_pipe#209](https://github.com/enjoy-digital/usb3_pipe/pull/209) (opened by the user). Tang Gen 1x2
   bench: a later PR.
+- `gw5-rx-stall-errors` (worktree `../usb3_pipe_pr14`, from upstream master 4550911, independent of the stack): PR 14
+  (2026-11-26), GTR12 RX stalls (RX_VLD_OUT low 64+ rx cycles) counted as RX errors (`RXErrorMonitor` `extra`,
+  `add_lfps(rx_errors_extra)`): Tang Warm Reset detection (t16v/t16w), test_lfps_reset test, transceivers chapter;
+  fast suite 7 known, Tang target elaborates. For the user to open. Not included: `decode_errors` (fork lanes RX
+  re-init input, with the Tang Gen 1x2 bench PR). Tang Gen 1x2 bench PR next (GW5UPARArbiter,
+  gw5_gtr12_share_quad, gw5_csr_merge_lanes, Tang --lanes 2), stacked on #209.
 - Merged PR branches to delete on the fork (2026-11-26, user request; deletion refused here by the git proxy and the
   GitHub API proxy, the user deletes them): gen1x2-deskew, gen1x2-phy, lanes-packet-aligner, lanes-skp-parity,
   pipe-cd-gen2-levels, pipe-cd-ltssm-levels, rx-word-aligner-com-runs, ts2-identical.
