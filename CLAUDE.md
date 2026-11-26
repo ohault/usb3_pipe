@@ -137,7 +137,8 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   names only); Tang `--lanes 2 --role --no-x2 --lanes-core` (USB3X2SoC split clocking, place option 3 for PRBS),
   `add_usb3_lanes_link` phy_cd, `PRBSLinkTester` cd, `USB3LanesDebug` pipe_cd (status only). Left out: CDR toggle,
   rx_valid_gate, RX gaps/invalid counters, clock meters, deskew trace, place-auto, PRBS resync/lane check, scripted
-  host. Full suite 7 known. For the user to open. Disk: delete worktree `build/` dirs after full suites (~11G each).
+  host. Full suite 7 known. Upstream PR
+  [enjoy-digital/usb3_pipe#211](https://github.com/enjoy-digital/usb3_pipe/pull/211) (opened by the user). Disk: delete worktree `build/` dirs after full suites (~11G each).
 - Merged PR branches to delete on the fork (2026-11-26, user request; deletion refused here by the git proxy and the
   GitHub API proxy, the user deletes them): gen1x2-deskew, gen1x2-phy, lanes-packet-aligner, lanes-skp-parity,
   pipe-cd-gen2-levels, pipe-cd-ltssm-levels, rx-word-aligner-com-runs, ts2-identical.
