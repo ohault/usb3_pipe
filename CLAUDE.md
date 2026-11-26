@@ -120,7 +120,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   Acorn Mini Gen 1x2 bench: `acorn.py --lanes 2 --role --no-x2 --lanes-core` (Device only), validated GTP defaults
   (post-cursor 6, TXDIFFCTRL 15, lpm-hold rxeq, 40ns idle spikes), SFP-1 IOs only with --lanes 2 (Gen 1x1 build
   unchanged), `add_usb3_lanes_link`, small `usb3_lanes.py` (status/prbs/retrain/x2-enable/watch), test_targets x2
-  elaboration; fast suite 7 known. For the user to open. Tang Gen 1x2 bench: a later PR.
+  elaboration; fast suite 7 known. Upstream PR
+  [enjoy-digital/usb3_pipe#209](https://github.com/enjoy-digital/usb3_pipe/pull/209) (opened by the user). Tang Gen 1x2
+  bench: a later PR.
 - Merged PR branches to delete on the fork (2026-11-26, user request; deletion refused here by the git proxy and the
   GitHub API proxy, the user deletes them): gen1x2-deskew, gen1x2-phy, lanes-packet-aligner, lanes-skp-parity,
   pipe-cd-gen2-levels, pipe-cd-ltssm-levels, rx-word-aligner-com-runs, ts2-identical.
