@@ -1111,7 +1111,7 @@ class USB3PIPESim(SoCMini):
             )
         if hasattr(phy, "lanes_skp_odd"):
             sync += If(phy.lanes_skp_odd,
-                Display("[%08d] {} lanes SKP run of odd length in U0 (lane shifted)".format(label), timer)
+                Display("[%08d] {} lanes odd SKP run (lane shifted by its SKP removal)".format(label), timer)
             )
         swap_d = Signal()
         sync += swap_d.eq(phy.lane_swap)

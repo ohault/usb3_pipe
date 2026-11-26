@@ -668,7 +668,7 @@ class TestPHYX2Core(unittest.TestCase):
         out = self.run_sim("core_x2_skp_error_d2h", ["--dev-mode", "x2", "--lanes-crossed",
             "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000",
             "--lane-skp-error", "303000,d2h,0"])
-        self.assertRegex(out, r"HOST\s*lanes SKP run of odd length in U0")
+        self.assertRegex(out, r"HOST\s*lanes odd SKP run")
         self.assertNotIn("DEV  Link Layer Recovery request", out)
 
     def test_core_x2_skp_error(self):
@@ -681,7 +681,7 @@ class TestPHYX2Core(unittest.TestCase):
             "--lanes-tx-inverted", "--no-host-skp", "--host-script", "900000",
             "--lane-skp-error", "303000,h2d,1"])
         self.assertIn("LANE SKP SYMBOL ERROR", out)
-        self.assertRegex(out, r"DEV\s*lanes SKP run of odd length in U0")
+        self.assertRegex(out, r"DEV\s*lanes odd SKP run")
         self.assertNotIn("DEV  Link Layer Recovery request", out)
 
     def test_core_x2_tx_shift(self):
