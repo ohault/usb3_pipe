@@ -1450,10 +1450,11 @@ LFPS plus a few 108-109 cycle gaps in Recovery.Active on both builds. A 100/100,
 `pending_hp` Recovery storm loads (336/491 Recoveries, deskew losses 319 vs 2, p 0.26: the per load draw). The `rx1`
 clock meter reads the Lane 0 RX clock (no per lane RX clock reading). Gen 1x1 2/2 each. Default kept (0x10000).
 
-Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
-Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
-(LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits
-for the Advertisement), then the run restarted (`--lane-skp-error 303000,d2h,0`).
+Also seen in these simulations: after the Host Recovery and the run restart Hot Reset, the Host
+enters U0 24 cycles before the Device and its Header Sequence Number Advertisement (LGOOD_n) could be
+lost (Device in HotReset.Exit), one Device `pending_hp` Recovery (`--lane-skp-error 303000,d2h,0`).
+Fixed by the RX words kept from the partner's Logical Idle before U0 (`rx_keep`, 30aab10):
+`TestPHYX2Core.test_core_x2_skp_error_d2h`.
 
 ## Troubleshooting
 

@@ -332,8 +332,9 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   t57: Lane 1 gaps vs the quad RX clock root (the x2 `.csr` = lane 0/1 configurations merged, 0x908870
   `q1.preload_fpcs_clock_root` ORed to lane 1's 0x10000, the TOML intends LN0; per lane settings identical): A/B
   0x10000 vs 0x0, 100/100 each, Lane 1 gaps unchanged (median 1387/1379 per training, p 1.0): not the cause, kept.
-  Open: Host Advertisement lost when the
-  Host enters U0 ~24 cycles before the Device after a Hot Reset (`--lane-skp-error 303000,d2h,0`).
+  The Host Advertisement lost when the Host enters U0 ~24 cycles before the Device after a Hot Reset
+  (`--lane-skp-error 303000,d2h,0`) is fixed by `rx_keep` (30aab10, `test_core_x2_skp_error_d2h` passes, checked
+  2026-11-26).
   Results table: doc/gen1x2-hardware-validation.md (rows after "Upstream merge").
 - Next: the Device Core build
   with a USB 3 host through the SFP2USB adapter/the breakout, then a Gen 1x2 host
