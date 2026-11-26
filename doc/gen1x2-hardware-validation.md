@@ -1442,6 +1442,14 @@ B's loads was noisy, inconclusive); the new transition seen once on hardware (B 
 lost, Recovery.Idle, a new TS1 2us later -> Recovery.Active, back in 12us with one extra Hot Reset, no retrain;
 before: 2ms Recovery.Idle, eSS.Inactive, Polling). Gen 1x1 4/4. Kept.
 
+**t57 (e930eba, Tang Device Core A `--serdes-csr` quad RX clock root 0x908870 = 0x10000 (the merged default) / B 0x0
+(LN0, as `usb3_5g_x2.toml`), one placement (p3 r1 122.97MHz, -0.13ns, identical timing reports), 10 loads alternating x
+20 runs)**: the Lane 1 RX_VLD_OUT gaps do not follow the quad RX clock root: Lane 1 gaps per training median 1387 (A) /
+1379 (B), p 1.0, same lengths (223-303 rx cycles in Polling.RxEQ/Active, 200-220 in Recovery.Active); Lane 0 only the
+LFPS plus a few 108-109 cycle gaps in Recovery.Active on both builds. A 100/100, B 100/100, 0 errors; B had two Tang
+`pending_hp` Recovery storm loads (336/491 Recoveries, deskew losses 319 vs 2, p 0.26: the per load draw). The `rx1`
+clock meter reads the Lane 0 RX clock (no per lane RX clock reading). Gen 1x1 2/2 each. Default kept (0x10000).
+
 Also seen in these simulations (separate, open): after the Host Recovery and the run restart Hot
 Reset, the Host enters U0 24 cycles before the Device and its Header Sequence Number Advertisement
 (LGOOD_n) can be lost (Device in HotReset.Exit): one Device `pending_hp` Recovery (the Device waits
