@@ -130,6 +130,14 @@ read that page first for LiteX itself (repository map, `--build --no-compile`, `
   [enjoy-digital/usb3_pipe#210](https://github.com/enjoy-digital/usb3_pipe/pull/210) (opened by the user). Not included: `decode_errors` (fork lanes RX
   re-init input, with the Tang Gen 1x2 bench PR). Tang Gen 1x2 bench PR next (GW5UPARArbiter,
   gw5_gtr12_share_quad, gw5_csr_merge_lanes, Tang --lanes 2), stacked on #209.
+- `gen1x2-tang-bench` (worktree `../usb3_pipe_pr15`, stacked on `gen1x2-acorn-bench`/#209 with
+  `gw5-rx-stall-errors`/#210 merged): PR 15 (2026-11-26), three commits: lanes RX errors re-init on
+  `rx_decode_errors` + `rx_errors_hold` (registered monitor inputs); GW5 two lanes of a quad (`quad_owner`,
+  `tx_clk`, `GW5UPARArbiter`, `gw5_gtr12_share_quad`, `gw5_usb3_csr_config_x2` merged lanes, Gen 1x1 Verilog
+  names only); Tang `--lanes 2 --role --no-x2 --lanes-core` (USB3X2SoC split clocking, place option 3 for PRBS),
+  `add_usb3_lanes_link` phy_cd, `PRBSLinkTester` cd, `USB3LanesDebug` pipe_cd (status only). Left out: CDR toggle,
+  rx_valid_gate, RX gaps/invalid counters, clock meters, deskew trace, place-auto, PRBS resync/lane check, scripted
+  host. Full suite 7 known. For the user to open. Disk: delete worktree `build/` dirs after full suites (~11G each).
 - Merged PR branches to delete on the fork (2026-11-26, user request; deletion refused here by the git proxy and the
   GitHub API proxy, the user deletes them): gen1x2-deskew, gen1x2-phy, lanes-packet-aligner, lanes-skp-parity,
   pipe-cd-gen2-levels, pipe-cd-ltssm-levels, rx-word-aligner-com-runs, ts2-identical.
