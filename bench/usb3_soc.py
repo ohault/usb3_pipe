@@ -748,7 +748,7 @@ class USB3HostScript(LiteXModule):
         # Link words pairs registered before the words unpacking (timing: PHY state -> RX words) and
         # the script TX words pairs before the Link (timing: script ROM -> PHY Idle detection).
         self.rx_buffer = rx_buffer = stream.Buffer([("data", 32), ("ctrl", 4)], pipe_valid=True)
-        from usb3_pipe.lanes import link_pairs_layout
+        from usb3_pipe.framing import gen2_link_layout as link_pairs_layout
         self.rx_pairs_buffer = rx_pairs_buffer = stream.Buffer(link_pairs_layout(), pipe_valid=True)
         self.tx_pairs_buffer = tx_pairs_buffer = stream.Buffer(link_pairs_layout(), pipe_valid=True)
 

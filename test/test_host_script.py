@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import usb3_soc
 from usb3_soc import USB3HostScript, usb3_host_script, usb3_host_idle_script
 
-from usb3_pipe.lanes      import link_pairs_layout
+from usb3_pipe.framing    import gen2_link_layout as link_pairs_layout
 from usb3_core.host_model import OP_SEND, link_command, LUP, HostScript
 
 class FakeLink:

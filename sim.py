@@ -119,7 +119,7 @@ class USB3SerDesModel(USB3SerDes):
         tx_datapath = TXDatapath(phy_dw=nwords*8)
         rx_datapath = RXDatapath(phy_dw=nwords*8, clock_domain=rx_clock_domain)
         self.submodules += tx_datapath, rx_datapath
-        self.rx_datapath = rx_datapath
+        self.rx_datapath = rx_datapath     # USB3SerDes.add_rx_skp_checker.
         self.rx_cd       = rx_clock_domain
         self.comb += [
             self.sink.connect(tx_datapath.sink),

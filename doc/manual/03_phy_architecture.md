@@ -68,7 +68,7 @@ transceiver files are described in [Datapath](#datapath) and [Transceivers](#tra
 | `framing.py`     | `Gen2LinkTX`, `Gen2LinkRX`, `WordsToPairs`         | Gen 2 packet framing, 64-bit word pairs helpers             |
 | `common.py`      | `Symbol`, `OrderedSet`, `AsyncFIFO`                | Symbols, Ordered Sets, LTSSM to PIPE signal list, FIFOs     |
 | `crc.py`         | `CRC5`, `CRC16`, `CRC32`                           | CRCs of the link layer packets                              |
-| `lanes.py`       | `LaneStriper`, `LaneDeskew`, `LanesPacketAligner`  | Gen 1x2 lane striping, deskew, lanes swap, packet alignment |
+| `lanes.py`       | `LaneStriper`, `LaneDeskew`, `LaneRXAligner`       | Gen 1x2 lane striping, deskew, lanes swap, packet alignment |
 | `serdes.py`      | `USB3SerDes`, `GW5USB3SerDes`, `ECP5USB3SerDes`    | Transceiver wrappers: AMD, Gowin and Lattice                |
 | `gw5/`           | TOML files, `gen_toml.py`                          | Gowin GTR12 register configurations                         |
 | `debug.py`       | `USB3PHYDebug`, `USB3LanesDebug`                   | Debug registers and LiteScope groups                        |
@@ -215,9 +215,10 @@ directions (`LinkWordsCDC`); the list below gives how each part works.
 - **LTSSM and PIPE**: control and status levels are resynchronized; status pulses go through
   pulse synchronizers. Training sequence requests take effect on Ordered Set boundaries, so a
   late request never truncates one. The LTSSM controls cross as one group, updated only from two
-  equal samples (`add_levels_stable`). Controls that change in the same `sys` cycle then change in
-  the same `pipe_cd` cycle. Crossing one by one, `tx_ready` and `idle_handshake` could both read 0
-  for a cycle at the U0 entry, which resets the transmit scrambler in U0.
+  equal samples (`ltssm_to_pipe`), to the Gen 1 PIPE and the Gen2PIPE alike. Controls that change
+  in the same `sys` cycle then change in the same `pipe_cd` cycle. Crossing one by one,
+  `tx_ready` and `idle_handshake` could both read 0 for a cycle at the U0 entry, which resets the
+  transmit scrambler in U0.
 - **Receive**: Logical Idle words between packets are dropped and the words packed in full pairs
   (`LogicalIdleFilter`, `WordsPacker`). A deep FIFO in block RAM absorbs the line rate. When it
   is half full, `rx_throttle` makes the link layer hold its receive credits, so the partner stops
@@ -348,7 +349,7 @@ deskew is lost, when a lane stays in electrical idle for 10 µs, when a lane rea
 or when a lane receives a run of SKP symbols of odd length. SKP ordered sets are two symbols, so
 an odd run means a SKP symbol received with an error, kept by the SKP removal, or a symbol taken
 for a SKP: the lane is then one symbol off the other lane, and no COM symbol in U0 would show it
-(`RXSKPParityCheck`). The deskew is also cleared on a lane word holding COM symbols with other
+(`RXSKPChecker`). The deskew is also cleared on a lane word holding COM symbols with other
 symbols, the 4 COM symbols of a training sequence cut by a lane that lost symbols at the end of a
 TS burst, when the two deskewed lanes words disagree. The word aligner keeps its alignment when
 a run of COM symbols starts late but ends where a 4 COM run on the current alignment ends: the
@@ -374,7 +375,7 @@ Two adapters give the device core its link interface. `USB3PHYX2Link` runs the S
 link layer on 64-bit word pairs at Gen 1x2 and the SuperSpeed one on lane 0 at Gen 1x1.
 `USB3PHYX1Link` gives a Gen 1x1 link layer the lane 0 interface only.
 
-On receive, the packets may start at any symbol of the 64-bit words. `LanesPacketAligner` finds
+On receive, the packets may start at any symbol of the 64-bit words. `LaneRXAligner` finds
 them symbol by symbol, removes the Logical Idle between them and pads the last word of each
 packet, so that each packet starts on a 32-bit word for the link layer.
 
